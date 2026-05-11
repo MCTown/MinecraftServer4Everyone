@@ -1,0 +1,23 @@
+{
+  "name": "minecraft-server-agent4everyone",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/server",
+    "apps/web"
+  ],
+  "dependencies": {
+    "httpxy": "latest"
+  },
+  "scripts": {
+    "dev": "node scripts/run.js dev",
+    "dev:proxy": "node proxy.js",
+    "dev:server": "npm run dev --workspace @mc-agent/server",
+    "dev:web": "npm run dev --workspace @mc-agent/web",
+    "build": "npm run build --workspaces",
+    "start": "node scripts/run.js start",
+    "start:proxy": "node proxy.js",
+    "typecheck": "npm run typecheck --workspaces"
+  }
+}
