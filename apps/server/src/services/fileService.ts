@@ -1,9 +1,10 @@
 import { once } from "node:events";
 import { createWriteStream } from "node:fs";
-import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import extractZip from "extract-zip";
+import { extract as extractTar } from "tar";
 import { fetch } from "undici";
 import { appConfig } from "../config.js";
 import type { FileEntry, ServerSlotStatus } from "../types.js";
@@ -25,6 +26,11 @@ interface DownloadOptions {
 
 interface ExtractOptions {
   onProgress?: (progress: { entriesExtracted: number; percent: number; currentEntry: string }) => void;
+}
+
+interface ReadTextOptions {
+  maxChars?: number;
+  offset?: number;
 }
 
 const textExtensions = new Set([
@@ -63,6 +69,20 @@ function abortError() {
 
 function throwIfAborted(signal?: AbortSignal) {
   if (signal?.aborted) throw abortError();
+}
+
+function isUnsafeArchiveEntry(entryPath: string) {
+  const normalized = entryPath.replaceAll("\\", "/");
+  return normalized.startsWith("/") || normalized.split("/").includes("..") || /^[a-zA-Z]:/.test(normalized);
+}
+
+function isTarGzFile(fileName: string) {
+  const lower = fileName.toLowerCase();
+  return lower.endsWith(".tar.gz") || lower.endsWith(".tgz");
+}
+
+function isZipFile(fileName: string) {
+  return fileName.toLowerCase().endsWith(".zip");
 }
 
 function safeDownloadName(url: string, fallback: string) {
@@ -129,7 +149,7 @@ export class FileService {
     return result.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
   }
 
-  async readText(serverId: string, userPath: string) {
+  async readText(serverId: string, userPath: string, options: ReadTextOptions = {}) {
     const base = await this.getBase(serverId);
     const target = await resolveWithin(base, userPath, { mustExist: true });
     const info = await stat(target);
@@ -137,7 +157,14 @@ export class FileService {
     if (!textExtensions.has(path.extname(target).toLowerCase())) {
       throw new Error("File type is not a supported text file");
     }
-    return readFile(target, "utf8");
+    const content = await readFile(target, "utf8");
+    const offset = Math.min(Math.max(options.offset ?? 0, 0), content.length);
+    const maxChars = options.maxChars;
+    if (!maxChars && offset === 0) return content;
+    const end = maxChars ? Math.min(offset + maxChars, content.length) : content.length;
+    const prefix = offset > 0 ? `...（已跳过前 ${offset} 字符）\n` : "";
+    const suffix = end < content.length ? `\n\n...（文件共 ${content.length} 字符，后续还有 ${content.length - end} 字符未返回。）` : "";
+    return `${prefix}${content.slice(offset, end)}${suffix}`;
   }
 
   async resolveDownload(serverId: string, userPath: string) {
@@ -186,6 +213,18 @@ export class FileService {
     const destination = await resolveWithin(base, destinationPath);
     await mkdir(path.dirname(destination), { recursive: true });
     await copyFile(sourcePath, destination);
+  }
+
+  async copyDirectoryIntoServer(serverId: string, sourcePath: string, destinationPath = ".", overwrite = false) {
+    const base = await this.getBase(serverId);
+    const destination = await resolveWithin(base, destinationPath);
+    await mkdir(destination, { recursive: true });
+    await cp(sourcePath, destination, {
+      recursive: true,
+      force: overwrite,
+      errorOnExist: false
+    });
+    return toRelative(base, destination);
   }
 
   async saveStream(serverId: string, directoryPath: string, fileName: string, stream: NodeJS.ReadableStream) {
@@ -347,38 +386,66 @@ export class FileService {
   async extractServerSlotIntoServer(serverId: string, destinationPath = ".", options: ExtractOptions = {}) {
     const slot = await this.getServerSlotStatus(serverId);
     if (!slot.filePath || !slot.fileName) throw new Error("服务端槽位为空");
-    if (!slot.fileName.toLowerCase().endsWith(".zip")) throw new Error("服务端槽位文件不是 zip，无法解压");
+    if (!isZipFile(slot.fileName) && !isTarGzFile(slot.fileName)) throw new Error("服务端槽位文件不是 zip/tar.gz/tgz，无法解压");
     const base = await this.getBase(serverId);
     const destination = await resolveWithin(base, destinationPath);
-    await mkdir(destination, { recursive: true });
     let entriesExtracted = 0;
-    await extractZip(slot.filePath, {
-      dir: destination,
-      onEntry: (entry) => {
-        const entryPath = entry.fileName.replaceAll("\\", "/");
-        if (entryPath.startsWith("/") || entryPath.includes("../") || /^[a-zA-Z]:/.test(entryPath)) {
-          throw new Error(`Unsafe zip entry: ${entry.fileName}`);
-        }
-        entriesExtracted += 1;
-        options.onProgress?.({ entriesExtracted, percent: Math.min(95, entriesExtracted), currentEntry: entry.fileName });
-      }
+    await this.extractArchive(slot.filePath, slot.fileName, destination, (entryName) => {
+      entriesExtracted += 1;
+      options.onProgress?.({ entriesExtracted, percent: Math.min(95, entriesExtracted), currentEntry: entryName });
     });
     options.onProgress?.({ entriesExtracted, percent: 100, currentEntry: "完成" });
     return { slot, destinationPath: toRelative(base, destination), entriesExtracted };
   }
 
+  async extractArchiveIntoServer(serverId: string, archivePath: string, archiveName: string, destinationPath = ".") {
+    const base = await this.getBase(serverId);
+    const destination = await resolveWithin(base, destinationPath);
+    await this.extractArchive(archivePath, archiveName, destination);
+  }
+
   async extractZipIntoServer(serverId: string, zipPath: string, destinationPath = ".") {
     const base = await this.getBase(serverId);
     const destination = await resolveWithin(base, destinationPath);
+    await this.extractArchive(zipPath, path.basename(zipPath), destination);
+  }
+
+  private async extractArchive(archivePath: string, archiveName: string, destination: string, onEntry?: (entryName: string) => void) {
     await mkdir(destination, { recursive: true });
+    if (isZipFile(archiveName)) {
+      await this.extractZipArchive(archivePath, destination, onEntry);
+      return;
+    }
+    if (isTarGzFile(archiveName)) {
+      await this.extractTarGzArchive(archivePath, destination, onEntry);
+      return;
+    }
+    throw new Error("Archive is not zip/tar.gz/tgz");
+  }
+
+  private async extractZipArchive(zipPath: string, destination: string, onEntry?: (entryName: string) => void) {
     await extractZip(zipPath, {
       dir: destination,
       onEntry: (entry) => {
-        const entryPath = entry.fileName.replaceAll("\\", "/");
-        if (entryPath.startsWith("/") || entryPath.includes("../") || /^[a-zA-Z]:/.test(entryPath)) {
+        if (isUnsafeArchiveEntry(entry.fileName)) {
           throw new Error(`Unsafe zip entry: ${entry.fileName}`);
         }
+        onEntry?.(entry.fileName);
       }
+    });
+  }
+
+  private async extractTarGzArchive(archivePath: string, destination: string, onEntry?: (entryName: string) => void) {
+    await extractTar({
+      file: archivePath,
+      cwd: destination,
+      gzip: true,
+      preservePaths: false,
+      filter: (entryPath) => {
+        if (isUnsafeArchiveEntry(entryPath)) throw new Error(`Unsafe tar entry: ${entryPath}`);
+        return true;
+      },
+      onReadEntry: (entry) => onEntry?.(entry.path)
     });
   }
 }

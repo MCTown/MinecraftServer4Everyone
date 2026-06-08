@@ -34,20 +34,24 @@ export function registerServerRoutes(app: FastifyInstance, services: RouteServic
       maxMemory: z.string().optional(),
       jarFile: z.string().optional(),
       startArgs: z.string().optional(),
+      startupCommand: z.string().nullable().optional(),
       serverType: z.string().nullable().optional(),
       minecraftVersion: z.string().nullable().optional(),
       modpackName: z.string().nullable().optional(),
       promptOverride: z.string().nullable().optional(),
       useGlobalPrompt: z.boolean().optional()
     }), request.body);
+    if (body.javaVersion && !body.javaPath) {
+      body.javaPath = await services.javaService.executableForInstalledVersion(body.javaVersion);
+    }
     return services.serverService.updateServer(id, body);
   });
 
   app.delete("/api/servers/:id", async (request) => {
     const { id } = idParams.parse(request.params);
     const body = parseBody(z.object({ confirmName: z.string().min(1) }), request.body);
-    if (services.processManager.getActiveServerId() === id) {
-      throw new Error("服务端正在运行，请先关闭后再删除");
+    if (services.processManager.getActiveServerId() === id || await services.processManager.hasActiveServerProcesses(id)) {
+      throw new Error("服务端正在运行或存在后台残留进程，请先关闭或强制结束后再删除");
     }
     if (services.agentService.isBusy(id)) {
       throw new Error("Agent 正在处理该服务端，请等待完成后再删除");

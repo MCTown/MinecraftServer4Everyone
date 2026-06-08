@@ -11,6 +11,7 @@ export const servers = sqliteTable("servers", {
   maxMemory: text("max_memory").notNull(),
   jarFile: text("jar_file").notNull(),
   startArgs: text("start_args").notNull(),
+  startupCommand: text("startup_command"),
   serverType: text("server_type"),
   minecraftVersion: text("minecraft_version"),
   modpackName: text("modpack_name"),

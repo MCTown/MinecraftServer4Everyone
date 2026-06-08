@@ -1,8 +1,18 @@
 import { z } from "zod";
 import type { FastifyInstance } from "fastify";
+import { fetch } from "undici";
 import { listAgentToolInfos } from "../../agent/toolCatalog.js";
+import { fetchDispatcher } from "../../services/proxySupport.js";
 import { idParams, parseBody } from "../helpers.js";
 import type { RouteServices } from "../types.js";
+
+function normalizeProxyTestTarget(rawTarget: string | undefined) {
+  const trimmed = rawTarget?.trim() || "www.google.com";
+  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  const url = new URL(candidate);
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("检测地址仅支持 HTTP 或 HTTPS");
+  return url.href;
+}
 
 export function registerSettingsRoutes(app: FastifyInstance, services: RouteServices) {
   app.get("/api/models", async () => services.modelService.list());
@@ -78,9 +88,91 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
     return services.promptService.setAgentSettings(body);
   });
 
+  app.post("/api/settings/agent/proxy/test", async (request) => {
+    const body = parseBody(z.object({
+      target: z.string().trim().optional(),
+      downloadProxyEnabled: z.boolean().optional(),
+      downloadProxyUrl: z.string().trim().optional()
+    }), request.body);
+    const settings = services.promptService.getAgentSettings();
+    const proxyEnabled = body.downloadProxyEnabled ?? settings.downloadProxyEnabled;
+    const proxyUrl = typeof body.downloadProxyUrl === "string" ? body.downloadProxyUrl.trim() : settings.downloadProxyUrl.trim();
+    const startedAt = Date.now();
+    let targetUrl: string;
+
+    try {
+      targetUrl = normalizeProxyTestTarget(body.target);
+    } catch (error) {
+      const rawTarget = body.target?.trim() || "www.google.com";
+      return {
+        ok: false,
+        targetUrl: rawTarget,
+        proxyEnabled,
+        usedProxy: false,
+        status: null,
+        statusText: "",
+        finalUrl: rawTarget,
+        elapsedMs: Date.now() - startedAt,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+
+    if (proxyEnabled && !proxyUrl) {
+      return { ok: false, targetUrl, proxyEnabled, usedProxy: false, status: null, statusText: "", finalUrl: targetUrl, elapsedMs: Date.now() - startedAt, error: "代理地址为空" };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await fetch(targetUrl, {
+        headers: { "user-agent": "MinecraftServerAgent/0.1 ProxyTest" },
+        signal: controller.signal,
+        dispatcher: proxyEnabled ? fetchDispatcher(proxyUrl) : undefined
+      });
+      await response.body?.cancel().catch(() => undefined);
+      return {
+        ok: true,
+        targetUrl,
+        proxyEnabled,
+        usedProxy: proxyEnabled,
+        status: response.status,
+        statusText: response.statusText,
+        finalUrl: response.url,
+        elapsedMs: Date.now() - startedAt,
+        error: null
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        targetUrl,
+        proxyEnabled,
+        usedProxy: proxyEnabled,
+        status: null,
+        statusText: "",
+        finalUrl: targetUrl,
+        elapsedMs: Date.now() - startedAt,
+        error: controller.signal.aborted ? "连接超时" : error instanceof Error ? error.message : String(error)
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  });
+
+  const providerKeySettingsSchema = z.object({
+    curseForgeApiKey: z.string().optional(),
+    modrinthApiKey: z.string().optional()
+  });
+
+  app.get("/api/settings/provider-keys", async () => services.promptService.getAgentToolSettings());
+
+  app.put("/api/settings/provider-keys", async (request) => {
+    const body = parseBody(providerKeySettingsSchema, request.body);
+    return services.promptService.setAgentToolSettings(body);
+  });
+
   app.get("/api/skills", async () => services.skillService.list());
 
-  app.get("/api/tools", async () => listAgentToolInfos());
+  app.get("/api/tools", async () => listAgentToolInfos(services.promptService.getAgentToolSettings()));
 
   app.patch("/api/skills/:id", async (request) => {
     const { id } = idParams.parse(request.params);

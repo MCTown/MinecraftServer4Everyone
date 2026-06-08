@@ -5,14 +5,14 @@ import type { JavaService } from "../services/javaService.js";
 import type { ProcessManager } from "../services/processManager.js";
 import type { ServerService } from "../services/serverService.js";
 import type { UploadService } from "../services/uploadService.js";
-import type { AgentConfirmationRequest, AgentDownloadProgress, AgentWorkflowProgress, ConsoleLogEntry, ServerSlotStatus } from "../types.js";
+import type { AgentConfirmationRequest, AgentDownloadProgress, AgentToolConfigRequired, AgentToolConfigRequirement, AgentWorkflowProgress, ConsoleLogEntry, ServerSlotStatus } from "../types.js";
 
 export const stringProperty = { type: "string" };
 
 export const installableCapabilities = {
   zip_extract: {
-    name: "服务端 ZIP 解压能力",
-    description: "解压当前服务端目录内已经存在的 .zip 文件。",
+    name: "服务端压缩包解压能力",
+    description: "解压当前服务端目录内已经存在的 .zip/.tar.gz/.tgz 文件。",
     tools: ["extract_server_zip"]
   },
   forge_server_setup: {
@@ -33,6 +33,9 @@ export interface AgentToolContext {
   javaService: JavaService;
   signal?: AbortSignal;
   downloadProxyUrl?: () => string | undefined;
+  getCurseForgeApiKey?: () => string;
+  getModrinthApiKey?: () => string;
+  toolConfigRequired?: (requirement: AgentToolConfigRequired) => void;
   installedCapabilities?: ReadonlySet<AgentCapabilityId>;
   installCapability?: (capability: AgentCapabilityId) => void;
   confirm?: (request: Omit<AgentConfirmationRequest, "id" | "serverId" | "createdAt">) => Promise<void>;
@@ -52,6 +55,7 @@ export interface AgentToolInfo {
   description: string;
   category: string;
   controllable: false;
+  configRequirements?: AgentToolConfigRequirement[];
 }
 
 export function objectSchema(properties: Record<string, unknown>, required: string[] = []) {

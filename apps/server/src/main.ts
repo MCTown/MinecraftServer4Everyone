@@ -28,9 +28,9 @@ async function bootstrap() {
   const modelService = new ModelService();
   const skillService = new SkillService();
   const promptService = new PromptService(serverService, skillService);
-  const processManager = new ProcessManager(serverService, consoleLogService, promptService);
-  const uploadService = new UploadService();
   const javaService = new JavaService(() => promptService.getAgentDownloadProxyUrl());
+  const processManager = new ProcessManager(serverService, consoleLogService, promptService, javaService);
+  const uploadService = new UploadService();
   const agentService = new AgentService(
     serverService,
     consoleLogService,

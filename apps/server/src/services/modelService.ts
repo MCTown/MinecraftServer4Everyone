@@ -52,6 +52,13 @@ export class ModelRemoteError extends Error {
   }
 }
 
+export class ModelEmptyResponseError extends ModelRemoteError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModelEmptyResponseError";
+  }
+}
+
 interface ChatCompletionRequest {
   messages: ChatMessageInput[];
   temperature?: number;
@@ -170,7 +177,8 @@ export class ModelService {
     }
     const result = this.extractChatResult(data);
     if (!result.content && result.toolCalls.length === 0) {
-      throw new ModelRemoteError(`模型接口返回缺少 choices[0].message.content 或 tool_calls：${text.slice(0, 500)}`);
+      const usage = this.extractUsageSummary(data);
+      throw new ModelEmptyResponseError(`模型接口返回了空 assistant 消息（缺少 choices[0].message.content 或 tool_calls）${usage ? `，${usage}` : ""}：${text.slice(0, 500)}`);
     }
     return result;
   }
@@ -453,6 +461,21 @@ export class ModelService {
       if (typeof message === "string") return message;
     }
     return null;
+  }
+
+  private extractUsageSummary(data: unknown) {
+    if (!data || typeof data !== "object" || !("usage" in data)) return "";
+    const usage = (data as { usage?: unknown }).usage;
+    if (!usage || typeof usage !== "object") return "";
+    const promptTokens = (usage as { prompt_tokens?: unknown }).prompt_tokens;
+    const completionTokens = (usage as { completion_tokens?: unknown }).completion_tokens;
+    const totalTokens = (usage as { total_tokens?: unknown }).total_tokens;
+    const parts = [
+      typeof promptTokens === "number" ? `prompt_tokens=${promptTokens}` : "",
+      typeof completionTokens === "number" ? `completion_tokens=${completionTokens}` : "",
+      typeof totalTokens === "number" ? `total_tokens=${totalTokens}` : ""
+    ].filter(Boolean);
+    return parts.length > 0 ? `usage: ${parts.join(", ")}` : "";
   }
 
   private moveToSingleton(row: typeof modelConfigs.$inferSelect) {

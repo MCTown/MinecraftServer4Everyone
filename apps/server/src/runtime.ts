@@ -10,6 +10,7 @@ export async function ensureRuntimeDirectories() {
     mkdir(appConfig.deletedServersDir, { recursive: true }),
     mkdir(appConfig.tempUploadsDir, { recursive: true }),
     mkdir(appConfig.jdksDir, { recursive: true }),
+    mkdir(appConfig.pythonDir, { recursive: true }),
     mkdir(appConfig.templatesDir, { recursive: true }),
     mkdir(appConfig.skillsDir, { recursive: true }),
     mkdir(appConfig.dataDir, { recursive: true })
@@ -30,9 +31,10 @@ export async function ensureRuntimeDirectories() {
     { flag: "wx" }
   ).catch(() => undefined);
 
-  const fixedTemplateSource = "D:\\Desktop\\1 (1)";
+  const bundledReferenceTemplate = path.join(appConfig.projectRoot, "templates", "reference");
   const referenceTemplate = path.join(appConfig.templatesDir, "reference");
-  if (await access(fixedTemplateSource).then(() => true).catch(() => false)) {
-    await cp(fixedTemplateSource, referenceTemplate, { recursive: true, force: false, errorOnExist: false }).catch(() => undefined);
+  if (await access(bundledReferenceTemplate).then(() => true).catch(() => false)) {
+    await mkdir(referenceTemplate, { recursive: true });
+    await cp(bundledReferenceTemplate, referenceTemplate, { recursive: true, force: true, errorOnExist: false }).catch(() => undefined);
   }
 }

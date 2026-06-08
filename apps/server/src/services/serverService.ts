@@ -20,6 +20,7 @@ export interface UpdateServerInput {
   maxMemory?: string;
   jarFile?: string;
   startArgs?: string;
+  startupCommand?: string | null;
   serverType?: string | null;
   minecraftVersion?: string | null;
   modpackName?: string | null;
@@ -39,6 +40,7 @@ function rowToServer(row: typeof servers.$inferSelect): ServerRecord {
     maxMemory: row.maxMemory,
     jarFile: row.jarFile,
     startArgs: row.startArgs,
+    startupCommand: row.startupCommand,
     serverType: row.serverType,
     minecraftVersion: row.minecraftVersion,
     modpackName: row.modpackName,
@@ -117,6 +119,7 @@ export class ServerService {
       maxMemory: "2G",
       jarFile: "server.jar",
       startArgs: "nogui",
+      startupCommand: null,
       serverType: null,
       minecraftVersion: null,
       modpackName: null,
@@ -139,6 +142,7 @@ export class ServerService {
     if (input.maxMemory !== undefined) changes.maxMemory = input.maxMemory;
     if (input.jarFile !== undefined) changes.jarFile = input.jarFile;
     if (input.startArgs !== undefined) changes.startArgs = input.startArgs;
+    if (input.startupCommand !== undefined) changes.startupCommand = input.startupCommand?.trim() || null;
     if (input.serverType !== undefined) changes.serverType = input.serverType;
     if (input.minecraftVersion !== undefined) changes.minecraftVersion = input.minecraftVersion;
     if (input.modpackName !== undefined) changes.modpackName = input.modpackName;
@@ -155,7 +159,7 @@ export class ServerService {
       throw new Error("服务端名称确认不匹配");
     }
     if (!["stopped", "crashed"].includes(server.status)) {
-      throw new Error("服务端正在运行或切换状态，请先关闭后再删除");
+      throw new Error("服务端正在运行、切换状态或存在后台残留进程，请先关闭后再删除");
     }
 
     const serverDirectory = resolveChildPath(appConfig.serversDir, server.directory, "Server directory");

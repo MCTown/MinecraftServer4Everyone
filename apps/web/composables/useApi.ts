@@ -10,12 +10,35 @@ interface UploadOptions {
   onProgress?: (progress: UploadProgress) => void;
 }
 
+const AUTH_COOKIE_NAME = "mcsa_token";
+
+function getCookieValue(cookieHeader: string | undefined, name: string): string | undefined {
+  if (!cookieHeader) return undefined;
+  for (const part of cookieHeader.split(";")) {
+    const [key, ...rest] = part.split("=");
+    if (key?.trim() === name) return rest.join("=").trim();
+  }
+  return undefined;
+}
+
+function getCookieToken(): string | undefined {
+  if (typeof document === "undefined") {
+    return getCookieValue(useRequestHeaders(["cookie"]).cookie, AUTH_COOKIE_NAME);
+  }
+  return getCookieValue(document.cookie, AUTH_COOKIE_NAME);
+}
+
 export function useApi() {
   const config = useRuntimeConfig();
-  const baseURL = config.public.apiBase.replace(/\/$/, "");
+  const baseURL = (typeof document === "undefined" ? config.apiBase : config.public.apiBase).replace(/\/$/, "");
 
   async function api<T>(path: string, options: Parameters<typeof $fetch>[1] = {}) {
-    return $fetch<T>(path, { baseURL, ...options });
+    const token = getCookieToken();
+    const cookie = typeof document === "undefined" ? useRequestHeaders(["cookie"]).cookie : undefined;
+    const headers: Record<string, string> = { ...(options.headers as Record<string, string> ?? {}) };
+    if (token) headers.authorization = `Bearer ${token}`;
+    if (cookie && !headers.cookie) headers.cookie = cookie;
+    return $fetch<T>(path, { baseURL, ...options, headers });
   }
 
   async function upload<T>(path: string, body: FormData, options: UploadOptions = {}) {
@@ -27,6 +50,9 @@ export function useApi() {
     return new Promise<T>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open(method, `${baseURL}${path}`);
+
+      const token = getCookieToken();
+      if (token) xhr.setRequestHeader("authorization", `Bearer ${token}`);
 
       xhr.upload.onprogress = (event) => {
         const total = event.lengthComputable ? event.total : 0;

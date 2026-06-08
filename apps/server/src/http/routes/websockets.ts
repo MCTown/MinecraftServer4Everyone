@@ -69,7 +69,7 @@ export function registerWebSocketRoutes(app: FastifyInstance, services: RouteSer
         return;
       }
       if (message.type === "message" && message.content) {
-        const reasoningEffort = reasoningEfforts.has(message.reasoningEffort ?? "") ? message.reasoningEffort as "minimal" | "low" | "medium" | "high" : "medium";
+        const reasoningEffort = reasoningEfforts.has(message.reasoningEffort ?? "") ? message.reasoningEffort as "minimal" | "low" | "medium" | "high" : "high";
         services.agentService.sendMessage(id, message.content, reasoningEffort).catch((error) => {
           send({
             type: "error",

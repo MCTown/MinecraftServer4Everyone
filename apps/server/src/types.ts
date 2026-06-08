@@ -1,4 +1,4 @@
-export type ServerStatus = "stopped" | "starting" | "running" | "stopping" | "crashed";
+export type ServerStatus = "stopped" | "starting" | "running" | "stopping" | "crashed" | "orphaned";
 
 export type AgentStatus = "idle" | "thinking" | "running" | "waiting_confirmation" | "retrying" | "completed" | "failed" | "cancelled";
 
@@ -15,6 +15,7 @@ export interface ServerRecord {
   maxMemory: string;
   jarFile: string;
   startArgs: string;
+  startupCommand: string | null;
   serverType: string | null;
   minecraftVersion: string | null;
   modpackName: string | null;
@@ -31,6 +32,32 @@ export interface AgentSettings {
   memory: string;
   memoryMb: number;
   systemMemoryMb: number;
+}
+
+export type ToolConfigKey = "curseForgeApiKey" | "modrinthApiKey";
+
+export interface AgentToolSettings {
+  curseForgeApiKeyConfigured: boolean;
+  curseForgeApiKeyHint: string;
+  modrinthApiKeyConfigured: boolean;
+  modrinthApiKeyHint: string;
+}
+
+export interface AgentToolConfigRequirement {
+  key: ToolConfigKey;
+  label: string;
+  required: boolean;
+  configured: boolean;
+  helpUrl: string;
+  secret: boolean;
+}
+
+export interface AgentToolConfigRequired {
+  key: ToolConfigKey;
+  label: string;
+  toolName?: string;
+  helpUrl: string;
+  message: string;
 }
 
 export interface FileEntry {
@@ -97,7 +124,7 @@ export interface AgentRetryEvent {
 }
 
 export interface AgentEvent {
-  type: "status" | "message" | "message_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared";
+  type: "status" | "message" | "message_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared" | "tool_config_required";
   status?: AgentStatus;
   content?: string;
   messageId?: string;
@@ -106,6 +133,7 @@ export interface AgentEvent {
   workflow?: AgentWorkflowProgress;
   serverSlot?: ServerSlotStatus;
   confirmation?: AgentConfirmationRequest;
+  toolConfigRequired?: AgentToolConfigRequired;
   confirmationId?: string;
   approved?: boolean;
 }

@@ -1,6 +1,4 @@
 import { eq } from "drizzle-orm";
-import path from "node:path";
-import { appConfig } from "../config.js";
 import { getDb } from "../db/client.js";
 import { agentMessages } from "../db/schema.js";
 import type { AgentConfirmationRequest, AgentEvent, AgentRole, AgentStatus, ConsoleLogEntry } from "../types.js";
@@ -8,7 +6,7 @@ import { createId } from "../utils/id.js";
 import { nowIso } from "../utils/time.js";
 import { FileService } from "../services/fileService.js";
 import { JavaService } from "../services/javaService.js";
-import { ModelRemoteError, ModelService, type ChatMessageInput, type ReasoningEffort } from "../services/modelService.js";
+import { ModelEmptyResponseError, ModelRemoteError, ModelService, type ChatMessageInput, type ReasoningEffort } from "../services/modelService.js";
 import { ProcessManager } from "../services/processManager.js";
 import { PromptService } from "../services/promptService.js";
 import { ServerService } from "../services/serverService.js";
@@ -36,6 +34,9 @@ export class AgentService {
   private installedCapabilitiesByServer = new Map<string, Set<AgentCapabilityId>>();
   private readonly modelRetryBaseDelayMs = 5000;
   private readonly modelRetryMaxDelayMs = 120000;
+  private readonly modelRetryMaxConsecutiveFailures = 5;
+  private readonly modelContextMaxEstimatedTokens = 120000;
+  private readonly modelToolResultMaxChars = 12000;
 
   constructor(
     private readonly serverService: ServerService,
@@ -69,7 +70,7 @@ export class AgentService {
       }));
   }
 
-  async sendMessage(serverId: string, content: string, reasoningEffort: ReasoningEffort = "medium") {
+  async sendMessage(serverId: string, content: string, reasoningEffort: ReasoningEffort = "high") {
     await this.serverService.requireServer(serverId);
     const normalizedContent = content.trim();
     if (!normalizedContent) throw new Error("消息内容不能为空");
@@ -84,7 +85,6 @@ export class AgentService {
     this.appendAgentConsoleLog(serverId, `开始任务：${this.formatConsolePayload(normalizedContent)}`);
     this.setStatus(serverId, "thinking");
     try {
-      this.emit(serverId, { type: "message", messageId: responseMessageId, content: "", status: "running" });
       const response = await this.runAgent(serverId, normalizedContent, reasoningEffort, responseMessageId, controller.signal);
       this.saveMessage(serverId, "agent", response, "completed", responseMessageId);
       this.emit(serverId, { type: "message", messageId: responseMessageId, content: response, status: "completed" });
@@ -198,6 +198,9 @@ export class AgentService {
         javaService: this.javaService,
         signal,
         downloadProxyUrl: () => this.promptService.getAgentDownloadProxyUrl(),
+        getCurseForgeApiKey: () => this.promptService.getCurseForgeApiKey(),
+        getModrinthApiKey: () => this.promptService.getModrinthApiKey(),
+        toolConfigRequired: (toolConfigRequired) => this.emit(serverId, { type: "tool_config_required", toolConfigRequired }),
         installedCapabilities,
         installCapability: (capability) => this.installCapability(serverId, capability),
         confirm: (request) => this.requestConfirmation(serverId, request),
@@ -208,14 +211,16 @@ export class AgentService {
       });
     const messages: ChatMessageInput[] = [];
     messages.push({ role: "system", content: `${systemPrompt}\n\n${runtimeContext}\n\n${this.agentRecoveryInstructions()}` });
-    messages.push(...this.listMessages(serverId).slice(-20).map<ChatMessageInput>((message) => ({
+    messages.push(...this.listMessages(serverId).filter((message) => message.role !== "system").slice(-20).map<ChatMessageInput>((message) => ({
         role: message.role === "agent" ? "assistant" as const : message.role === "system" ? "system" as const : "user" as const,
         content: message.content
       })));
     try {
-      for (let step = 0; step < 100; step += 1) {
+      for (let step = 0; step < 500; step += 1) {
         this.throwIfAborted(signal);
         const tools = makeTools();
+        const toolDefinitions = tools.map((tool) => tool.definition);
+        this.ensureModelContextWithinLimit(messages, toolDefinitions);
         const toolMap = new Map(tools.map((tool) => [tool.definition.function.name, tool]));
         const result = await this.chatCompletionWithRetry(serverId, {
           baseUrl: modelConfig.baseUrl,
@@ -224,7 +229,7 @@ export class AgentService {
           temperature: 0.2,
           reasoningEffort,
           messages,
-          tools: tools.map((tool) => tool.definition),
+          tools: toolDefinitions,
           signal
         });
         this.throwIfAborted(signal);
@@ -290,7 +295,7 @@ export class AgentService {
     try {
       const content = await tool.execute(args);
       this.throwIfAborted(signal);
-      return content;
+      return this.truncateToolResultForModel(toolName, content);
     } catch (error) {
       if (this.isAbortError(error) || this.isConfirmationRejection(error)) throw error;
       const normalized = this.normalizeModelError(error);
@@ -303,6 +308,49 @@ export class AgentService {
         "如果是外部网站、下载或信息不足导致失败，改用已上传/已存在文件，或向用户说明缺少的具体信息。"
       ]);
     }
+  }
+
+  private truncateToolResultForModel(toolName: string, content: string) {
+    const maxChars = this.modelToolResultMaxChars;
+    if (content.length <= maxChars) return content;
+    const marker = `\n\n...（工具 ${toolName} 返回 ${content.length} 字符，已截断中间内容以避免模型上下文过大；保留开头和结尾。如需更多细节，请读取更具体的文件或日志片段。）...\n\n`;
+    const headChars = Math.floor((maxChars - marker.length) / 2);
+    const tailChars = Math.max(0, maxChars - marker.length - headChars);
+    return `${content.slice(0, Math.max(0, headChars))}${marker}${tailChars > 0 ? content.slice(-tailChars) : ""}`;
+  }
+
+  private ensureModelContextWithinLimit(messages: ChatMessageInput[], tools: AgentTool["definition"][]) {
+    const estimatedTokens = this.estimateModelContextTokens(messages, tools);
+    if (estimatedTokens <= this.modelContextMaxEstimatedTokens) return;
+    throw new Error([
+      `模型请求上下文预计约 ${estimatedTokens} tokens，超过安全上限 ${this.modelContextMaxEstimatedTokens}，已停止发送以避免上游返回空 assistant 消息。`,
+      "请清除 Agent 上下文、拆分任务，或让 Agent 只读取更具体的日志/文件片段后重试。"
+    ].join(""));
+  }
+
+  private estimateModelContextTokens(messages: ChatMessageInput[], tools: AgentTool["definition"][]) {
+    let estimated = 0;
+    for (const message of messages) {
+      estimated += 4 + this.estimateTextTokens(message.role);
+      if (message.content) estimated += this.estimateTextTokens(message.content);
+      if (message.tool_call_id) estimated += this.estimateTextTokens(message.tool_call_id);
+      if (message.tool_calls?.length) estimated += this.estimateTextTokens(JSON.stringify(message.tool_calls));
+    }
+    for (const tool of tools) {
+      estimated += this.estimateTextTokens(tool.function.name);
+      estimated += this.estimateTextTokens(tool.function.description);
+      estimated += this.estimateTextTokens(JSON.stringify(tool.function.parameters));
+    }
+    return Math.ceil(estimated);
+  }
+
+  private estimateTextTokens(text: string) {
+    let ascii = 0;
+    for (let index = 0; index < text.length; index += 1) {
+      if (text.charCodeAt(index) <= 0x7f) ascii += 1;
+    }
+    const nonAscii = text.length - ascii;
+    return ascii / 4 + nonAscii * 1.2;
   }
 
   private formatToolError(toolName: string, message: string, recovery: string[]) {
@@ -320,13 +368,17 @@ export class AgentService {
       "Agent 失败恢复策略：",
       "- 工具返回 TOOL_ERROR 时，不要直接结束任务；根据错误调整路径、参数或方案后继续。",
       "- 如果当前工具缺少完成任务所需能力，先调用 install_agent_capability 安装可用内置能力包。",
-      "- 整合包服务端部署必须按顺序推进：确认整合包 -> 获取玩家给的服务端包并保存到当前服务端独立槽位 -> 解压槽位到当前服务端工作目录 -> 不加 MCDReforged 先直启验证 -> 直启成功后配置 MCDReforged -> 加入 MCDReforged 后最终启动验证。",
-      "- 每个部署阶段开始、完成或失败时都要调用 update_agent_workflow_progress。服务端包必须先进入当前服务端的独立槽位，优先使用 save_upload_to_server_slot，其次使用 download_https_file_to_server_slot；不要直接把原始服务端包散落到根目录。",
-      "- 已存在于服务端目录内的 zip 需要先安装 zip_extract 能力，再用 extract_server_zip 解压；服务端槽位中的 zip 应使用 extract_server_slot_to_workspace 解压。",
-      "- 启动验证前必须优先使用服务端包自带的 run/start/server/launch 脚本；如果没有自带脚本或脚本确实不可用，再按当前服务端配置生成启动脚本。",
-      "- 启动验证前必须优先按上下文里的推荐内存写入 user_jvm_args.txt、脚本 -Xms/-Xmx 或当前服务端配置。整合包有明确要求时可以调整，但不能超过推荐内存，并且必须向用户说明调整原因和最终内存值。",
+      "- 整合包服务端部署必须按顺序推进：确认整合包 -> 获取玩家给的服务端包并保存到当前服务端独立槽位 -> 调用 initialize_server_template(template=reference) 套用内置 MCDReforged 模板 -> 解压槽位到 server/ -> 用 update_current_server_config 将 startupCommand 切到 server/ 内脚本后直启验证 -> 调用 configure_builtin_python_environment 安装并配置内置 Python/pip/MCDReforged -> 直启成功后编辑根目录 config.yml 配置 MCDReforged，并调用 update_current_server_config 将 startupCommand 切到 {python} -m mcdreforged -> 通过 MCDReforged 最终启动验证。serverType 只是标签，不决定启动方式。",
+      "- 确认整合包来源时必须同时考虑 Modrinth 和 CurseForge。只查询了其中一个平台、或其中一个平台结果不唯一/不匹配时，不得把 identify_modpack 标记为 failed；必须继续尝试另一个平台的官方 API 工具。只有两个平台都已查询且没有匹配项，或 CurseForge 因缺少/鉴权失败 API Key 需要用户配置，或用户没有提供足够名称/版本信息时，才可以失败并明确说明还缺少什么。",
+      "- 每个部署阶段开始、完成或失败时都要调用 update_agent_workflow_progress。服务端包必须先进入当前服务端的独立槽位，优先使用 save_upload_to_server_slot；没有上传时优先使用 download_modrinth_server_pack_to_server_slot 和 download_curseforge_server_pack_to_server_slot 通过平台 API 获取；最后才使用 download_https_file_to_server_slot。不要抓取 CurseForge 网页 Files 页面，不要直接把原始服务端包散落到根目录。",
+      "- CurseForge API 工具如果提示缺少或鉴权失败，或前端收到 tool_config_required，必须停止部署并让用户点击 Tools 卡片/设置中的配置按钮填写 CurseForge API Key，告知申请/管理地址 https://console.curseforge.com/?#/api-keys。Modrinth 工具如果提示需要 PAT，必须停止部署并让用户点击配置按钮填写 Modrinth PAT，告知申请/管理地址 https://modrinth.com/settings/pats。",
+      "- 部署整合包时必须使用内置 reference 模板。Minecraft 服务端本体必须位于当前服务端根目录下的 server/ 子目录；mods、libraries、world、server.jar、eula.txt、user_jvm_args.txt 和服务端自带脚本都应在 server/ 内，不应放在 MCDReforged 根目录。",
+      "- 安装单个模组时优先调用 download_mod_to_server_mods，通过 provider=modrinth 或 provider=curseforge 下载 .jar 到 server/mods/；不要把 .mrpack、zip 或服务端包当作单个模组安装。",
+      "- 已存在于服务端目录内的 zip/tar.gz/tgz 需要先安装 zip_extract 能力，再用 extract_server_zip 解压到 server/；服务端槽位中的 zip/tar.gz/tgz 应使用 extract_server_slot_to_workspace，并把 destinationPath 设为 server。",
+      "- 直启验证前必须优先使用 server/ 内服务端包自带的 run/start/server/launch 脚本；如果没有自带脚本或脚本确实不可用，再按当前服务端配置生成启动脚本。",
+      "- 启动验证前必须优先按上下文里的推荐内存写入 server/user_jvm_args.txt、server/ 内脚本 -Xms/-Xmx 或当前服务端配置。整合包有明确要求时可以调整，但不能超过推荐内存，并且必须向用户说明调整原因和最终内存值。",
       "- Forge 1.17+ 整合包如果需要运行 forge installer 生成 libraries 参数文件，先安装 forge_server_setup 能力，再用 setup_forge_server 写入 @libraries/.../win_args.txt 或 unix_args.txt 启动配置；不要把 installer jar 当作服务端 jar 启动。",
-      "- setup_forge_server 返回 ok=true 后，Forge 服务端已安装，根目录启动配置和 eula/server.properties/user_jvm_args.txt 已写入；除非用户明确要求启动测试，不要再初始化模板或重复写同类配置，直接总结部署结果。",
+      "- setup_forge_server 返回 ok=true 后，Forge 服务端已安装；如果是 MCDReforged 模板部署，仍需确认 Minecraft 服务端文件在 server/ 内，并编辑根目录 config.yml 使 working_directory=server、start_command 和 handler 正确。",
       "- 只有用户拒绝确认、用户中断、或确实缺少外部文件/信息时，才向用户说明无法继续的具体原因。"
     ].join("\n");
   }
@@ -415,9 +467,13 @@ export class AgentService {
       `- Java 版本：${server.javaVersion ?? "未设置"}`,
       `- 推荐 Java 版本：${javaVersion}`,
       `- 启动 Jar：${server.jarFile}`,
+      `- 启动参数：${server.startArgs}`,
+      `- 启动指令：${server.startupCommand ?? "未设置"}`,
       `- 内存：${server.minMemory} / ${server.maxMemory}`,
       `- 推荐内存：${agentSettings.memory}`,
-      "启动策略：启动验证前优先按推荐内存写入服务端内存参数；整合包有明确要求时可以调整但不能超过推荐内存，并向用户说明调整原因和最终内存值；优先使用服务端自带 run/start/server/launch 脚本，没有或不可用时再生成启动脚本。",
+      "配置策略：Agent 在部署或调整服务端时必须调用 update_current_server_config 写入服务端名字、Java 版本/路径、内存和必要的统一启动指令；内存只能使用一个值，并同时写入 minMemory 和 maxMemory，优先使用推荐内存；Java 版本优先使用推荐 Java 版本，必要时先安装对应工作区 Java；startupCommand 可使用 {java}/{javaHome}/{python}/{pythonHome}/{workspace}/{serverDir}/{minecraftDir}/{memory}/{minMemory}/{maxMemory}/{jarFile}/{startArgs} 变量。serverType 只是展示/分类标签，不决定启动方式。",
+      "模板部署约束：整合包部署必须调用 initialize_server_template(template=reference) 套用内置 MCDReforged 模板；Minecraft 服务端本体必须放在 server/ 子目录；根目录用于 MCDReforged 的 config.yml、permission.yml、plugins/、config/、logs/。",
+      "启动策略：start_current_server 只有一种后端启动路径，按当前配置执行。直启验证前先把 startupCommand 设置为进入 server/ 并调用服务端自带 run/start/server/launch 脚本的非交互命令；直启成功后必须先调用 configure_builtin_python_environment 配置工作区内置 Python/pip/MCDReforged，不要直接使用系统 Python；Linux 下系统 python3 只允许用于创建 workspace/python venv。MCDReforged 最终验证需要编辑根目录 config.yml，使 working_directory=server、start_command 从 server/ 工作目录启动服务端、handler 符合核心/Loader，并把 startupCommand 设置为 {python} -m mcdreforged。切换启动方式前先用 get_current_server_config 查看现状，必要时用 stop_current_server 或 kill_current_server 停止/清理残留进程。",
       "当前服务端根目录文件：",
       fileSummary,
       "当前上传给 Agent 的临时文件：",
@@ -436,11 +492,7 @@ export class AgentService {
     const lower = input.toLowerCase();
 
     if (lower.includes("模板") || lower.includes("初始化") || lower.includes("init")) {
-      const templateDir = path.join(appConfig.templatesDir, "default");
-      await this.fileService.copyIntoServer(serverId, path.join(templateDir, "eula.txt"), "eula.txt");
-      await this.fileService.copyIntoServer(serverId, path.join(templateDir, "server.properties"), "server.properties");
-      await this.fileService.copyIntoServer(serverId, path.join(templateDir, "user_jvm_args.txt"), "user_jvm_args.txt");
-      return "已根据内置默认模板初始化服务端目录。请上传 server.jar 或整合包服务端文件，然后配置 Java 路径和启动 Jar。";
+      return "请在设置中添加 OpenAI-compatible 模型配置后，让 Agent 调用 initialize_server_template(template=reference) 套用内置 MCDReforged 模板。Minecraft 服务端文件必须放入 server/ 目录。";
     }
 
     return [
@@ -494,6 +546,13 @@ export class AgentService {
       } catch (error) {
         if (!(error instanceof ModelRemoteError)) throw error;
         retryAttempt += 1;
+        const maxFailures = error instanceof ModelEmptyResponseError ? 2 : this.modelRetryMaxConsecutiveFailures;
+        if (retryAttempt >= this.modelRetryMaxConsecutiveFailures) {
+          throw new ModelRemoteError(`模型接口连续异常 ${retryAttempt} 次，已停止自动重试。最后错误：${error.message}`);
+        }
+        if (retryAttempt >= maxFailures) {
+          throw new ModelRemoteError(`模型接口连续返回空 assistant 消息 ${retryAttempt} 次，已停止自动重试。通常是模型上下文过大、输出被上游网关截断，或该模型/网关不完全兼容 OpenAI Chat Completions。最后错误：${error.message}`);
+        }
         const delayMs = this.modelRetryDelayMs(retryAttempt);
         const nextRetryAt = new Date(Date.now() + delayMs).toISOString();
         this.setStatus(serverId, "retrying");

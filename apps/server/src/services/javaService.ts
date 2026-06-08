@@ -3,6 +3,7 @@ import { createWriteStream, type WriteStream } from "node:fs";
 import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import extractZip from "extract-zip";
+import { extract as extractTar } from "tar";
 import { fetch } from "undici";
 import { appConfig } from "../config.js";
 import { fetchDispatcher } from "./proxySupport.js";
@@ -76,6 +77,13 @@ interface JavaDownloadCandidate {
   label: string;
   url: string;
   archiveName: string;
+}
+
+interface JavaPlatformSpec {
+  adoptiumOs: "windows" | "linux";
+  mirrorOs: "windows" | "linux";
+  archiveExtension: ".zip" | ".tar.gz";
+  displayName: string;
 }
 
 interface AdoptiumReleaseInfo {
@@ -267,6 +275,12 @@ export class JavaService {
     return this.taskForVersion(normalized);
   }
 
+  async executableForInstalledVersion(version: string) {
+    const normalized = this.normalizeVersion(version);
+    const executable = this.executableForVersion(normalized);
+    return await stat(executable).then(() => executable).catch(() => null);
+  }
+
   recommendVersion(minecraftVersion?: string | null) {
     if (!minecraftVersion) return "17";
     const [majorRaw, minorRaw, patchRaw] = minecraftVersion.split(".");
@@ -282,9 +296,7 @@ export class JavaService {
   }
 
   private async performInstall(normalized: string, task: JavaInstallTask, context: JavaInstallContext): Promise<JavaInstallResult> {
-    if (process.platform !== "win32") {
-      throw new Error("Automatic Java installation currently supports Windows zip packages only");
-    }
+    const platform = this.currentPlatformSpec();
 
     try {
       const targetDir = this.targetDirForVersion(normalized);
@@ -305,7 +317,7 @@ export class JavaService {
       this.updateTask(task.version, { status: "extracting", progress: 92, message: `正在解压 Java ${normalized}` });
       await rm(extractRoot, { recursive: true, force: true });
       await mkdir(extractRoot, { recursive: true });
-      await extractZip(archivePath, { dir: extractRoot });
+      await this.extractArchive(archivePath, extractRoot, platform);
       this.ensureNotCancelled(context);
       const children = await readdir(extractRoot, { withFileTypes: true });
       const jdkDir = children.find((entry) => entry.isDirectory());
@@ -417,19 +429,21 @@ export class JavaService {
   }
 
   private async resolveMirrorDownload(source: Exclude<JavaDownloadSource, "auto-cn" | "official">, version: string, context: JavaInstallContext): Promise<JavaDownloadCandidate> {
-    const directoryUrl = this.mirrorDirectoryUrl(source, version);
+    const platform = this.currentPlatformSpec();
+    const directoryUrl = this.mirrorDirectoryUrl(source, version, platform);
     const response = await fetch(directoryUrl, { signal: context.controller.signal, dispatcher: fetchDispatcher(this.proxyUrl?.()) });
     if (!response.ok) throw new Error(`${this.sourceLabel(source)} directory failed: ${response.status}`);
     const html = await response.text();
-    const href = this.findMirrorArchiveHref(html, version);
-    if (!href) throw new Error(`${this.sourceLabel(source)} has no Windows zip package for Java ${version}`);
+    const href = this.findMirrorArchiveHref(html, version, platform);
+    if (!href) throw new Error(`${this.sourceLabel(source)} has no ${platform.displayName} package for Java ${version}`);
     const url = new URL(href, directoryUrl).toString();
     const archiveName = path.basename(decodeURIComponent(new URL(url).pathname));
     return { source, label: this.sourceLabel(source), url, archiveName };
   }
 
   private async resolveOfficialDownload(version: string, context: JavaInstallContext): Promise<JavaDownloadCandidate> {
-    const apiUrl = `https://api.adoptium.net/v3/assets/latest/${version}/hotspot?architecture=x64&image_type=jdk&os=windows&vendor=eclipse`;
+    const platform = this.currentPlatformSpec();
+    const apiUrl = `https://api.adoptium.net/v3/assets/latest/${version}/hotspot?architecture=x64&image_type=jdk&os=${platform.adoptiumOs}&vendor=eclipse`;
     try {
       const assets = await fetch(apiUrl, { signal: context.controller.signal, dispatcher: fetchDispatcher(this.proxyUrl?.()) }).then((response) => {
         if (!response.ok) throw new Error(`Adoptium API failed: ${response.status}`);
@@ -441,7 +455,7 @@ export class JavaService {
         source: "official",
         label: this.sourceLabel("official"),
         url: asset.link,
-        archiveName: path.basename(asset.name ?? `temurin-${version}.zip`)
+        archiveName: path.basename(asset.name ?? `temurin-${version}${platform.archiveExtension}`)
       };
     } catch (error) {
       if (this.isCancelledError(error, context)) throw new JavaInstallCancelledError(version);
@@ -449,25 +463,43 @@ export class JavaService {
     }
   }
 
-  private mirrorDirectoryUrl(source: Exclude<JavaDownloadSource, "auto-cn" | "official">, version: string) {
+  private mirrorDirectoryUrl(source: Exclude<JavaDownloadSource, "auto-cn" | "official">, version: string, platform: JavaPlatformSpec) {
     const baseUrl = source === "tsinghua"
       ? "https://mirrors.tuna.tsinghua.edu.cn/Adoptium"
       : "https://mirrors.cernet.edu.cn/Adoptium";
-    return `${baseUrl}/${version}/jdk/x64/windows/`;
+    return `${baseUrl}/${version}/jdk/x64/${platform.mirrorOs}/`;
   }
 
-  private findMirrorArchiveHref(html: string, version: string) {
-    const hrefs = [...html.matchAll(/href=["']([^"']+\.zip)["']/gi)]
+  private findMirrorArchiveHref(html: string, version: string, platform: JavaPlatformSpec) {
+    const extensionPattern = platform.archiveExtension.replace(/\./g, "\\.");
+    const hrefs = [...html.matchAll(new RegExp(`href=["']([^"']+${extensionPattern})["']`, "gi"))]
       .map((match) => match[1])
       .filter((href): href is string => Boolean(href));
     const normalizedVersion = version === "8" ? "8" : `${version}`;
     const candidates = hrefs.filter((href) => {
       const name = path.basename(href).toLowerCase();
-      return name.includes(`openjdk${normalizedVersion}u-jdk_x64_windows_hotspot_`.toLowerCase())
-        || name.includes(`openjdk${normalizedVersion}-jdk_x64_windows_hotspot_`.toLowerCase())
-        || name.includes(`openjdk${normalizedVersion}u_jdk_x64_windows_hotspot_`.toLowerCase());
+      return name.includes(`openjdk${normalizedVersion}u-jdk_x64_${platform.mirrorOs}_hotspot_`.toLowerCase())
+        || name.includes(`openjdk${normalizedVersion}-jdk_x64_${platform.mirrorOs}_hotspot_`.toLowerCase())
+        || name.includes(`openjdk${normalizedVersion}u_jdk_x64_${platform.mirrorOs}_hotspot_`.toLowerCase());
     });
     return (candidates.length > 0 ? candidates : hrefs).sort().at(-1) ?? null;
+  }
+
+  private currentPlatformSpec(): JavaPlatformSpec {
+    if (process.arch !== "x64") {
+      throw new Error(`Automatic Java installation currently supports x64 packages only (current architecture: ${process.arch})`);
+    }
+    if (process.platform === "win32") return { adoptiumOs: "windows", mirrorOs: "windows", archiveExtension: ".zip", displayName: "Windows zip" };
+    if (process.platform === "linux") return { adoptiumOs: "linux", mirrorOs: "linux", archiveExtension: ".tar.gz", displayName: "Linux tar.gz" };
+    throw new Error(`Automatic Java installation currently supports Windows and Linux x64 packages only (current platform: ${process.platform})`);
+  }
+
+  private async extractArchive(archivePath: string, extractRoot: string, platform: JavaPlatformSpec) {
+    if (platform.archiveExtension === ".zip") {
+      await extractZip(archivePath, { dir: extractRoot });
+      return;
+    }
+    await extractTar({ file: archivePath, cwd: extractRoot });
   }
 
   private async cleanupContext(context: JavaInstallContext) {

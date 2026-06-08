@@ -1,9 +1,10 @@
 import { eq } from "drizzle-orm";
 import os from "node:os";
-import { defaultSystemPrompt } from "../config.js";
+import { appConfig, defaultSystemPrompt } from "../config.js";
 import { getDb } from "../db/client.js";
 import { appSettings } from "../db/schema.js";
-import type { AgentSettings } from "../types.js";
+import { decryptSecret, encryptSecret, maskSecret } from "../security/encrypt.js";
+import type { AgentSettings, AgentToolSettings } from "../types.js";
 import { nowIso } from "../utils/time.js";
 import { ServerService } from "./serverService.js";
 import { SkillService } from "./skillService.js";
@@ -12,6 +13,8 @@ const agentAutoConfirmKey = "agent_auto_confirm";
 const agentDownloadProxyEnabledKey = "agent_download_proxy_enabled";
 const agentDownloadProxyUrlKey = "agent_download_proxy_url";
 const agentMemoryMbKey = "agent_memory_mb";
+const curseForgeApiKeySettingKey = "curseforge_api_key";
+const modrinthApiKeySettingKey = "modrinth_api_key";
 const minimumAgentMemoryMb = 512;
 
 function systemMemoryMb() {
@@ -74,6 +77,48 @@ export class PromptService {
   getAgentDownloadProxyUrl() {
     const settings = this.getAgentSettings();
     return settings.downloadProxyEnabled && settings.downloadProxyUrl ? settings.downloadProxyUrl : undefined;
+  }
+
+  private getDecryptedSetting(key: string) {
+    const encrypted = this.getSetting(key);
+    if (!encrypted) return "";
+    try {
+      return decryptSecret(encrypted);
+    } catch {
+      return "";
+    }
+  }
+
+  private setSecretSetting(key: string, value: string | undefined) {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    this.setSetting(key, encryptSecret(trimmed));
+  }
+
+  getCurseForgeApiKey() {
+    return this.getDecryptedSetting(curseForgeApiKeySettingKey) || appConfig.curseForgeApiKey.trim();
+  }
+
+  getModrinthApiKey() {
+    return this.getDecryptedSetting(modrinthApiKeySettingKey) || appConfig.modrinthApiKey.trim();
+  }
+
+  getAgentToolSettings(): AgentToolSettings {
+    const curseForgeApiKey = this.getCurseForgeApiKey();
+    const modrinthApiKey = this.getModrinthApiKey();
+    return {
+      curseForgeApiKeyConfigured: Boolean(curseForgeApiKey),
+      curseForgeApiKeyHint: maskSecret(curseForgeApiKey),
+      modrinthApiKeyConfigured: Boolean(modrinthApiKey),
+      modrinthApiKeyHint: maskSecret(modrinthApiKey)
+    };
+  }
+
+  setAgentToolSettings(settings: Partial<{ curseForgeApiKey: string; modrinthApiKey: string }>) {
+    this.setSecretSetting(curseForgeApiKeySettingKey, settings.curseForgeApiKey);
+    this.setSecretSetting(modrinthApiKeySettingKey, settings.modrinthApiKey);
+    return this.getAgentToolSettings();
   }
 
   getGlobalPrompt() {

@@ -1,4 +1,4 @@
-export type ServerStatus = "stopped" | "starting" | "running" | "stopping" | "crashed";
+export type ServerStatus = "stopped" | "starting" | "running" | "stopping" | "crashed" | "orphaned";
 export type AgentStatus = "idle" | "thinking" | "running" | "waiting_confirmation" | "retrying" | "completed" | "failed" | "cancelled";
 
 export interface ServerRecord {
@@ -12,6 +12,7 @@ export interface ServerRecord {
   maxMemory: string;
   jarFile: string;
   startArgs: string;
+  startupCommand: string | null;
   serverType: string | null;
   minecraftVersion: string | null;
   modpackName: string | null;
@@ -54,6 +55,32 @@ export interface AgentConfirmationRequest {
   description: string;
   risk: "medium" | "high";
   createdAt: string;
+}
+
+export type ToolConfigKey = "curseForgeApiKey" | "modrinthApiKey";
+
+export interface AgentToolSettings {
+  curseForgeApiKeyConfigured: boolean;
+  curseForgeApiKeyHint: string;
+  modrinthApiKeyConfigured: boolean;
+  modrinthApiKeyHint: string;
+}
+
+export interface AgentToolConfigRequirement {
+  key: ToolConfigKey;
+  label: string;
+  required: boolean;
+  configured: boolean;
+  helpUrl: string;
+  secret: boolean;
+}
+
+export interface AgentToolConfigRequired {
+  key: ToolConfigKey;
+  label: string;
+  toolName?: string;
+  helpUrl: string;
+  message: string;
 }
 
 export interface AgentDownloadProgress {
@@ -104,6 +131,18 @@ export interface AgentSettings {
   systemMemoryMb: number;
 }
 
+export interface ProxyTestResult {
+  ok: boolean;
+  targetUrl: string;
+  proxyEnabled: boolean;
+  usedProxy: boolean;
+  status: number | null;
+  statusText: string;
+  finalUrl: string;
+  elapsedMs: number;
+  error: string | null;
+}
+
 export interface AgentRetryState {
   attempt: number;
   delayMs: number;
@@ -134,6 +173,7 @@ export interface AgentToolRecord {
   description: string;
   category: string;
   controllable: false;
+  configRequirements?: AgentToolConfigRequirement[];
 }
 
 export interface JavaInstall {

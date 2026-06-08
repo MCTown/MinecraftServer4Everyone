@@ -23,6 +23,7 @@ export function initDatabase() {
       max_memory TEXT NOT NULL,
       jar_file TEXT NOT NULL,
       start_args TEXT NOT NULL,
+      startup_command TEXT,
       server_type TEXT,
       minecraft_version TEXT,
       modpack_name TEXT,
@@ -91,6 +92,11 @@ export function initDatabase() {
       expires_at TEXT NOT NULL
     );
   `);
+
+  const serverColumns = sqlite.prepare("PRAGMA table_info(servers)").all() as Array<{ name: string }>;
+  if (!serverColumns.some((column) => column.name === "startup_command")) {
+    sqlite.exec("ALTER TABLE servers ADD COLUMN startup_command TEXT");
+  }
 
   database = drizzle(sqlite, { schema });
   const existingPrompt = sqlite.prepare("SELECT value FROM app_settings WHERE key = ?").get("global_system_prompt");

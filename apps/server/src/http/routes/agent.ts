@@ -5,7 +5,7 @@ import { idParams, parseBody } from "../helpers.js";
 import type { RouteServices } from "../types.js";
 
 export function registerAgentRoutes(app: FastifyInstance, services: RouteServices) {
-  const reasoningEffortSchema = z.enum(["minimal", "low", "medium", "high"]).default("medium");
+  const reasoningEffortSchema = z.enum(["minimal", "low", "medium", "high"]).default("high");
 
   app.get("/api/servers/:id/agent/messages", async (request) => {
     const { id } = idParams.parse(request.params);
