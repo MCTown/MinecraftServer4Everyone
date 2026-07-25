@@ -1,0 +1,7 @@
+{
+  "online_time": {
+    "cls": "custom",
+    "target": "play_time",
+    "title": "在线榜"
+  }
+}

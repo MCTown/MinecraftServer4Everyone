@@ -1,0 +1,14 @@
+{
+    "turn_off_auto_save": true,
+    "ignore_session_lock": true,
+    "backup_path": "./perma_backup",
+    "server_path": "./server",
+    "world_names": [
+        "world"
+    ],
+    "minimum_permission_level": {
+        "make": 2,
+        "list": 0,
+        "listall": 2
+    }
+}

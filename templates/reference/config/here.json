@@ -1,0 +1,7 @@
+{
+    "highlight_time": 15,
+    "display_voxel_waypoint": true,
+    "display_xaero_waypoint": true,
+    "click_to_teleport": false,
+    "use_rcon_if_possible": true
+}

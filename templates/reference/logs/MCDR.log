@@ -1,0 +1,319 @@
+[MCDR] [2026-05-05 00:20:09.762] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-05 00:20:09.765] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-05 06:21:02.879] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-05 06:21:02.885] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-05 07:00:58.169] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 正在整理数据库, 请稍等...
+[MCDR] [2026-05-05 07:00:58.854] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 数据库整理完毕, 耗时0.68s, 体积变化: 106.40MiB -> 105.55MiB (-876.00KiB) (99.2%)
+[MCDR] [2026-05-05 07:00:58.854] [PB@1a79-crontab_0/INFO] [basic_job.py:184(log_info)] [prime_backup]: 整理数据库完成, 下次执行: 2026-05-06 07:00:54
+[MCDR] [2026-05-05 11:53:30.86] [CheckUpdate/INFO] [update_helper.py:77(__check_update)]: 已检测到新版本: §7v2.15.7§r。§7v2.15.7§r 的新内容:
+[MCDR] [2026-05-05 11:53:30.87] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved `RconConnection` compatibility with Minecraft's silly RCON implementation (#407, #411)
+[MCDR] [2026-05-05 11:53:30.87] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved RCON connection error messages
+[MCDR] [2026-05-05 11:55:27.283] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-05 11:55:27.284] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-05 11:55:27.330] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1777982127329656518, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-05 11:55:27.522] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #103 done, +7 blobs (size 252.57KiB / 768.99KiB)
+[MCDR] [2026-05-05 11:55:27.522] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.04s, create backup 0.2s
+[MCDR] [2026-05-05 11:55:27.523] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #103, 耗时0.24s, 体积205.77MiB (+768.99KiB)
+[MCDR] [2026-05-05 11:55:27.524] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-05 23:55:31
+[MCDR] [2026-05-05 12:21:06.198] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-05 12:21:06.200] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-05 18:21:46.110] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-05 18:21:46.115] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-05 18:29:42.836] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> [[CICode,url=https://gxh.vip.qq.com/club/item/parcel/item/6f/6ff1b828a85f8e6015774b701aa0ad34/raw300.gif,name=图片]]
+[MCDR] [2026-05-05 18:32:00.358] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 鹿
+[MCDR] [2026-05-05 18:32:06.243] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 补鹿 4
+[MCDR] [2026-05-05 23:55:31.495] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-05 23:55:31.496] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-05 23:55:31.588] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1778025331588518872, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-05 23:55:31.740] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #104 done, +6 blobs (size 252.67KiB / 761.95KiB)
+[MCDR] [2026-05-05 23:55:31.740] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.09s, create backup 0.15s
+[MCDR] [2026-05-05 23:55:31.741] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #104, 耗时0.24s, 体积205.77MiB (+761.95KiB)
+[MCDR] [2026-05-05 23:55:31.742] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-06 11:55:39
+[MCDR] [2026-05-06 00:22:45.600] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-06 00:22:45.602] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-06 03:19:18.825] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <月光の猫> 玩什么
+[MCDR] [2026-05-06 03:54:45.882] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zyb_1> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhQUUwtsg3A2ZLJfhq33ih9DKBC6JBjImAIg_woop9S4_uGjlAMyBHByb2RQgL2jAVoQP0pvtKWuP0q7Q37OtfmXA3oCGuaCAQJneg&rkey=CAESMHZ3x4aaH67fv_I9oyBLmmArxEHCM7G75QETGc-nrd4sPSXQ5JABjt8PP2uX_9iEGQ,name=图片]]
+[MCDR] [2026-05-06 03:54:56.711] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zyb_1>  小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 03:56:31.406] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 03:59:59.240] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 04:09:56.399] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 04:15:58.269] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 05:07:14.115] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <橙曦澄> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 05:09:46.31] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 06:23:33.589] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-06 06:23:33.594] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-06 07:00:54.860] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 正在整理数据库, 请稍等...
+[MCDR] [2026-05-06 07:00:55.895] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 数据库整理完毕, 耗时1.03s, 体积变化: 106.55MiB -> 105.69MiB (-880.00KiB) (99.2%)
+[MCDR] [2026-05-06 07:00:55.896] [PB@1a79-crontab_0/INFO] [basic_job.py:184(log_info)] [prime_backup]: 整理数据库完成, 下次执行: 2026-05-07 07:00:25
+[MCDR] [2026-05-06 08:02:10.551] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <月光の猫> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 11:53:30.59] [CheckUpdate/INFO] [update_helper.py:77(__check_update)]: 已检测到新版本: §7v2.15.7§r。§7v2.15.7§r 的新内容:
+[MCDR] [2026-05-06 11:53:30.59] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved `RconConnection` compatibility with Minecraft's silly RCON implementation (#407, #411)
+[MCDR] [2026-05-06 11:53:30.59] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved RCON connection error messages
+[MCDR] [2026-05-06 11:55:39.51] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-06 11:55:39.52] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-06 11:55:39.128] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1778068539127706870, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-06 11:55:39.298] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #105 done, +6 blobs (size 251.44KiB / 761.95KiB)
+[MCDR] [2026-05-06 11:55:39.299] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.07s, create backup 0.17s
+[MCDR] [2026-05-06 11:55:39.299] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #105, 耗时0.25s, 体积205.77MiB (+761.95KiB)
+[MCDR] [2026-05-06 11:55:39.300] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-06 23:55:42
+[MCDR] [2026-05-06 12:23:53.207] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-06 12:23:53.209] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-06 14:15:21.221] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Cuber> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-06 18:24:32.352] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-06 18:24:32.357] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-06 23:55:42.422] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-06 23:55:42.423] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-06 23:55:42.478] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1778111742477588827, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-06 23:55:42.633] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #106 done, +6 blobs (size 250.99KiB / 761.94KiB)
+[MCDR] [2026-05-06 23:55:42.633] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.05s, create backup 0.16s
+[MCDR] [2026-05-06 23:55:42.634] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #106, 耗时0.21s, 体积205.77MiB (+761.94KiB)
+[MCDR] [2026-05-06 23:55:42.635] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-07 11:55:43
+[MCDR] [2026-05-07 00:25:00.557] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-07 00:25:00.559] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-07 06:25:50.766] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-07 06:25:50.771] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-07 06:27:09.778] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <killgod _black> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-07 06:42:19.999] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Waluyiji_> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-07 07:00:25.107] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 正在整理数据库, 请稍等...
+[MCDR] [2026-05-07 07:00:26.161] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 数据库整理完毕, 耗时1.05s, 体积变化: 106.67MiB -> 105.83MiB (-860.00KiB) (99.2%)
+[MCDR] [2026-05-07 07:00:26.161] [PB@1a79-crontab_0/INFO] [basic_job.py:184(log_info)] [prime_backup]: 整理数据库完成, 下次执行: 2026-05-08 07:00:35
+[MCDR] [2026-05-07 07:35:22.481] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <FunSSSSY> 小时候都不给我做一个玩玩，太不够意思了兄弟
+[MCDR] [2026-05-07 11:51:42.187] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <月光の猫> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhRdAJDGRJPUa_xNGfS5LfIj_svxSRjWkw4g_woo0Pizuo6nlAMyBHByb2RQgL2jAVoQ-rZG9GtbFI3aeDkzaGdsCXoCFzmCAQJneg&rkey=CAESMJhmI8EcyfpjKYAnyes6qGfRGnydfyxZukNZ4jBTO00LBa_zz493OnYu5JIYLpyXOg,name=图片]]
+[MCDR] [2026-05-07 11:53:31.578] [CheckUpdate/INFO] [update_helper.py:77(__check_update)]: 已检测到新版本: §7v2.15.7§r。§7v2.15.7§r 的新内容:
+[MCDR] [2026-05-07 11:53:31.578] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved `RconConnection` compatibility with Minecraft's silly RCON implementation (#407, #411)
+[MCDR] [2026-05-07 11:53:31.578] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved RCON connection error messages
+[MCDR] [2026-05-07 11:55:43.519] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-07 11:55:43.519] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-07 11:55:43.575] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1778154943574994864, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-07 11:55:43.773] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #107 done, +6 blobs (size 253.18KiB / 761.95KiB)
+[MCDR] [2026-05-07 11:55:43.774] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.05s, create backup 0.2s
+[MCDR] [2026-05-07 11:55:43.775] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #107, 耗时0.25s, 体积205.77MiB (+761.95KiB)
+[MCDR] [2026-05-07 11:55:43.775] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-07 23:55:44
+[MCDR] [2026-05-07 12:25:59.986] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-07 12:25:59.989] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-07 18:26:36.230] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-07 18:26:36.235] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-07 23:55:44.444] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-07 23:55:44.445] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-07 23:55:44.475] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1778198144474576935, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-07 23:55:44.605] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #108 done, +7 blobs (size 252.59KiB / 768.99KiB)
+[MCDR] [2026-05-07 23:55:44.605] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.03s, create backup 0.13s
+[MCDR] [2026-05-07 23:55:44.606] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #108, 耗时0.16s, 体积205.77MiB (+768.99KiB)
+[MCDR] [2026-05-07 23:55:44.607] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-08 11:55:47
+[MCDR] [2026-05-08 00:27:28.770] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-08 00:27:28.773] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-08 02:17:46.356] [OneBotConnectionThread/INFO] [onebot_client.py:163(send)] [chathub]: [OneBot] 已发送: {"self_id": "modded2", "user_id": "null", "time": 1751454150, "message_id": 16, "message_seq": 16, "real_id": 16, "real_seq": 16, "message_type": "group", "sender": {"user_id": "null", "nickname": "null", "card": "null", "role": "owner"}, "raw_message": [{"type": "text", "data": {"text": "\u5f53\u524d\u6ca1\u6709\u5728\u7ebf\u73a9\u5bb6"}}], "font": 14, "sub_type": "normal", "message": [{"type": "text", "data": {"text": "\u5f53\u524d\u6ca1\u6709\u5728\u7ebf\u73a9\u5bb6"}}], "message_format": "array", "post_type": "message", "group_id": "chathub"}
+[MCDR] [2026-05-08 06:28:15.856] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-08 06:28:15.860] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-08 07:00:35.527] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 正在整理数据库, 请稍等...
+[MCDR] [2026-05-08 07:00:36.285] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 数据库整理完毕, 耗时0.76s, 体积变化: 106.81MiB -> 105.98MiB (-852.00KiB) (99.2%)
+[MCDR] [2026-05-08 07:00:36.286] [PB@1a79-crontab_0/INFO] [basic_job.py:184(log_info)] [prime_backup]: 整理数据库完成, 下次执行: 2026-05-09 07:00:28
+[MCDR] [2026-05-08 07:04:31.198] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 最近有啥包能玩吗
+[MCDR] [2026-05-08 07:04:34.696] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 整个玩玩
+[MCDR] [2026-05-08 07:07:10.582] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 基本没了（
+[MCDR] [2026-05-08 07:07:22.64] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 最近ender应该给开完了
+[MCDR] [2026-05-08 07:10:35.532] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> 把ender开了
+[MCDR] [2026-05-08 07:19:11.557] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 把ender开了
+[MCDR] [2026-05-08 07:19:39.595] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 把ender开了
+[MCDR] [2026-05-08 07:20:29.757] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 把ender开了
+[MCDR] [2026-05-08 09:01:57.343] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Waluyiji_> 把ender开了
+[MCDR] [2026-05-08 09:06:06.933] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zyb_1> 把ender开了
+[MCDR] [2026-05-08 09:27:17.115] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> ？
+[MCDR] [2026-05-08 09:27:21.802] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhTk6ur7DRh3w2QKAdz5Nq5RWSdnShj4pGsg_woo8pfkh7CplAMyBHByb2RQgL2jAVoQGYSKC5dCLtDfteZQpcqfi3oCvjOCAQJuag&rkey=CAMSMA52R4F0MEyTt8eBLGXssnyjqI_8g6alEOYpwNevh_Xep5WEQpmuJhP0ON0w2vM2kg,name=图片]]
+[MCDR] [2026-05-08 09:27:27.760] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 我在玩暗黑4
+[MCDR] [2026-05-08 09:28:11.798] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> huh
+[MCDR] [2026-05-08 09:28:14.541] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 找个包吧
+[MCDR] [2026-05-08 09:28:21.265] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 我现在下班都不知道干啥
+[MCDR] [2026-05-08 09:28:41.845] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> 下班骑自行车
+[MCDR] [2026-05-08 09:29:16.709] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 骑不了一点
+[MCDR] [2026-05-08 09:29:31.601] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 下班人都成狗了
+[MCDR] [2026-05-08 09:55:17.945] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhSt0oKTPYtP-bFtKUP28uUlrkfkahjv6Cwg_woo8M7-praplAMyBHByb2RQgL2jAVoQtkl9yBtsBeRpUNB1eVJL13oCacqCAQJuag&rkey=CAMSMA52R4F0MEyTt8eBLGXssnyjqI_8g6alEOYpwNevh_Xep5WEQpmuJhP0ON0w2vM2kg,name=图片]]
+[MCDR] [2026-05-08 09:55:23.33] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 我也不知道玩啥
+[MCDR] [2026-05-08 09:59:56.117] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <LinCuoYu【哎bot服】> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhQ8d58Mew46jG4jOyC1sobarajY2xiMOCD_Ciixxcqrt6mUAzIEcHJvZFCAvaMBWhAQZYg0vgYpBf9Z9H7E-e8yegLS1YIBAm5q&rkey=CAMSMA52R4F0MEyTt8eBLGXssnyjqI_8g6alEOYpwNevh_Xep5WEQpmuJhP0ON0w2vM2kg,name=图片]]
+[MCDR] [2026-05-08 11:09:54.457] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <月光の猫> 来点好玩对跌倒
+[MCDR] [2026-05-08 11:10:02.281] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <月光の猫> 来点好玩的
+[MCDR] [2026-05-08 11:42:52.362] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> [[CICode,url=https://gchat.qpic.cn/gchatpic_new/0/0-0-278915F76EB4359C3CF8CD4FF92ADF31/0,name=图片]]你们找
+[MCDR] [2026-05-08 11:53:30.139] [CheckUpdate/INFO] [update_helper.py:77(__check_update)]: 已检测到新版本: §7v2.15.7§r。§7v2.15.7§r 的新内容:
+[MCDR] [2026-05-08 11:53:30.139] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved `RconConnection` compatibility with Minecraft's silly RCON implementation (#407, #411)
+[MCDR] [2026-05-08 11:53:30.139] [CheckUpdate/INFO] [update_helper.py:79(__check_update)]:     - Improved RCON connection error messages
+[MCDR] [2026-05-08 11:55:47.292] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-08 11:55:47.293] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-08 11:55:47.328] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1778241347327638695, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-08 11:55:47.518] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #109 done, +6 blobs (size 251.62KiB / 761.94KiB)
+[MCDR] [2026-05-08 11:55:47.518] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.03s, create backup 0.19s
+[MCDR] [2026-05-08 11:55:47.519] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #109, 耗时0.22s, 体积205.77MiB (+761.94KiB)
+[MCDR] [2026-05-08 11:55:47.520] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-08 23:55:49
+[MCDR] [2026-05-08 12:27:35.174] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 找不到一点
+[MCDR] [2026-05-08 12:28:58.658] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-08 12:28:58.661] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-08 12:59:47.17] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 想玩宝藏猎人捏
+[MCDR] [2026-05-08 13:07:22.715] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> [[CICode,url=https://gchat.qpic.cn/gchatpic_new/0/0-0-278915F76EB4359C3CF8CD4FF92ADF31/0,name=图片]]玩儿
+[MCDR] [2026-05-08 13:10:26.991] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 已经在玩暗黑了 还要在mc里玩暗黑hh
+[MCDR] [2026-05-08 13:33:23.60] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 宝藏猎人不赖
+[MCDR] [2026-05-08 13:33:34.746] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 要是不ban生电就好了
+[MCDR] [2026-05-08 14:03:40.947] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 
+[MCDR] [2026-05-08 14:03:43.639] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 神了
+[MCDR] [2026-05-08 14:03:49.500] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain>   
+[MCDR] [2026-05-08 14:03:54.468] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 咱们之前怎么解决的来着
+[MCDR] [2026-05-08 14:04:01.490] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 加timeoutfix？
+[MCDR] [2026-05-08 14:04:35.327] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 先用spark出个profile
+[MCDR] [2026-05-08 14:04:41.858] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 看看是不是啥炸了
+[MCDR] [2026-05-08 14:06:44.169] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 神秘碧油鸡
+[MCDR] [2026-05-08 14:06:55.76] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 出了吗
+[MCDR] [2026-05-08 14:06:59.20] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> profile
+[MCDR] [2026-05-08 14:07:09.222] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Cuber> huh
+[MCDR] [2026-05-08 14:07:21.783] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 有日志最好
+[MCDR] [2026-05-08 14:07:48.688] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 我看宝藏猎人更了好多版本
+[MCDR] [2026-05-08 14:07:51.33] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 1.18的那个
+[MCDR] [2026-05-08 14:08:05.436] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 你开我就开
+[MCDR] [2026-05-08 14:08:16.697] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Cuber> 什么时候开
+[MCDR] [2026-05-08 14:08:16.757] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> ？
+[MCDR] [2026-05-08 14:08:24.667] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 什么叫你开我就开
+[MCDR] [2026-05-08 14:11:33.678] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 
+[MCDR] [2026-05-08 14:11:39.210] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 还真有日志（
+[MCDR] [2026-05-08 14:11:43.636] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 但是ai说tos炸了
+[MCDR] [2026-05-08 14:11:47.43] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> tps
+[MCDR] [2026-05-08 14:12:56.750] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 
+[MCDR] [2026-05-08 14:13:00.52] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <OctRain> 神秘
+[MCDR] [2026-05-08 14:16:12.579] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 出个spark看看
+[MCDR] [2026-05-08 14:17:13.282] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123>  
+[MCDR] [2026-05-08 14:19:12.37] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 日志里面看不出来啥
+[MCDR] [2026-05-08 14:48:51.981] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> [[CICode,url=https://gchat.qpic.cn/gchatpic_new/0/0-0-278915F76EB4359C3CF8CD4FF92ADF31/0,name=图片]]
+[MCDR] [2026-05-08 14:48:53.510] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 开啊
+[MCDR] [2026-05-08 14:49:08.302] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 好像有个魔改版宝库3挺好的
+[MCDR] [2026-05-08 14:58:13.418] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> 开不开
+[MCDR] [2026-05-08 14:58:23.36] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> 都没有好包玩
+[MCDR] [2026-05-08 15:14:20.344] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Cuber> 啥时候开
+[MCDR] [2026-05-08 15:17:55.579] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 啥时候开
+[MCDR] [2026-05-08 15:18:12.629] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 明日下午或者晚上如何
+[MCDR] [2026-05-08 15:23:36.662] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Cuber> 明天下午
+[MCDR] [2026-05-08 15:23:38.811] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Cuber> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhSPiMlPAmF9DUNr3ZScKY9tAc35yBj5lkYg_wooytCF2f-plAMyBHByb2RQgL2jAVoQSUtRLqpazLmBzXxGzrufjXoCKImCAQJuag&rkey=CAQSMClqGxWKU4pooWRbSPBn7RL-l3wKmuyH88AWx7MrZKa2FR-QmDas_0hP3u74Xg5t6A,name=图片]]
+[MCDR] [2026-05-08 15:23:59.32] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhSPiMlPAmF9DUNr3ZScKY9tAc35yBj5lkYg_woopZLh4v-plAMyBHByb2RQgL2jAVoQ894fH5CI7PuCJqmicN2VWnoCBEWCAQJneg&rkey=CAQSMClqGxWKU4pooWRbSPBn7RL-l3wKmuyH88AWx7MrZKa2FR-QmDas_0hP3u74Xg5t6A,name=图片]]
+[MCDR] [2026-05-08 15:25:18.416] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Waluyiji_> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhSPiMlPAmF9DUNr3ZScKY9tAc35yBj5lkYg_woowZfgiICqlAMyBHByb2RQgL2jAVoQNPtRRH576mjXU00x8e3o3XoCvF2CAQJuag&rkey=CAQSMClqGxWKU4pooWRbSPBn7RL-l3wKmuyH88AWx7MrZKa2FR-QmDas_0hP3u74Xg5t6A,name=图片]]
+[MCDR] [2026-05-08 18:28:59.242] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-08 18:28:59.245] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-08 23:55:49.509] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份触发
+[MCDR] [2026-05-08 23:55:49.510] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 创建备份中...请稍等
+[MCDR] [2026-05-08 23:55:49.575] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:508(run)] [prime_backup]: Creating backup Backup(id=None, timestamp=1778284549574594396, creator='prime_backup:scheduled_backup', comment='__pb_translated__:scheduled_backup', targets=['world'], tags={}, file_raw_size_sum=None, file_stored_size_sum=None) on ['world']
+[MCDR] [2026-05-08 23:55:49.726] [PB@1a79-worker-heavy/INFO] [create_backup_action.py:542(run)] [prime_backup]: Create backup #110 done, +6 blobs (size 253.36KiB / 761.95KiB)
+[MCDR] [2026-05-08 23:55:49.727] [PB@1a79-worker-heavy/INFO] [create_backup_task.py:56(run)] [prime_backup]: Time costs: save wait 0.06s, create backup 0.16s
+[MCDR] [2026-05-08 23:55:49.728] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 备份完成, ID #110, 耗时0.22s, 体积205.77MiB (+761.95KiB)
+[MCDR] [2026-05-08 23:55:49.728] [PB@1a79-crontab_0/INFO] [misc_utils.py:30(print_text_to_console)] [prime_backup]: [PB] 定时备份完成, 下次执行: 2026-05-09 11:55:58
+[MCDR] [2026-05-09 00:23:02.800] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhSPiMlPAmF9DUNr3ZScKY9tAc35yBj5lkYg_woo9-SxofiqlAMyBHByb2RQgL2jAVoQ6KgT_R2EXqLCWfG8AmOIBHoC6LeCAQJuag&rkey=CAQSMHwqwxNW7p3i0sW5kTNp_69Zjr8YiWBuwYPegKsYG2TKfOyrAfpHQvUSi6H5pDtv8A,name=图片]]
+[MCDR] [2026-05-09 00:29:08.907] [PB@1a79-crontab_0/INFO] [prune_backup_job.py:29(run)] [prime_backup]: Prune backup job started
+[MCDR] [2026-05-09 00:29:08.911] [PB@1a79-worker-heavy/INFO] [misc_utils.py:30(print_text_to_console)]: [PB] 已完成所有清理子任务, 共删除0个备份、0个数据对象, 共释放0.00B
+[MCDR] [2026-05-09 00:39:49.885] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 玩宝猎的扣个1嘞，我看看人够不够
+[MCDR] [2026-05-09 00:40:50.761] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> 111111111111111111111111111111，这么多1肯定够了
+[MCDR] [2026-05-09 00:45:40.481] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000> 1
+[MCDR] [2026-05-09 00:49:57.163] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 假人科技吗？有点意思
+[MCDR] [2026-05-09 01:37:47.121] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 希望我一觉睡醒
+[MCDR] [2026-05-09 01:37:49.598] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 服开好了
+[MCDR] [2026-05-09 01:37:53.382] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 这就开始睡觉
+[MCDR] [2026-05-09 01:49:28.451] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000> ?
+[MCDR] [2026-05-09 01:49:35.550] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000> 不上班了?
+[MCDR] [2026-05-09 01:52:13.128] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> 今天周六
+[MCDR] [2026-05-09 01:52:17.938] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhRbw23-XTx1r6U6RJ757HfkjPS4yBjzzgYg_wool8P8moyrlAMyBHByb2RQgL2jAVoQxxn03RWWgkshDQIk2b2UxXoCRr2CAQJneg&rkey=CAESMPLpFkkskFtvRMEC4bb54ZOjCs_A0btUvK5wkRAtx6RTJ-cfh1z4RUkm7VKVV7deXg,name=图片]]
+[MCDR] [2026-05-09 01:55:57.343] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 上不了
+[MCDR] [2026-05-09 01:56:19.533] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 我姥姥半夜肺炎，紧着送去急诊，输液输了一宿，刚回来
+[MCDR] [2026-05-09 01:56:27.812] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 一宿没睡咋上班
+[MCDR] [2026-05-09 01:58:40.587] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 坏
+[MCDR] [2026-05-09 01:58:52.322] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000>  今天调休
+[MCDR] [2026-05-09 01:58:55.905] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000> 要上班
+[MCDR] [2026-05-09 01:59:09.32] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhRur9v5I-5NmNzukvq2Y20n0L7KWxiZ1AQg_woo96Dh3o2rlAMyBHByb2RQgL2jAVoQQTofodmVNAcsnLyxhgjeJHoCKB-CAQJuag&rkey=CAESMPLpFkkskFtvRMEC4bb54ZOjCs_A0btUvK5wkRAtx6RTJ-cfh1z4RUkm7VKVV7deXg,name=图片]]
+[MCDR] [2026-05-09 01:59:21.460] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000>  那确实是这个重要
+[MCDR] [2026-05-09 02:04:21.395] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot>  我去，不早说
+[MCDR] [2026-05-09 02:06:21.180] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <月光の猫> 有包吗
+[MCDR] [2026-05-09 02:31:58.816] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 我去还真是，今天调休
+[MCDR] [2026-05-09 02:32:15.728] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 那晚上开？
+[MCDR] [2026-05-09 02:32:23.462] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 还没搓
+[MCDR] [2026-05-09 02:32:33.994] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 我在开组会，开完才能动工
+[MCDR] [2026-05-09 02:36:19.954] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 万恶的组会
+[MCDR] [2026-05-09 02:41:41.403] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 我在想要不要搓一个ai门户
+[MCDR] [2026-05-09 02:41:50.973] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 写一堆skills
+[MCDR] [2026-05-09 02:41:57.508] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 规定如何开服
+[MCDR] [2026-05-09 02:42:06.917] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 包括对接mcdr之类的
+[MCDR] [2026-05-09 02:42:23.523] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhQH_N2RzYdinhSexlx7c0zpuRha0hiU0WYg_woo96v4s5erlAMyBHByb2RQgL2jAVoQFYQSU_aeqpanFcXIf3oWVHoCVdWCAQJneg&rkey=CAISMBM0ORFMr4gHg1alQBop90qFXyjnEs43cfLRR4YXkzUqqi-7xfJcKRLEbSSh_ceBqg,name=图片]]
+[MCDR] [2026-05-09 02:42:28.914] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 这样就算群友没学过相关技术也可以想开啥开啥了
+[MCDR] [2026-05-09 02:42:45.594] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <wosihunter> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhQH_N2RzYdinhSexlx7c0zpuRha0hiU0WYg_wooia_JvperlAMyBHByb2RQgL2jAVoQTyhRWQZ6x_EV0o3qqffGv3oCFh2CAQJuag&rkey=CAISMBM0ORFMr4gHg1alQBop90qFXyjnEs43cfLRR4YXkzUqqi-7xfJcKRLEbSSh_ceBqg,name=图片]]
+[MCDR] [2026-05-09 02:44:43.193] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zwt2000> 我觉得可以写n8n工作流
+[MCDR] [2026-05-09 02:46:24.295] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 所以说是晚上开好还是下午开好
+[MCDR] [2026-05-09 02:46:31.759] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 下午开
+[MCDR] [2026-05-09 02:46:37.347] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 开完我下班直接玩
+[MCDR] [2026-05-09 02:47:16.358] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 下午5点差不多吗
+[MCDR] [2026-05-09 02:47:23.538] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> ok
+[MCDR] [2026-05-09 02:47:30.743] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 虽然我是6点下班
+[MCDR] [2026-05-09 02:47:31.372] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 5点或者6点这样吧
+[MCDR] [2026-05-09 02:47:40.100] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 那7点（）
+[MCDR] [2026-05-09 02:47:42.972] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 吃完饭开
+[MCDR] [2026-05-09 02:47:50.716] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 我研究下这个ai门户
+[MCDR] [2026-05-09 02:47:56.741] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 彳亍
+[MCDR] [2026-05-09 02:48:56.356] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> ap难道要试图教会我们吗
+[MCDR] [2026-05-09 02:49:00.102] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhSR8p6ilQcuxTvd32n-x-23iT9efhi8JyD_CiiC553xmKuUAzIEcHJvZFCAvaMBWhCg41uD2ZOCIIqFj84sMlq2egLRcoIBAm5q&rkey=CAISMBM0ORFMr4gHg1alQBop90qFXyjnEs43cfLRR4YXkzUqqi-7xfJcKRLEbSSh_ceBqg,name=图片]]
+[MCDR] [2026-05-09 02:49:10.399] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> ai教会你们
+[MCDR] [2026-05-09 02:49:15.749] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 有skill
+[MCDR] [2026-05-09 02:49:33.496] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> 那太好了
+[MCDR] [2026-05-09 02:49:35.417] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhQH_N2RzYdinhSexlx7c0zpuRha0hiU0WYg_wookJyOgpmrlAMyBHByb2RQgL2jAVoQWucagakFABc3k9zlXkx3unoCVbWCAQJuag&rkey=CAISMBM0ORFMr4gHg1alQBop90qFXyjnEs43cfLRR4YXkzUqqi-7xfJcKRLEbSSh_ceBqg,name=图片]]
+[MCDR] [2026-05-09 02:49:54.191] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Sirin_bot> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhQH_N2RzYdinhSexlx7c0zpuRha0hiU0WYg_woo7NqMi5mrlAMyBHByb2RQgL2jAVoQU4y49PQh_4H4LjtNppcMqXoCMruCAQJneg&rkey=CAISMBM0ORFMr4gHg1alQBop90qFXyjnEs43cfLRR4YXkzUqqi-7xfJcKRLEbSSh_ceBqg,name=图片]]
+[MCDR] [2026-05-09 02:49:54.371] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 效果差不多是丢个服务端甚至说丢个要开的服务端的名字，等一会就部署完了
+[MCDR] [2026-05-09 02:50:03.524] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 简单的整合包（不用下依赖的）直接用n8n整吧
+[MCDR] [2026-05-09 02:50:20.422] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 这玩意顶多就是选一下jdk版本
+[MCDR] [2026-05-09 02:50:32.697] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 然后选择可执行文件
+[MCDR] [2026-05-09 02:50:41.910] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <oolong_coco> ap我爱你
+[MCDR] [2026-05-09 02:50:55.309] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> ai这一块
+[MCDR] [2026-05-09 02:51:17.950] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> 为人民服务这一块
+[MCDR] [2026-05-09 02:51:20.411] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Server> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhQH_N2RzYdinhSexlx7c0zpuRha0hiU0WYg_woooMGOtJmrlAMyBHByb2RQgL2jAVoQ2m2oGpTwC9jAESb_QbOOGnoCTi-CAQJuag&rkey=CAISMBM0ORFMr4gHg1alQBop90qFXyjnEs43cfLRR4YXkzUqqi-7xfJcKRLEbSSh_ceBqg,name=图片]]
+[MCDR] [2026-05-09 02:51:48.933] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx>  我的想法是干脆搭建一个agent应用得了
+[MCDR] [2026-05-09 02:51:55.637] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 也行
+[MCDR] [2026-05-09 02:52:06.358] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 这样直接集成到dify上面
+[MCDR] [2026-05-09 02:52:12.64] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 前端都不用写了
+[MCDR] [2026-05-09 02:52:23.357] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 都不需要集成，直接都是一个可以单独运行的东西
+[MCDR] [2026-05-09 02:52:30.914] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 甚至可以搞到github上，然后炒作一下
+[MCDR] [2026-05-09 02:52:37.456] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 给我搞1000个星星
+[MCDR] [2026-05-09 02:52:38.124] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 还是得集成
+[MCDR] [2026-05-09 02:52:45.956] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 集成了好监控
+[MCDR] [2026-05-09 02:52:52.597] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 然后就可以白嫖ChatGPT的Pro服务了。
+[MCDR] [2026-05-09 02:53:23.873] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 还好mcsm有api文档
+[MCDR] [2026-05-09 02:54:25.47] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 话说
+[MCDR] [2026-05-09 02:54:33.335] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 咱们的mcsm是不是该更新了
+[MCDR] [2026-05-09 02:54:42.515] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 我记得很老了
+[MCDR] [2026-05-09 02:56:44.154] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 是的
+[MCDR] [2026-05-09 02:56:55.788] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 我觉得甚至都可以抛弃mcsm做成独立应用了
+[MCDR] [2026-05-09 02:57:28.832] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 毕竟像生存服这种没有变动需求的服务器很大程度上都不会动了
+[MCDR] [2026-05-09 02:58:07.443] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 是这样
+[MCDR] [2026-05-09 03:00:36.57] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <zyb_1>  给我嫖嫖
+[MCDR] [2026-05-09 03:02:33.51] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <oolong_coco> @Apricityx 给我嫖嫖
+[MCDR] [2026-05-09 03:03:28.672] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 其实咱们现在国产模型已经基本上随便用了
+[MCDR] [2026-05-09 03:03:54.911] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 狠狠蹬ds
+[MCDR] [2026-05-09 03:04:00.775] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> ds还是太便宜了
+[MCDR] [2026-05-09 03:08:03.705] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 直接蹬
+[MCDR] [2026-05-09 03:10:24.134] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 直接炼化群友
+[MCDR] [2026-05-09 03:15:59.256] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> apricityx-skill.md
+[MCDR] [2026-05-09 03:16:06.132] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> enix.md
+[MCDR] [2026-05-09 03:16:23.779] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> [[CICode,url=https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=EhRbBlpc5to2_RbC8J4Gpgo3VxsjSxjy2RIg_woohP_8gJ-rlAMyBHByb2RQgL2jAVoQLF8SyC-kNapLnXDZTgyFNHoCcqyCAQJuag&rkey=CAISMMohHmpem3FI8NuCWyPMuwk2DTGrtiBgxRnMKrkyH5ZlZYRgFuN_aE5cSCdKehfl3Q,name=图片]]
+[MCDR] [2026-05-09 03:16:32.26] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> md，移动给我打电话
+[MCDR] [2026-05-09 03:16:44.659] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Ender> 好不容易睡着了
+[MCDR] [2026-05-09 03:18:35.709] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> astrbot的那个我觉得可以整了
+[MCDR] [2026-05-09 03:18:40.387] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123>  
+[MCDR] [2026-05-09 03:18:42.359] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 怎么说
+[MCDR] [2026-05-09 03:18:53.896] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 现在api自由了
+[MCDR] [2026-05-09 03:20:57.675] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 那个烧的很快哦
+[MCDR] [2026-05-09 03:21:11.23] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 没事
+[MCDR] [2026-05-09 03:21:16.842] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 整就完了
+[MCDR] [2026-05-09 03:21:27.177] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 烧ds就行
+[MCDR] [2026-05-09 03:21:39.895] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 这玩意你烧个10b我都不心疼
+[MCDR] [2026-05-09 03:22:07.950] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 笑死我了
+[MCDR] [2026-05-09 03:22:31.28] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 缓存命中这一块
+[MCDR] [2026-05-09 03:22:42.236] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 得快点搞
+[MCDR] [2026-05-09 03:22:52.522] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 下个月就没有优惠了
+[MCDR] [2026-05-09 03:33:41.157] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123>  怎么说
+[MCDR] [2026-05-09 03:33:46.564] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 🉑
+[MCDR] [2026-05-09 03:33:50.812] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 今日先开服
+[MCDR] [2026-05-09 03:33:51.24] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> ok
+[MCDR] [2026-05-09 03:33:54.790] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 彳亍
+[MCDR] [2026-05-09 03:33:59.935] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> astrbot 后边研究
+[MCDR] [2026-05-09 03:34:03.801] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 我写了一堆需求
+[MCDR] [2026-05-09 03:34:14.955] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 开完会回去就喂给ai让他给我搓门户
+[MCDR] [2026-05-09 03:34:19.685] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 刚看了下技术栈
+[MCDR] [2026-05-09 03:34:26.138] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 等api换到newapi了再整也行
+[MCDR] [2026-05-09 03:34:41.929] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Enix_123> 要不然到时候还得换地址和key
+[MCDR] [2026-05-09 03:43:44.352] [OneBotConnectionThread/INFO] [misc_utils.py:30(print_text_to_console)] [chathub]: §7[QQ Channel] <Apricityx> 那倒也是

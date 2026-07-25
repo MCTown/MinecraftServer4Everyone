@@ -1,0 +1,7 @@
+{
+    "aes_key": "ThisIstheSecret",
+    "name": "模组服",
+    "password": "MCT",
+    "server_hostname": "pve.zwtsvx.xyz",
+    "server_port": 7768
+}

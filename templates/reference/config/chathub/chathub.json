@@ -1,0 +1,19 @@
+{
+    "only_using_as_onebot_server": false,
+    "onebot_server_config": {
+        "ws_url": "localhost",
+        "port": 8080,
+        "access_token": "",
+        "react_qq_group_id": 726315307
+    },
+    "only_using_as_onebot_client": true,
+    "onebot_client_config": {
+        "onebot_server_address": "192.168.31.236",
+        "onebot_server_port": 6700,
+        "onebot_server_path": "/onebot/chathub",
+        "access_token": "",
+        "client_id": "modded2",
+        "broadcast_message_color": "§7"
+    },
+    "general_config": {}
+}

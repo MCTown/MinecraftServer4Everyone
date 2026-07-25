@@ -1,0 +1,4 @@
+[ChatBridge@7080] [2025-08-17 23:43:39] [ChatBridge-MainLoop/INFO]: Connecting to 192.168.31.236:30001
+[ChatBridge@7080] [2025-08-17 23:43:39] [ChatBridge-MainLoop/INFO]: Connected to the server
+[ChatBridge@7080] [2025-08-19 10:13:32] [ChatBridge-MainLoop/WARNING]: Connection closed: Empty content received
+[ChatBridge@7080] [2025-08-19 10:13:32] [ChatBridge-MainLoop/INFO]: Client stopped

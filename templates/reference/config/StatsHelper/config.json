@@ -1,0 +1,12 @@
+{
+    "server_path": "./server",
+    "world_folder": "world",
+    "save_world_on_query": false,
+    "save_world_on_rank": false,
+    "save_world_on_scoreboard": true,
+    "player_name_blacklist": [
+        "^bot.*",
+        "Steve",
+        "Alex"
+    ]
+}

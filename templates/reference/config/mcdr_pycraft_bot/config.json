@@ -1,0 +1,6 @@
+{
+    "address": "127.0.0.1",
+    "port": 25565,
+    "gamemode": null,
+    "name_prefix": "bot_"
+}

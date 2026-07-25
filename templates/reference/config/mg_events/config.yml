@@ -1,0 +1,7 @@
+death_keys_extralist: [command.kill.success.single]
+lang_file:
+  others: [config/mg_events/zh_cn.json]
+  raw: config/mg_events/en_us.json
+set_advancement_color_in_content_raw: true
+use_json5: false
+use_unsafe_mcdr_api_to_load_faster: true

@@ -4,6 +4,11 @@ dist/
 .output/
 .data/
 workspace/
+.idea/
+test-results/
+*.swp
+__pycache__/
+*.pyc
 *.log
 !templates/reference/**/*.log
 .env

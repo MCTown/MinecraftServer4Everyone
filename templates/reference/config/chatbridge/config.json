@@ -1,0 +1,10 @@
+{
+    "aes_key": "ThisIstheSecret",
+    "name": "模组服",
+    "password": "MCT",
+    "server_hostname": "192.168.31.236",
+    "server_port": 30001,
+    "enable": true,
+    "debug": false,
+    "client_to_query_online": null
+}
