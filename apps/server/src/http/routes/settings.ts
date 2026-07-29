@@ -23,7 +23,8 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
       baseUrl: z.string().min(1),
       modelName: z.string().min(1),
       apiKey: z.string().optional(),
-      isDefault: z.boolean().default(false)
+      isDefault: z.boolean().default(false),
+      contextSizeK: z.number().int().min(8).max(2000).optional()
     }), request.body);
     return services.modelService.create(body);
   });
@@ -35,7 +36,8 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
       baseUrl: z.string().optional(),
       modelName: z.string().optional(),
       apiKey: z.string().optional(),
-      isDefault: z.boolean().optional()
+      isDefault: z.boolean().optional(),
+      contextSizeK: z.number().int().min(8).max(2000).optional()
     }), request.body);
     return services.modelService.update(id, body);
   });

@@ -16,6 +16,12 @@ function rowToLog(row: typeof consoleLogs.$inferSelect): ConsoleLogEntry {
   };
 }
 
+function stripInteractivePromptRedraws(text: string) {
+  // MCDReforged's prompt-toolkit redraws its input prompt when stdout is piped.
+  // These empty lines are terminal UI artifacts, not server log output.
+  return text.replace(/(^|\n)>[ \t]*\r?\n(?:[ \t]*\r?\n){2,}[ \t]*/g, "$1");
+}
+
 export class ConsoleLogService {
   clear(serverId: string) {
     getDb().delete(consoleLogs).where(eq(consoleLogs.serverId, serverId)).run();
@@ -23,11 +29,13 @@ export class ConsoleLogService {
   }
 
   append(serverId: string, stream: ConsoleLogEntry["stream"], text: string) {
+    const cleanText = stripInteractivePromptRedraws(text);
+    if (!cleanText) return null;
     const entry: ConsoleLogEntry = {
       id: createId("log"),
       serverId,
       stream,
-      text,
+      text: cleanText,
       createdAt: nowIso()
     };
     getDb().insert(consoleLogs).values(entry).run();

@@ -5,12 +5,14 @@ import type { JavaService } from "../services/javaService.js";
 import type { ModelService } from "../services/modelService.js";
 import type { ProcessManager } from "../services/processManager.js";
 import type { PromptService } from "../services/promptService.js";
+import type { ServerErrorService } from "../services/serverErrorService.js";
 import type { ServerService } from "../services/serverService.js";
 import type { SkillService } from "../services/skillService.js";
 import type { UploadService } from "../services/uploadService.js";
 
 export interface RouteServices {
   serverService: ServerService;
+  serverErrorService: ServerErrorService;
   consoleLogService: ConsoleLogService;
   fileService: FileService;
   processManager: ProcessManager;

@@ -1,0 +1,34 @@
+{
+  "generated": "2026-07-29T00:00:00Z",
+  "sections": [
+    {
+      "id": "mockups",
+      "label": "Mockups",
+      "groups": [
+        {
+          "slug": "agent-console-redesign",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/agent-console-redesign/index.html"
+            }
+          ]
+        },
+        {
+          "slug": "settings-redesign",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/settings-redesign/index.html"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "design-systems",
+      "label": "Design Systems",
+      "groups": []
+    }
+  ]
+}

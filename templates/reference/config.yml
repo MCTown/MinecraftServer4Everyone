@@ -60,9 +60,9 @@ rcon:
 check_update: true
 
 
-# Advance console switch powered by prompt-toolkit
-# Set it to false if you need to redirect the stdin/stdout of MCDR
-advanced_console: true
+# The management UI redirects MCDR stdin/stdout, so prompt-toolkit redraws would
+# otherwise be captured as repeated blank lines in the web console.
+advanced_console: false
 
 
 # ==========================================

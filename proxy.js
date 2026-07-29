@@ -3,9 +3,9 @@ import { createServer } from "node:http";
 import { createProxyServer } from "httpxy";
 
 const host = process.env.PROXY_HOST ?? process.env.HOST ?? "0.0.0.0";
-const port = Number(process.env.PROXY_PORT ?? process.env.PORT ?? 3000);
+const port = Number(process.env.PROXY_PORT ?? process.env.PORT ?? 1143);
 const apiTarget = process.env.PROXY_API_TARGET ?? `http://127.0.0.1:${process.env.APP_PORT ?? 8787}`;
-const webTarget = process.env.PROXY_WEB_TARGET ?? `http://127.0.0.1:${process.env.NUXT_PORT ?? process.env.NITRO_PORT ?? 3001}`;
+const webTarget = process.env.PROXY_WEB_TARGET ?? `http://127.0.0.1:${process.env.NUXT_PORT ?? process.env.NITRO_PORT ?? 3000}`;
 const appPassword = process.env.APP_PASSWORD ?? "ilovemct";
 const secretKey = process.env.APP_SECRET_KEY ?? "dev-secret-change-me";
 

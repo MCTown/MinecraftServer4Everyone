@@ -14,6 +14,8 @@ export function registerServerRoutes(app: FastifyInstance, services: RouteServic
 
   app.get("/api/servers", async () => services.serverService.listServers());
 
+  app.get("/api/server-errors", async () => services.serverErrorService.listStates());
+
   app.post("/api/servers", async (request) => {
     const body = parseBody(z.object({ name: z.string().min(1) }), request.body);
     return services.serverService.createServer(body);
@@ -75,5 +77,24 @@ export function registerServerRoutes(app: FastifyInstance, services: RouteServic
     const { id } = idParams.parse(request.params);
     const query = z.object({ limit: z.coerce.number().optional() }).parse(request.query);
     return services.consoleLogService.list(id, query.limit ?? 300);
+  });
+
+  app.get("/api/servers/:id/errors", async (request) => {
+    const { id } = idParams.parse(request.params);
+    await services.serverService.requireServer(id);
+    return services.serverErrorService.getState(id);
+  });
+
+  app.get("/api/servers/:id/errors/digest", async (request) => {
+    const { id } = idParams.parse(request.params);
+    await services.serverService.requireServer(id);
+    return services.serverErrorService.buildDigest(id);
+  });
+
+  app.post("/api/servers/:id/errors/dismiss", async (request) => {
+    const { id } = idParams.parse(request.params);
+    await services.serverService.requireServer(id);
+    services.serverErrorService.reset(id);
+    return services.serverErrorService.getState(id);
   });
 }

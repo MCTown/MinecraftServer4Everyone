@@ -12,6 +12,11 @@ export function registerAgentRoutes(app: FastifyInstance, services: RouteService
     return services.agentService.listMessages(id);
   });
 
+  app.get("/api/servers/:id/agent/context-usage", async (request) => {
+    const { id } = idParams.parse(request.params);
+    return services.agentService.getContextUsage(id);
+  });
+
   app.post("/api/servers/:id/agent/messages", async (request) => {
     const { id } = idParams.parse(request.params);
     const body = parseBody(z.object({ content: z.string().min(1), reasoningEffort: reasoningEffortSchema }), request.body);

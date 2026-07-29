@@ -3,10 +3,15 @@ export default defineNuxtConfig({
   devtools: { enabled: true },
   devServer: {
     host: process.env.NUXT_HOST ?? "0.0.0.0",
-    port: Number(process.env.NUXT_PORT ?? 3001)
+    port: Number(process.env.NUXT_PORT ?? 3000)
   },
   typescript: { strict: true },
-  css: ["~/assets/css/main.css"],
+  css: [
+    "~/assets/css/components/settings.css",
+    "~/assets/css/components/dialogs.css",
+    "~/assets/css/main.css",
+    "~/assets/css/layout/command-bridge.css"
+  ],
   runtimeConfig: {
     apiBase: process.env.NUXT_API_BASE ?? process.env.NUXT_PUBLIC_API_BASE ?? `http://127.0.0.1:${process.env.APP_PORT ?? 8787}`,
     public: {

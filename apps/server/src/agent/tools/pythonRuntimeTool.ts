@@ -4,20 +4,31 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import extractZip from "extract-zip";
+import { extract as extractTar } from "tar";
 import { fetch } from "undici";
 import { appConfig } from "../../config.js";
 import { fetchDispatcher, proxyEnv } from "../../services/proxySupport.js";
-import { objectSchema, requireConfirmation, type AgentTool, type AgentToolContext, type AgentToolInfo } from "../toolKit.js";
+import { objectSchema, requireConfirmation, stringArrayInput, type AgentTool, type AgentToolContext, type AgentToolInfo } from "../toolKit.js";
 import { spawn } from "node:child_process";
 
-const windowsPythonVersion = "3.12.10";
-const windowsPythonArchiveUrl = `https://www.python.org/ftp/python/${windowsPythonVersion}/python-${windowsPythonVersion}-embed-amd64.zip`;
+const pythonVersion = "3.10.14";
+const pythonBuildRelease = "20240726";
+const windowsPythonArchiveUrl = `https://www.python.org/ftp/python/${pythonVersion}/python-${pythonVersion}-embed-amd64.zip`;
+const linuxPythonArchiveUrl = (architecture: string) =>
+  `https://github.com/astral-sh/python-build-standalone/releases/download/${pythonBuildRelease}/cpython-${pythonVersion}%2B${pythonBuildRelease}-${architecture}-unknown-linux-gnu-install_only.tar.gz`;
 const getPipUrl = "https://bootstrap.pypa.io/get-pip.py";
 let builtinPythonInstallPromise: Promise<string> | null = null;
 
 export const configureBuiltinPythonToolInfo: AgentToolInfo = {
   name: "configure_builtin_python_environment",
-  description: "配置 workspace/python 的内置 Python，并安装 pip 与 MCDReforged。Windows 会下载 embeddable Python；Linux 会用系统 python3 创建 venv。最终验证必须使用工作区 Python，不直接使用系统 Python。",
+  description: "配置 workspace/python 的内置 Python 3.10，并安装 pip 与 MCDReforged。Windows 和 Linux 都会下载独立运行时到工作区；不使用系统 Python、venv 或 ensurepip。",
+  category: "Python 环境",
+  controllable: false
+};
+
+export const installMcdrPluginDependenciesToolInfo: AgentToolInfo = {
+  name: "install_mcdreforged_plugin_dependencies",
+  description: "使用 workspace/python 内置 Python 的 pip 安装 MCDReforged 插件启动日志或 requirements 文件明确声明的 PyPI 依赖；不使用系统 Python。",
   category: "Python 环境",
   controllable: false
 };
@@ -117,16 +128,6 @@ async function ensurePip(ctx: AgentToolContext) {
     ctx.consoleLog?.("内置 pip 不可用，正在安装 pip");
   }
 
-  if (process.platform !== "win32") {
-    await runPython(["-m", "ensurepip", "--upgrade"], appConfig.pythonDir, ctx).catch(() => undefined);
-    try {
-      await runPython(["-m", "pip", "--version"], appConfig.pythonDir, ctx);
-      return;
-    } catch {
-      ctx.consoleLog?.("ensurepip 不可用，改用 get-pip.py 安装 pip");
-    }
-  }
-
   ctx.consoleLog?.(`下载 get-pip.py：${getPipUrl}`);
   await downloadFile(getPipUrl, getPipPath, ctx);
   await runPython([getPipPath, "--no-warn-script-location"], appConfig.pythonDir, ctx);
@@ -135,7 +136,7 @@ async function ensurePip(ctx: AgentToolContext) {
 
 async function installWindowsPython(ctx: AgentToolContext) {
   const tempDir = path.join(appConfig.workspaceRoot, "_python_install");
-  const archivePath = path.join(tempDir, `python-${windowsPythonVersion}-embed-amd64.zip`);
+  const archivePath = path.join(tempDir, `python-${pythonVersion}-embed-amd64.zip`);
   const extractRoot = path.join(tempDir, "extract");
   await rm(tempDir, { recursive: true, force: true });
   await mkdir(tempDir, { recursive: true });
@@ -156,30 +157,34 @@ async function installWindowsPython(ctx: AgentToolContext) {
   return { bootstrapPython: "windows-embeddable" };
 }
 
-async function findLinuxSystemPython(ctx: AgentToolContext) {
-  const candidates = ["python3.12", "python3.11", "python3.10", "python3"];
-  const script = "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')";
-  for (const candidate of candidates) {
-    const output = await runCommand(candidate, ["-c", script], appConfig.workspaceRoot, ctx, `检查 ${candidate} 超时`).catch(() => "");
-    const match = output.match(/(\d+)\.(\d+)/);
-    const major = Number(match?.[1] ?? 0);
-    const minor = Number(match?.[2] ?? 0);
-    if (major === 3 && minor >= 10) return candidate;
-  }
-  throw new Error("Linux 自动配置工作区 Python 需要系统中可执行的 Python 3.10+（python3.10/python3.11/python3.12/python3）。请先安装 Python 和 venv 模块，例如 Debian/Ubuntu: apt install python3 python3-venv。");
-}
-
 async function installLinuxPython(ctx: AgentToolContext) {
-  const systemPython = await findLinuxSystemPython(ctx);
-  ctx.consoleLog?.(`使用 ${systemPython} 创建工作区 Python venv：${appConfig.pythonDir}`);
-  await rm(appConfig.pythonDir, { recursive: true, force: true });
-  await mkdir(appConfig.workspaceRoot, { recursive: true });
-  try {
-    await runCommand(systemPython, ["-m", "venv", appConfig.pythonDir], appConfig.workspaceRoot, ctx, "Linux Python venv 创建超过 10 分钟，已终止");
-  } catch (error) {
-    throw new Error(`创建 Linux 工作区 Python venv 失败。请确认已安装 venv 模块，例如 Debian/Ubuntu: apt install python3-venv。${error instanceof Error ? error.message : String(error)}`);
+  const architecture = process.arch === "x64"
+    ? "x86_64"
+    : process.arch === "arm64"
+      ? "aarch64"
+      : null;
+  if (!architecture) throw new Error(`Linux 内置 Python 仅支持 x64 和 arm64，当前架构为：${process.arch}`);
+
+  const tempDir = path.join(appConfig.workspaceRoot, "_python_install");
+  const archivePath = path.join(tempDir, `cpython-${pythonVersion}-${architecture}.tar.gz`);
+  const extractRoot = path.join(tempDir, "extract");
+  await rm(tempDir, { recursive: true, force: true });
+  await mkdir(extractRoot, { recursive: true });
+  ctx.consoleLog?.(`下载内置 Python ${pythonVersion}：${linuxPythonArchiveUrl(architecture)}`);
+  await downloadFile(linuxPythonArchiveUrl(architecture), archivePath, ctx);
+  await extractTar({ file: archivePath, cwd: extractRoot });
+
+  const extractedPythonDir = path.join(extractRoot, "python");
+  if (!(await exists(path.join(extractedPythonDir, "bin", "python3")))) {
+    throw new Error("内置 Python 解压结果不完整，未找到 python/bin/python3");
   }
-  return { bootstrapPython: systemPython };
+  await rm(appConfig.pythonDir, { recursive: true, force: true });
+  await mkdir(appConfig.pythonDir, { recursive: true });
+  for (const entry of await readdir(extractedPythonDir)) {
+    await rename(path.join(extractedPythonDir, entry), path.join(appConfig.pythonDir, entry));
+  }
+  await rm(tempDir, { recursive: true, force: true });
+  return { bootstrapPython: `python-build-standalone-${pythonVersion}-${architecture}` };
 }
 
 async function configureBuiltinPython(ctx: AgentToolContext) {
@@ -207,6 +212,14 @@ async function configureBuiltinPython(ctx: AgentToolContext) {
   }, null, 2);
 }
 
+function validatePackageSpec(packageSpec: string) {
+  const normalized = packageSpec.trim();
+  if (!normalized || normalized.length > 200 || normalized.startsWith("-") || /[\s@/:\\]/.test(normalized)) {
+    throw new Error(`不安全或无效的 Python 包声明：${packageSpec}`);
+  }
+  return normalized;
+}
+
 export function createConfigureBuiltinPythonTool(ctx: AgentToolContext): AgentTool {
   return {
     definition: {
@@ -222,8 +235,8 @@ export function createConfigureBuiltinPythonTool(ctx: AgentToolContext): AgentTo
       await requireConfirmation(ctx, {
         title: "安装并配置内置 Python",
         description: process.platform === "win32"
-          ? `Agent 准备下载 Python ${windowsPythonVersion} 到应用工作区 ${appConfig.pythonDir}，安装 pip 与 MCDReforged，并确保最终验证使用工作区 Python。`
-          : `Agent 准备使用系统 python3 在应用工作区 ${appConfig.pythonDir} 创建 venv，安装 pip 与 MCDReforged，并确保最终验证使用工作区 Python。`,
+          ? `Agent 准备下载独立 Python ${pythonVersion} 到应用工作区 ${appConfig.pythonDir}，安装 pip 与 MCDReforged；不会使用或修改系统 Python。`
+          : `Agent 准备下载独立 Python ${pythonVersion} 到应用工作区 ${appConfig.pythonDir}，安装 pip 与 MCDReforged；不会使用或修改系统 Python。`,
         risk: "high"
       });
 
@@ -235,6 +248,46 @@ export function createConfigureBuiltinPythonTool(ctx: AgentToolContext): AgentTo
         builtinPythonInstallPromise = null;
       });
       return builtinPythonInstallPromise;
+    }
+  };
+}
+
+export function createInstallMcdrPluginDependenciesTool(ctx: AgentToolContext): AgentTool {
+  return {
+    definition: {
+      type: "function",
+      function: {
+        name: installMcdrPluginDependenciesToolInfo.name,
+        description: installMcdrPluginDependenciesToolInfo.description,
+        parameters: objectSchema({
+          packages: {
+            type: "array",
+            items: { type: "string" },
+            description: "需要安装的 PyPI 包名或带版本约束的包声明，例如 [\"ruamel.yaml\", \"requests>=2.31\"]。仅填写日志或 requirements 明确指出的依赖。"
+          }
+        }, ["packages"])
+      }
+    },
+    execute: async (input) => {
+      const packages = [...new Set(stringArrayInput(input, "packages").map(validatePackageSpec))];
+      if (packages.length === 0) throw new Error("至少提供一个从插件日志或 requirements 文件确认的 Python 依赖");
+      if (!(await exists(pythonExecutable()))) {
+        throw new Error("内置 Python 不存在。请先调用 configure_builtin_python_environment，禁止使用系统 Python 安装插件依赖。");
+      }
+
+      await requireConfirmation(ctx, {
+        title: "安装 MCDReforged 插件依赖",
+        description: `Agent 准备通过应用内置 Python 的 pip 从 PyPI 安装：${packages.join(", ")}。仅影响 workspace/python，不使用系统 Python。`,
+        risk: "medium"
+      });
+      await ensurePip(ctx);
+      const output = await runPython(["-m", "pip", "install", ...packages], appConfig.pythonDir, ctx);
+      return JSON.stringify({
+        pythonPath: pythonExecutable(),
+        packages,
+        output: output.trim() || "依赖安装完成",
+        systemPythonUsed: false
+      }, null, 2);
     }
   };
 }

@@ -1,0 +1,245 @@
+.management-dialog { width: min(64rem, calc(100vw - 2rem)); max-height: min(46rem, calc(100dvh - 2rem)); display: flex; flex-direction: column; gap: 0.75rem; }
+.files-dialog { height: min(46rem, calc(100dvh - 2rem)); }
+.config-dialog { width: min(38rem, calc(100vw - 2rem)); overflow: auto; border-color: rgba(229, 169, 0, 0.44); }
+.config-field { border: 1px solid rgba(229, 169, 0, 0.18); border-radius: 0.8rem; background: rgba(229, 169, 0, 0.035); padding: 0.72rem; }
+.memory-config-panel { display: grid; gap: 0.62rem; }
+.memory-config-head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8rem, 10rem); align-items: center; gap: 0.65rem; }
+.memory-config-head strong { font-size: 1.25rem; }
+.memory-slider { padding-inline: 0; accent-color: var(--cyan); }
+.memory-range-labels { justify-content: space-between; }
+.startup-command-input { min-height: 5.6rem; font-family: "IBM Plex Mono", "PingFang SC", "Microsoft YaHei", monospace; resize: vertical; }
+.file-toolbar { flex-wrap: nowrap; }
+.file-toolbar input { flex: 1; }
+.empty-row { display: block; }
+
+/* ── 新建 dropdown ── */
+.new-dropdown { position: relative; flex-shrink: 0; }
+.new-dropdown-backdrop { position: fixed; inset: 0; z-index: 19; }
+.new-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.3rem);
+  left: 0;
+  z-index: 20;
+  min-width: 10rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.new-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--text);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.new-dropdown-item:hover { background: rgba(255, 255, 255, 0.07); box-shadow: none; }
+.new-dropdown-icon { transform: scale(0.65); transform-origin: left center; flex-shrink: 0; border: none !important; background: transparent !important; box-shadow: none !important; }
+
+/* ── 内联新建弹窗 ── */
+.create-name-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 6, 5, 0.65);
+  backdrop-filter: blur(6px);
+  border-radius: inherit;
+}
+.create-name-dialog {
+  width: min(22rem, calc(100% - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-color: rgba(229, 169, 0, 0.44);
+}
+
+/* ── Windows Explorer Details-view layout ── */
+
+/* Outer pane: stacks header + scrollable list, fills remaining card space */
+.file-list-pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  /* reserve scrollbar gutter on the pane so header width matches the list */
+  scrollbar-gutter: stable;
+}
+
+/* Column grid token shared by header + all rows: checkbox | name | type | size | actions */
+.file-list-header,
+.dialog-file-list .file-row {
+  --explorer-cols: 1.75rem 1fr 7.5rem 5.5rem;
+}
+
+/* Column header row — sits above the scroll area, no gap */
+.file-list-header {
+  display: grid;
+  grid-template-columns: var(--explorer-cols);
+  align-items: center;
+  padding: 0 0.5rem;
+  height: 1.65rem;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 0.72rem;
+  color: var(--muted-strong);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  user-select: none;
+}
+
+/* Scrollable rows container */
+.dialog-file-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: grid;
+  align-content: start;
+  gap: 0;
+  padding-right: 0;
+  /* scrollbar-gutter: stable already reserves space on parent .file-list-pane */
+}
+
+/* Flatten every row inside the dialog file list */
+.dialog-file-list .file-row {
+  display: grid;
+  grid-template-columns: var(--explorer-cols);
+  height: 2.05rem;
+  min-height: 0;
+  border-radius: 0 !important;
+  border: none !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.038) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 0.5rem !important;
+  gap: 0 !important;
+  transform: none !important;
+  transition: background 80ms ease !important;
+}
+.dialog-file-list .file-row:hover:not(.file-loading-row):not(.empty-row) {
+  background: rgba(255, 255, 255, 0.055) !important;
+}
+
+/* Selected row: full-width solid highlight, no left-strip trick */
+.dialog-file-list .dialog-file-row.selected {
+  background: rgba(229, 169, 0, 0.15) !important;
+  border-bottom-color: rgba(229, 169, 0, 0.18) !important;
+}
+.dialog-file-list .dialog-file-row.selected:hover {
+  background: rgba(229, 169, 0, 0.2) !important;
+}
+.dialog-file-list .dialog-file-row:focus-visible {
+  outline: 2px solid rgba(229, 169, 0, 0.55) !important;
+  outline-offset: -2px !important;
+  background: rgba(229, 169, 0, 0.1) !important;
+}
+
+/* Loading / empty rows span full width */
+.dialog-file-list .file-loading-row,
+.dialog-file-list .empty-row {
+  grid-template-columns: 1fr !important;
+  justify-items: center;
+  gap: 0.55rem !important;
+}
+.dialog-file-list .file-loading-row { grid-template-columns: auto 1fr !important; justify-items: start; }
+
+/* Column cells */
+.file-col-name {
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-width: 0;
+  overflow: hidden;
+  padding-right: 0.5rem;
+}
+.file-col-name > span:last-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-col-type {
+  display: flex;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--muted-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 0.4rem;
+}
+.file-col-size {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding-right: 0.6rem;
+  font-variant-numeric: tabular-nums;
+}
+.file-col-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.file-col-check-placeholder { display: flex; align-items: center; }
+
+/* file-open button fills the name column */
+.dialog-file-list .file-open {
+  min-height: unset;
+  height: 100%;
+  padding: 0;
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  text-align: left;
+  font-size: inherit;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-width: 0;
+  overflow: hidden;
+}
+.dialog-file-list .file-open:hover { color: var(--blue); }
+.dialog-file-list .file-open > span:last-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Scale icons down to fit compact rows */
+.dialog-file-list .file-icon {
+  flex-shrink: 0;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: scale(0.65);
+  transform-origin: left center;
+}
+
+/* checkbox stays vertically centred */
+.dialog-file-list .file-check {
+  align-self: center;
+}
+.modal-backdrop { position: fixed; inset: 0; z-index: 30; display: grid; place-items: center; padding: 1rem; background: rgba(8, 6, 5, 0.72); backdrop-filter: blur(10px); }
+.confirmation-dialog, .create-dialog, .delete-dialog, .editor-dialog { width: min(43rem, 100%); border-color: rgba(229, 169, 0, 0.56); }
+.delete-dialog { border-color: rgba(219, 102, 86, 0.6); }
+.path-preview { display: block; overflow: auto; border: 1px solid rgba(219, 102, 86, 0.28); border-radius: 0.62rem; background: rgba(219, 102, 86, 0.07); color: #f5c4bc; padding: 0.75rem; font-family: "IBM Plex Mono", "PingFang SC", "Microsoft YaHei", monospace; white-space: nowrap; }
+.danger-note { margin: 0; border: 1px solid rgba(219, 102, 86, 0.32); border-radius: 0.62rem; background: rgba(219, 102, 86, 0.08); color: #f5c4bc; padding: 0.7rem; }
+.editor-dialog { height: min(43rem, calc(100dvh - 2rem)); display: flex; flex-direction: column; }
+.code-editor { flex: 1; min-height: 0; overflow: hidden; border: 1px solid rgba(229, 169, 0, 0.22); border-radius: 0.55rem; background: rgba(0, 0, 0, 0.28); }
+.code-editor .cm-host, .code-editor .cm-editor, .cm-host { height: 100%; min-height: 0; }

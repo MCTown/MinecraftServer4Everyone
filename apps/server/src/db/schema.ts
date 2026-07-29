@@ -37,6 +37,7 @@ export const modelConfigs = sqliteTable("model_configs", {
   encryptedApiKey: text("encrypted_api_key").notNull(),
   apiKeyHint: text("api_key_hint").notNull(),
   isDefault: integer("is_default").notNull(),
+  contextSizeK: integer("context_size_k").notNull().default(120),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull()
 });

@@ -10,7 +10,9 @@ export function registerWebSocketRoutes(app: FastifyInstance, services: RouteSer
     const { id } = idParams.parse(request.params);
     const send = (payload: unknown) => connection.send(JSON.stringify(payload));
 
-    services.consoleLogService.list(id).forEach((entry) => send({ type: "log", entry }));
+    // Snapshot once on connect; live events use type "log". Avoid replaying history as individual log events.
+    send({ type: "snapshot", entries: services.consoleLogService.list(id) });
+    send({ type: "error_state", errorState: services.serverErrorService.getState(id) });
     const onLog = (entry: { serverId: string }) => {
       if (entry.serverId === id) send({ type: "log", entry });
     };
@@ -20,10 +22,14 @@ export function registerWebSocketRoutes(app: FastifyInstance, services: RouteSer
     const onStatus = (payload: { serverId: string; status: string }) => {
       if (payload.serverId === id) send({ type: "status", ...payload });
     };
+    const onErrorState = (payload: { serverId: string }) => {
+      if (payload.serverId === id) send({ type: "error_state", errorState: payload });
+    };
 
     eventBus.on("console", onLog);
     eventBus.on("consoleClear", onClear);
     eventBus.on("serverStatus", onStatus);
+    eventBus.on("serverError", onErrorState);
 
     connection.on("message", (raw: { toString(): string }) => {
       let message: { type?: string; command?: string };

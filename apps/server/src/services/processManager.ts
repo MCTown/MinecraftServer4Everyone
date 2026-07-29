@@ -589,7 +589,18 @@ export class ProcessManager {
         activeScriptName = customScript;
         launch = this.scriptCommand(customScript);
       } else {
-        const bundledScript = await this.findStartupScript(server, server.directory) ?? await this.findStartupScript(server, minecraftDirectory);
+        // MCDR layout (config.yml + server/): prefer scripts under server/ so root run.sh
+        // from a mistaken Forge install cannot bypass the intended Minecraft directory.
+        const hasMcdrLayout = await access(path.join(server.directory, "config.yml")).then(() => true).catch(() => false)
+          && await access(minecraftDirectory).then(() => true).catch(() => false);
+        if (hasMcdrLayout) {
+          generatedWorkingDirectory = minecraftDirectory;
+          fallbackWorkingDirectory = minecraftDirectory;
+          fallbackArgs = javaArgs;
+        }
+        const bundledScript = hasMcdrLayout
+          ? await this.findStartupScript(server, minecraftDirectory) ?? await this.findStartupScript(server, server.directory)
+          : await this.findStartupScript(server, server.directory) ?? await this.findStartupScript(server, minecraftDirectory);
         if (bundledScript) {
           await this.syncStartupScriptMemory(bundledScript.workingDirectory, bundledScript.scriptName, minMemory, maxMemory);
           activeScriptName = bundledScript.displayName;
@@ -603,19 +614,29 @@ export class ProcessManager {
           const nestedJarPath = path.isAbsolute(jarFile) ? jarFile : path.join(minecraftDirectory, jarFile);
           const rootJarExists = await access(rootJarPath).then(() => true).catch(() => false);
           const nestedJarExists = await access(nestedJarPath).then(() => true).catch(() => false);
-          if (rootJarExists) {
+          if (nestedJarExists || (hasMcdrLayout && rootJarExists)) {
+            // Prefer server/ under MCDR layout; if jar only exists at root, still use it as last resort.
+            const useNested = nestedJarExists;
+            generatedWorkingDirectory = useNested ? minecraftDirectory : server.directory;
+            generatedArgs = useNested && jarFile
+              ? [...memoryArgs, ...proxyArgs, "-jar", path.basename(jarFile), ...startArgs]
+              : javaArgs;
+            fallbackWorkingDirectory = generatedWorkingDirectory;
+            fallbackArgs = generatedArgs;
+          } else if (rootJarExists && !hasMcdrLayout) {
             generatedWorkingDirectory = server.directory;
             generatedArgs = javaArgs;
-          } else if (nestedJarExists) {
-            generatedWorkingDirectory = minecraftDirectory;
-            generatedArgs = jarFile
-              ? [...memoryArgs, ...proxyArgs, "-jar", path.basename(jarFile), ...startArgs]
-              : [...memoryArgs, ...proxyArgs, ...startArgs];
           } else {
             throw new Error(`Cannot find jar file: ${jarFile}. Checked ${rootJarPath} and ${nestedJarPath}`);
           }
         } else if (!launch && startArgs.length === 0) {
           throw new Error("Cannot start server: jarFile is empty and startArgs is empty");
+        } else if (!launch && hasMcdrLayout && startArgs.length > 0) {
+          // Forge @libraries/.../unix_args.txt style: args are relative to Minecraft dir (server/).
+          generatedWorkingDirectory = minecraftDirectory;
+          generatedArgs = javaArgs;
+          fallbackWorkingDirectory = minecraftDirectory;
+          fallbackArgs = javaArgs;
         }
 
         if (!launch) {

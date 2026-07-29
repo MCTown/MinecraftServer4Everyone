@@ -1,10 +1,11 @@
 import { EventEmitter } from "node:events";
-import type { AgentEvent, ConsoleLogEntry, ServerRecord } from "../types.js";
+import type { AgentEvent, ConsoleLogEntry, ServerErrorState, ServerRecord } from "../types.js";
 
 export interface AppEvents {
   console: [ConsoleLogEntry];
   consoleClear: [{ serverId: string }];
   serverStatus: [{ serverId: string; status: ServerRecord["status"] }];
+  serverError: [ServerErrorState];
   agent: [{ serverId: string; event: AgentEvent }];
 }
 

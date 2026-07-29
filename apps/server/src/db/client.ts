@@ -50,6 +50,7 @@ export function initDatabase() {
       encrypted_api_key TEXT NOT NULL,
       api_key_hint TEXT NOT NULL,
       is_default INTEGER NOT NULL,
+      context_size_k INTEGER NOT NULL DEFAULT 120,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -96,6 +97,11 @@ export function initDatabase() {
   const serverColumns = sqlite.prepare("PRAGMA table_info(servers)").all() as Array<{ name: string }>;
   if (!serverColumns.some((column) => column.name === "startup_command")) {
     sqlite.exec("ALTER TABLE servers ADD COLUMN startup_command TEXT");
+  }
+
+  const modelColumns = sqlite.prepare("PRAGMA table_info(model_configs)").all() as Array<{ name: string }>;
+  if (!modelColumns.some((column) => column.name === "context_size_k")) {
+    sqlite.exec("ALTER TABLE model_configs ADD COLUMN context_size_k INTEGER NOT NULL DEFAULT 120");
   }
 
   database = drizzle(sqlite, { schema });

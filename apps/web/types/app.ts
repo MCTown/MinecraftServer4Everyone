@@ -39,6 +39,28 @@ export interface ConsoleLogEntry {
   createdAt: string;
 }
 
+export type ServerErrorLevel = "error" | "fatal";
+
+export interface ServerErrorState {
+  serverId: string;
+  hasError: boolean;
+  level: ServerErrorLevel | null;
+  count: number;
+  latestText: string;
+  firstAt: string | null;
+  lastAt: string | null;
+}
+
+export interface ServerErrorDigest {
+  serverId: string;
+  hasError: boolean;
+  level: ServerErrorLevel | null;
+  errorLineCount: number;
+  truncated: boolean;
+  excerpt: string;
+  prompt: string;
+}
+
 export interface AgentMessage {
   id: string;
   serverId: string;
@@ -157,6 +179,16 @@ export interface ModelConfig {
   modelName: string;
   apiKeyHint: string;
   isDefault: boolean;
+  contextSizeK: number;
+}
+
+export interface AgentContextUsage {
+  contextSizeK: number;
+  maxTokens: number;
+  usedTokens: number;
+  remainingTokens: number;
+  remainingRatio: number;
+  remainingPercent: number;
 }
 
 export interface SkillRecord {

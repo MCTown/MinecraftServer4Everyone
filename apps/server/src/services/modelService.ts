@@ -6,12 +6,32 @@ import { nowIso } from "../utils/time.js";
 
 const singletonModelId = "default_model";
 
+export const DEFAULT_MODEL_CONTEXT_SIZE_K = 120;
+export const MIN_MODEL_CONTEXT_SIZE_K = 8;
+export const MAX_MODEL_CONTEXT_SIZE_K = 2000;
+
 export interface ModelInput {
   displayName?: string;
   baseUrl?: string;
   modelName?: string;
   apiKey?: string;
   isDefault?: boolean;
+  contextSizeK?: number;
+}
+
+export interface ModelContextUsage {
+  contextSizeK: number;
+  maxTokens: number;
+  usedTokens: number;
+  remainingTokens: number;
+  remainingRatio: number;
+  remainingPercent: number;
+}
+
+export function normalizeContextSizeK(value: unknown, fallback = DEFAULT_MODEL_CONTEXT_SIZE_K) {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.min(MAX_MODEL_CONTEXT_SIZE_K, Math.max(MIN_MODEL_CONTEXT_SIZE_K, Math.round(numeric)));
 }
 
 export interface ChatMessageInput {
@@ -77,6 +97,7 @@ function keyHint(apiKey: string) {
 }
 
 function publicModel(row: typeof modelConfigs.$inferSelect) {
+  const contextSizeK = normalizeContextSizeK(row.contextSizeK);
   return {
     id: row.id,
     displayName: row.displayName,
@@ -84,6 +105,7 @@ function publicModel(row: typeof modelConfigs.$inferSelect) {
     modelName: row.modelName,
     apiKeyHint: row.apiKeyHint,
     isDefault: Boolean(row.isDefault),
+    contextSizeK,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
@@ -115,8 +137,18 @@ export class ModelService {
       displayName: row.displayName,
       baseUrl: normalizeOpenAiBaseUrl(row.baseUrl),
       modelName: row.modelName,
-      apiKey: decryptSecret(row.encryptedApiKey)
+      apiKey: decryptSecret(row.encryptedApiKey),
+      contextSizeK: normalizeContextSizeK(row.contextSizeK)
     };
+  }
+
+  getContextSizeK() {
+    const row = this.getDefaultRaw();
+    return normalizeContextSizeK(row?.contextSizeK);
+  }
+
+  getContextMaxTokens() {
+    return this.getContextSizeK() * 1000;
   }
 
   create(input: ModelInput) {
@@ -185,15 +217,22 @@ export class ModelService {
 
   async chatCompletionStream(input: ChatCompletionRequest, onDelta: (delta: string) => void) {
     const request = this.buildChatRequest(input);
-    const response = await fetch(`${request.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "authorization": `Bearer ${request.apiKey}`,
-        "content-type": "application/json"
-      },
-      signal: input.signal,
-      body: JSON.stringify({ ...request.body, stream: true })
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${request.baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "authorization": `Bearer ${request.apiKey}`,
+          "content-type": "application/json"
+        },
+        signal: input.signal,
+        body: JSON.stringify({ ...request.body, stream: true })
+      });
+    } catch (error) {
+      if (error instanceof Error && (error.name === "AbortError" || error.message === "Agent 操作已中断")) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new ModelRemoteError(`模型接口请求失败：${message}`);
+    }
     if (!response.ok || !response.body) {
       const text = await response.text();
       let data: unknown;
@@ -202,7 +241,7 @@ export class ModelService {
       } catch {
         data = null;
       }
-      throw new Error(this.extractProviderError(data) ?? `HTTP ${response.status} ${response.statusText}: ${text.slice(0, 300)}`);
+      throw new ModelRemoteError(this.extractProviderError(data) ?? `HTTP ${response.status} ${response.statusText}: ${text.slice(0, 300)}`);
     }
     return this.readChatStream(response.body, onDelta, input.signal);
   }
@@ -267,18 +306,18 @@ export class ModelService {
     };
   }
 
-  private extractContent(content: unknown) {
-    if (typeof content === "string") return content.trim();
+  private extractContent(content: unknown, trim = true) {
+    if (typeof content === "string") return trim ? content.trim() : content;
     if (!Array.isArray(content)) return "";
-    return content
+    const text = content
       .map((part) => {
         if (typeof part === "string") return part;
         if (!part || typeof part !== "object") return "";
         const text = (part as { text?: unknown }).text;
         return typeof text === "string" ? text : "";
       })
-      .join("")
-      .trim();
+      .join("");
+    return trim ? text.trim() : text;
   }
 
   private extractToolCalls(message: object) {
@@ -416,17 +455,19 @@ export class ModelService {
       }
     }
     return {
-      content: this.extractContent(content),
-      reasoning: this.extractReasoning(delta),
+      // Stream chunks may begin or end with whitespace. Trimming per chunk
+      // corrupts prose, Markdown, and reasoning when the chunks are joined.
+      content: this.extractContent(content, false),
+      reasoning: this.extractReasoning(delta, false),
       toolCalls
     };
   }
 
-  private extractReasoning(message: object) {
+  private extractReasoning(message: object, trim = true) {
     for (const key of ["reasoning", "reasoning_content", "reasoning_text"] as const) {
       if (key in message) {
         const value = (message as Record<string, unknown>)[key];
-        if (typeof value === "string") return value.trim();
+        if (typeof value === "string") return trim ? value.trim() : value;
       }
     }
     return "";
@@ -497,6 +538,9 @@ export class ModelService {
     const baseUrl = input.baseUrl !== undefined ? normalizeOpenAiBaseUrl(input.baseUrl) : existing?.baseUrl;
     const modelName = input.modelName ?? existing?.modelName;
     const apiKey = input.apiKey || (existing ? decryptSecret(existing.encryptedApiKey) : "");
+    const contextSizeK = input.contextSizeK !== undefined
+      ? normalizeContextSizeK(input.contextSizeK)
+      : normalizeContextSizeK(existing?.contextSizeK);
     if (!displayName || !baseUrl || !modelName || !apiKey) {
       throw new Error("Missing model connection fields");
     }
@@ -508,6 +552,7 @@ export class ModelService {
       encryptedApiKey: encryptSecret(apiKey),
       apiKeyHint: keyHint(apiKey),
       isDefault: 1,
+      contextSizeK,
       createdAt: existing?.createdAt ?? now,
       updatedAt: now
     };

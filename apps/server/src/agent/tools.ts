@@ -5,10 +5,14 @@ import { fetch } from "undici";
 import { appConfig } from "../config.js";
 import { createDownloadHttpsFileToServerTool } from "./tools/downloadHttpsFileTool.js";
 import { createInstallJavaVersionTool } from "./tools/javaDownloadTool.js";
-import { createConfigureBuiltinPythonTool } from "./tools/pythonRuntimeTool.js";
+import { createConfigureBuiltinPythonTool, createInstallMcdrPluginDependenciesTool } from "./tools/pythonRuntimeTool.js";
+import { createWebSearchTool } from "./tools/webSearchTool.js";
+import { createDeployMrpackServerTool, createInspectMrpackServerTool } from "./tools/mrpackDeploymentTool.js";
+import { createDisableClientOnlyServerModsTool, createDisableServerModsTool, createInspectClientOnlyServerModsTool } from "./tools/clientOnlyModsTool.js";
 import { booleanInput, installableCapabilities, isAbortError, objectSchema, requireConfirmation, safeDownloadName, stringArrayInput, stringInput, stringProperty, type AgentCapabilityId, type AgentTool, type AgentToolContext } from "./toolKit.js";
 import { createId } from "../utils/id.js";
 import type { AgentDownloadProgress } from "../types.js";
+import type { CurseForgeManifestSlotInfo } from "../services/fileService.js";
 import { fetchDispatcher, isJavaExecutable, javaProxyArgs, proxyEnv } from "../services/proxySupport.js";
 
 export type { AgentCapabilityId, AgentTool } from "./toolKit.js";
@@ -365,6 +369,224 @@ async function fetchCurseForgeDownloadUrl(ctx: AgentToolContext, modId: string, 
   }
 }
 
+interface CurseForgeManifestMod {
+  projectId: string;
+  fileId: string;
+  fileName: string;
+  projectName: string;
+  downloadUrl: string;
+}
+
+function manifestSummary(manifest: CurseForgeManifestSlotInfo) {
+  return {
+    name: manifest.name,
+    version: manifest.version,
+    minecraftVersion: manifest.minecraftVersion,
+    loaders: manifest.loaders,
+    requiredModCount: manifest.files.filter((file) => file.required).length,
+    optionalModCount: manifest.files.filter((file) => !file.required).length,
+    overridesPath: manifest.overridesPath,
+    slotFileName: manifest.slot.fileName
+  };
+}
+
+function parseForgeLoaderVersion(loaders: string[]) {
+  const loader = loaders.find((item) => /^forge-/i.test(item));
+  if (!loader) return "";
+  const version = loader.slice("forge-".length).trim();
+  return /^\d+(?:\.\d+){1,3}(?:[-+][a-zA-Z0-9.-]+)?$/.test(version) ? version : "";
+}
+
+function forgeInstallerUrl(minecraftVersion: string, forgeVersion: string) {
+  const coordinate = `${minecraftVersion}-${forgeVersion}`;
+  return `https://maven.minecraftforge.net/net/minecraftforge/forge/${encodeURIComponent(coordinate)}/forge-${encodeURIComponent(coordinate)}-installer.jar`;
+}
+
+async function preflightCurseForgeManifestMods(ctx: AgentToolContext, manifest: CurseForgeManifestSlotInfo) {
+  const requiredFiles = manifest.files.filter((file) => file.required);
+  const mods: CurseForgeManifestMod[] = [];
+  const seenNames = new Set<string>();
+  for (const entry of requiredFiles) {
+    const response = await fetchCurseForgeJson(ctx, `/mods/${entry.projectId}/files/${entry.fileId}`, {}, "install_curseforge_manifest_pack_from_server_slot") as JsonRecord;
+    const file = response.data;
+    if (!file || typeof file !== "object" || Array.isArray(file)) {
+      throw new Error(`CurseForge 未返回清单模组 ${entry.projectId}/${entry.fileId} 的文件信息`);
+    }
+    const fileRecord = file as JsonRecord;
+    const fileName = path.basename(stringField(fileRecord.fileName) || stringField(fileRecord.displayName));
+    if (!fileName.toLowerCase().endsWith(".jar")) {
+      throw new Error(`清单模组 ${entry.projectId}/${entry.fileId} 不是 .jar 文件：${fileName || "未知文件名"}`);
+    }
+    const safeFileName = fileName.replace(/[<>:"/\\|?*]/g, "_");
+    if (seenNames.has(safeFileName.toLowerCase())) {
+      throw new Error(`清单中存在会写入同一文件名的模组：${safeFileName}`);
+    }
+    seenNames.add(safeFileName.toLowerCase());
+    mods.push({
+      projectId: entry.projectId,
+      fileId: entry.fileId,
+      fileName: safeFileName,
+      projectName: stringField(fileRecord.displayName) || entry.projectId,
+      downloadUrl: normalizeCurseForgeDownloadUrl(
+        await fetchCurseForgeDownloadUrl(ctx, entry.projectId, entry.fileId, safeFileName, stringField(fileRecord.downloadUrl), "install_curseforge_manifest_pack_from_server_slot"),
+        entry.fileId,
+        safeFileName
+      )
+    });
+  }
+  return mods;
+}
+
+async function downloadCurseForgeManifestMods(ctx: AgentToolContext, mods: CurseForgeManifestMod[]) {
+  const server = await ctx.serverService.requireServer(ctx.serverId);
+  const paths = mods.map((mod) => path.join("server", "mods", mod.fileName));
+  for (const destinationPath of paths) {
+    if (await pathExists(path.join(server.directory, destinationPath))) {
+      throw new Error(`目标文件已存在，拒绝覆盖：${destinationPath}`);
+    }
+  }
+
+  const downloadedPaths: string[] = [];
+  for (const [index, mod] of mods.entries()) {
+    const destinationPath = path.join("server", "mods", mod.fileName);
+    const downloadId = createId("download");
+    const emitProgress = (progress: Omit<AgentDownloadProgress, "id" | "url" | "fileName" | "destinationPath">) => {
+      ctx.progress?.({ id: downloadId, url: mod.downloadUrl, fileName: mod.fileName, destinationPath, ...progress });
+    };
+    emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: "starting" });
+    try {
+      downloadedPaths.push(await ctx.fileService.downloadIntoServer(ctx.serverId, mod.downloadUrl, destinationPath, {
+        signal: ctx.signal,
+        proxyUrl: ctx.downloadProxyUrl?.(),
+        onProgress: (progress) => emitProgress({ ...progress, status: progress.percent >= 100 ? "completed" : "downloading" })
+      }));
+      ctx.workflowProgress?.({
+        title: "CurseForge 清单包还原",
+        currentStepId: "extract_to_workspace",
+        overallProgress: clampPercent(300 / workflowSteps.length + ((index + 1) / Math.max(mods.length, 1)) * 100 / workflowSteps.length),
+        status: index + 1 === mods.length ? "completed" : "running",
+        steps: workflowSteps.map((step, stepIndex) => ({
+          ...step,
+          status: stepIndex < 3 ? "completed" : stepIndex === 3 ? index + 1 === mods.length ? "completed" : "running" : "pending",
+          progress: stepIndex < 3 ? 100 : stepIndex === 3 ? Math.round(((index + 1) / Math.max(mods.length, 1)) * 100) : 0,
+          detail: stepIndex === 3 ? `正在下载模组 ${index + 1}/${mods.length}: ${mod.fileName}` : ""
+        }))
+      });
+    } catch (error) {
+      emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: isAbortError(error) ? "cancelled" : "failed", error: error instanceof Error ? error.message : String(error) });
+      throw new Error(`下载清单模组 ${index + 1}/${mods.length} 失败；已成功下载 ${downloadedPaths.length} 个模组。${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  return downloadedPaths;
+}
+
+function normalizeCurseForgeSearchText(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/\b3rd\b/g, "third")
+    .replace(/\b2nd\b/g, "second")
+    .replace(/\b1st\b/g, "first")
+    .replace(/\bed\.\b/g, "edition")
+    .replace(/[^a-z0-9\u4e00-\u9fff]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function curseForgeSearchTokens(value: string) {
+  return normalizeCurseForgeSearchText(value).split(" ").filter((token) => token.length > 1);
+}
+
+function isCurseForgeSlugCandidate(value: string) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)+$/i.test(value.trim());
+}
+
+function extractCurseForgeSlugHint(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const urlMatch = trimmed.match(/curseforge\.com\/minecraft\/(?:modpacks|mc-mods|mods)\/([a-z0-9-]+)/i);
+  if (urlMatch?.[1]) return urlMatch[1].toLowerCase();
+  if (isCurseForgeSlugCandidate(trimmed)) return trimmed.toLowerCase();
+  return "";
+}
+
+function scoreCurseForgeProject(project: JsonRecord, searchQuery: string) {
+  const normalizedQuery = normalizeCurseForgeSearchText(searchQuery);
+  const queryTokens = curseForgeSearchTokens(searchQuery);
+  const slug = stringField(project.slug).toLowerCase();
+  const name = stringField(project.name);
+  const normalizedName = normalizeCurseForgeSearchText(name);
+  const normalizedSlug = normalizeCurseForgeSearchText(slug.replace(/-/g, " "));
+  const downloadCount = numberField(project.downloadCount);
+  let score = Math.log10(Math.max(downloadCount, 1)) * 8;
+
+  if (slug === searchQuery.trim().toLowerCase()) score += 1000;
+  if (normalizedName === normalizedQuery || normalizedSlug === normalizedQuery) score += 500;
+  if (normalizedName.includes(normalizedQuery) && normalizedQuery.length >= 6) score += 200;
+  if (normalizedSlug.includes(normalizedQuery) && normalizedQuery.length >= 6) score += 180;
+  if (normalizedQuery && (normalizedName.startsWith(normalizedQuery) || normalizedSlug.startsWith(normalizedQuery))) score += 80;
+
+  const nameTokens = new Set([...curseForgeSearchTokens(name), ...curseForgeSearchTokens(slug.replace(/-/g, " "))]);
+  let matched = 0;
+  for (const token of queryTokens) {
+    if (nameTokens.has(token)) matched += 1;
+    else if ([...nameTokens].some((nameToken) => nameToken.includes(token) || token.includes(nameToken))) matched += 0.5;
+  }
+  if (queryTokens.length > 0) {
+    score += (matched / queryTokens.length) * 220;
+    if (matched === 0) score -= 120;
+  }
+
+  // Prefer official-looking titles over fan packs that merely mention the target.
+  if (/\bofficial\b/.test(normalizedName) && /\bofficial\b/.test(normalizedQuery)) score += 40;
+  if (/\b(based on|remastered|smp|plus|legacy|remix|unofficial)\b/.test(normalizedName) && !/\b(based on|remastered|smp|plus|legacy|remix|unofficial)\b/.test(normalizedQuery)) {
+    score -= 60;
+  }
+
+  return score;
+}
+
+function pickBestCurseForgeProject(projects: JsonRecord[], searchQuery: string) {
+  if (projects.length === 0) return undefined;
+  const normalizedQuery = normalizeCurseForgeSearchText(searchQuery);
+  const exactSlug = projects.find((project) => stringField(project.slug).toLowerCase() === searchQuery.trim().toLowerCase());
+  if (exactSlug) return exactSlug;
+
+  const exactName = projects.find((project) => normalizeCurseForgeSearchText(stringField(project.name)) === normalizedQuery);
+  if (exactName) return exactName;
+
+  const ranked = [...projects].sort((first, second) => scoreCurseForgeProject(second, searchQuery) - scoreCurseForgeProject(first, searchQuery));
+  const best = ranked[0];
+  if (!best) return undefined;
+  if (scoreCurseForgeProject(best, searchQuery) < 40 && projects.length > 1) {
+    // Avoid confidently returning an unrelated top hit when nothing is a real match.
+    const strong = ranked.find((project) => scoreCurseForgeProject(project, searchQuery) >= 40);
+    return strong ?? best;
+  }
+  return best;
+}
+
+function curseForgeSearchVariants(searchQuery: string) {
+  const variants = new Set<string>();
+  const trimmed = searchQuery.trim();
+  if (trimmed) variants.add(trimmed);
+
+  const normalized = normalizeCurseForgeSearchText(trimmed);
+  if (normalized) variants.add(normalized);
+
+  const withoutEditionNoise = normalized
+    .replace(/\b(minecraft|modpack|mod pack|official pack|official modpack|official)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (withoutEditionNoise) variants.add(withoutEditionNoise);
+
+  // Prefer hyphenated slug-style queries when the normalized text is multi-token.
+  const slugStyle = withoutEditionNoise.replace(/\s+/g, "-");
+  if (slugStyle.includes("-")) variants.add(slugStyle);
+
+  return [...variants];
+}
+
 async function resolveCurseForgeProject(ctx: AgentToolContext, rawProjectId: string, query: string, classId = 4471, toolName = "download_curseforge_server_pack_to_server_slot") {
   const directId = /^\d+$/.test(rawProjectId) ? rawProjectId : "";
   if (directId) {
@@ -373,20 +595,45 @@ async function resolveCurseForgeProject(ctx: AgentToolContext, rawProjectId: str
     if (data && typeof data === "object" && !Array.isArray(data)) return data as JsonRecord;
   }
 
+  const slugHint = extractCurseForgeSlugHint(rawProjectId) || extractCurseForgeSlugHint(query);
+  if (slugHint) {
+    const bySlug = await fetchCurseForgeJson(ctx, "/mods/search", {
+      gameId: 432,
+      classId,
+      slug: slugHint,
+      pageSize: 5
+    }, toolName) as JsonRecord;
+    const slugProjects = recordArrayField(bySlug.data);
+    const exact = slugProjects.find((project) => stringField(project.slug).toLowerCase() === slugHint) ?? slugProjects[0];
+    if (exact) return exact;
+  }
+
   const searchQuery = query || rawProjectId;
   if (!searchQuery) throw new Error("缺少 CurseForge 搜索关键词或 projectId");
-  const response = await fetchCurseForgeJson(ctx, "/mods/search", {
-    gameId: 432,
-    classId,
-    searchFilter: searchQuery,
-    pageSize: 10
-  }, toolName) as JsonRecord;
-  const projects = recordArrayField(response.data);
-  const normalized = searchQuery.toLowerCase();
-  const selected = projects.find((project) => stringField(project.slug).toLowerCase() === normalized)
-    ?? projects.find((project) => stringField(project.name).toLowerCase().includes(normalized))
-    ?? projects[0];
-  if (!selected) throw new Error(`CurseForge 未找到项目：${searchQuery}`);
+
+  const seen = new Set<string>();
+  const projects: JsonRecord[] = [];
+  for (const variant of curseForgeSearchVariants(searchQuery)) {
+    const response = await fetchCurseForgeJson(ctx, "/mods/search", {
+      gameId: 432,
+      classId,
+      searchFilter: variant,
+      sortField: 6,
+      sortOrder: "desc",
+      pageSize: 20
+    }, toolName) as JsonRecord;
+    for (const project of recordArrayField(response.data)) {
+      const id = String(numberField(project.id) || stringField(project.id) || stringField(project.slug));
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      projects.push(project);
+    }
+  }
+
+  const selected = pickBestCurseForgeProject(projects, searchQuery);
+  if (!selected) {
+    throw new Error(`CurseForge 未找到项目：${searchQuery}。请改用英文整合包名、CurseForge slug（如 vault-hunters-1-18-2）、数字 projectId，或完整 CurseForge 项目/文件 URL。`);
+  }
   return selected;
 }
 
@@ -420,10 +667,18 @@ async function curseForgeFileCandidate(ctx: AgentToolContext, project: JsonRecor
   } satisfies ServerPackageCandidate;
 }
 
+function extractCurseForgeFileIdHint(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const fileMatch = trimmed.match(/curseforge\.com\/minecraft\/(?:modpacks|mc-mods|mods)\/[a-z0-9-]+\/files\/(\d+)/i)
+    || trimmed.match(/\/files\/(\d+)(?:\/|$)/i);
+  return fileMatch?.[1] || "";
+}
+
 async function findCurseForgeServerPackage(ctx: AgentToolContext, input: Record<string, unknown>) {
   const query = stringInput(input, "query");
   const rawProjectId = stringInput(input, "projectId") || stringInput(input, "projectIdOrSlug");
-  const fileId = stringInput(input, "fileId");
+  const fileId = stringInput(input, "fileId") || extractCurseForgeFileIdHint(query) || extractCurseForgeFileIdHint(rawProjectId);
   const minecraftVersion = stringInput(input, "minecraftVersion");
   const loader = stringInput(input, "loader");
   const modpackVersion = stringInput(input, "modpackVersion");
@@ -634,7 +889,11 @@ async function findModrinthServerPackage(ctx: AgentToolContext, input: Record<st
       const downloadUrl = stringField(file.url);
       if (!fileName || !downloadUrl) continue;
       const lower = fileName.toLowerCase();
-      const score = fileServerScore(fileName) + (file.primary === true ? 10 : 0) - (lower.endsWith(".mrpack") ? 40 : 0);
+      const isMrpack = lower.endsWith(".mrpack");
+      // Prefer dedicated server packs; allow .mrpack as a lower-priority deployable candidate via deploy_mrpack_server_from_server_slot.
+      const score = isMrpack
+        ? 55 + (file.primary === true ? 10 : 0)
+        : fileServerScore(fileName) + (file.primary === true ? 10 : 0);
       candidates.push({
         provider: "modrinth",
         projectId,
@@ -648,16 +907,18 @@ async function findModrinthServerPackage(ctx: AgentToolContext, input: Record<st
         gameVersions,
         loaders,
         releaseType: stringField(version.version_type),
-        isServerCandidate: score >= 50 && !lower.endsWith(".mrpack"),
-        reason: lower.endsWith(".mrpack") ? `.mrpack 是 Modrinth 客户端整合包格式，不是可直接部署的服务端包；score=${score}` : `filename server score=${score}`
+        isServerCandidate: isMrpack || score >= 50,
+        reason: isMrpack
+          ? `.mrpack 可下载到服务端槽位后，用 inspect_mrpack_server_slot + deploy_mrpack_server_from_server_slot 部署；score=${score}`
+          : `filename server score=${score}`
       });
     }
   }
 
-  candidates.sort((first, second) => Number(second.isServerCandidate) - Number(first.isServerCandidate) || fileServerScore(second.fileName) - fileServerScore(first.fileName));
+  candidates.sort((first, second) => Number(second.isServerCandidate) - Number(first.isServerCandidate) || fileServerScore(second.fileName) - fileServerScore(first.fileName) || (second.fileName.toLowerCase().endsWith(".mrpack") ? 0 : 1) - (first.fileName.toLowerCase().endsWith(".mrpack") ? 0 : 1));
   const selected = pickBestCandidate(candidates, allowMrpackFallback);
   if (!selected || !selected.isServerCandidate && !allowMrpackFallback) {
-    throw new Error(`Modrinth API 已可访问，但没有找到可直接部署的服务端包。若只有 .mrpack，它不能被当作服务端包直接部署。候选文件：${JSON.stringify(candidateSummary(candidates).slice(0, 10), null, 2)}`);
+    throw new Error(`Modrinth API 已可访问，但没有找到可部署的服务端包或 .mrpack。完整服务端包优先；若仅有 .mrpack，下载后须用 inspect_mrpack_server_slot 与 deploy_mrpack_server_from_server_slot，不能当普通 ZIP 解压。候选文件：${JSON.stringify(candidateSummary(candidates).slice(0, 10), null, 2)}`);
   }
   return { selected, candidates };
 }
@@ -748,8 +1009,38 @@ function javaArgsFilePath(minecraftVersion: string, forgeVersion: string) {
   );
 }
 
+const rootMinecraftLayoutMarkers = [
+  "mods",
+  "libraries",
+  "world",
+  "eula.txt",
+  "server.properties",
+  "user_jvm_args.txt",
+  "run.sh",
+  "run.bat",
+  "startserver.sh",
+  "startserver.bat",
+  "server.jar"
+] as const;
+
 async function pathExists(targetPath: string) {
   return access(targetPath).then(() => true).catch(() => false);
+}
+
+async function detectMcdrInstallRoot(serverDirectory: string) {
+  const minecraftDirectory = path.join(serverDirectory, "server");
+  const hasConfigYml = await pathExists(path.join(serverDirectory, "config.yml"));
+  const hasServerDir = await pathExists(minecraftDirectory);
+  if (hasConfigYml && hasServerDir) {
+    return { layout: "mcdr" as const, installRoot: minecraftDirectory };
+  }
+  return { layout: "plain" as const, installRoot: serverDirectory };
+}
+
+async function listRootMinecraftLayoutMarkers(serverDirectory: string) {
+  const entries = await readdir(serverDirectory).catch(() => [] as string[]);
+  const names = new Set(entries.map((entry) => entry.toLowerCase()));
+  return rootMinecraftLayoutMarkers.filter((marker) => names.has(marker));
 }
 
 async function runProcess(executable: string, args: string[], cwd: string, signal?: AbortSignal, onOutput?: (stream: "stdout" | "stderr", text: string) => void, proxyUrl?: string) {
@@ -875,6 +1166,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
   const capabilityNames = Object.keys(installableCapabilities).join(", ");
   const templateNames = ["default", "reference"];
   const tools: AgentTool[] = [
+    createWebSearchTool(ctx),
     {
       definition: {
         type: "function",
@@ -1000,10 +1292,11 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "download_curseforge_server_pack_to_server_slot",
-          description: "使用 CurseForge 官方 API 查找整合包服务端包并下载到当前服务端槽位。需要已配置 CurseForge API Key；缺失或鉴权失败时必须停止部署并让用户点击 Tools 卡片/设置中的配置按钮，申请/管理地址：https://console.curseforge.com/?#/api-keys。",
+          description: "使用 CurseForge 官方 API 查找整合包服务端包并下载到当前服务端槽位。仅在用户已明确确认是哪一个整合包/版本后调用；未确认前禁止调用。可用 query（名称）、projectId（数字 ID）、projectIdOrSlug（slug 如 vault-hunters-1-18-2）或完整 CurseForge 项目/文件 URL 定位项目；会跟随 client 文件的 serverPackFileId 下载真正的 Server Pack。需要已配置 CurseForge API Key；缺失或鉴权失败时必须停止部署并让用户点击 Tools 卡片/设置中的配置按钮，申请/管理地址：https://console.curseforge.com/?#/api-keys。",
           parameters: objectSchema({
             query: stringProperty,
             projectId: stringProperty,
+            projectIdOrSlug: stringProperty,
             fileId: stringProperty,
             minecraftVersion: stringProperty,
             loader: stringProperty,
@@ -1023,7 +1316,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "download_modrinth_server_pack_to_server_slot",
-          description: "使用 Modrinth API 查找整合包服务端包并下载到当前服务端槽位。通常不需要 API Key；若公开 API 返回 401/403，必须停止部署并向用户索取 Modrinth PAT，申请/管理地址：https://modrinth.com/settings/pats。不会把 .mrpack 当作可直接部署的服务端包，除非 allowMrpackFallback=true。",
+          description: "使用 Modrinth API 查找整合包服务端包或 .mrpack 并下载到当前服务端槽位。仅在用户已明确确认是哪一个整合包/版本后调用；未确认前禁止调用。通常不需要 API Key；若公开 API 返回 401/403，必须停止部署并向用户索取 Modrinth PAT，申请/管理地址：https://modrinth.com/settings/pats。若选择 .mrpack，下载完成后必须调用 inspect_mrpack_server_slot，再调用 deploy_mrpack_server_from_server_slot；不能直接解压。",
           parameters: objectSchema({
             query: stringProperty,
             projectIdOrSlug: stringProperty,
@@ -1074,7 +1367,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "extract_server_slot_to_workspace",
-          description: "将服务端槽位中的 zip/tar.gz/tgz 服务端包解压到当前服务端工作目录。基于 MCDReforged reference 模板部署时必须解压到 server/ 目录，不能解压到根目录。",
+          description: "将服务端槽位中的 zip/tar.gz/tgz 服务端包解压到当前服务端工作目录。基于 MCDReforged reference 模板部署时必须解压到 server/ 目录，不能解压到根目录。.mrpack 禁止用此工具，必须改用 inspect_mrpack_server_slot + deploy_mrpack_server_from_server_slot。",
           parameters: objectSchema({ destinationPath: stringProperty })
         }
       },
@@ -1105,6 +1398,55 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           })
         });
         return JSON.stringify(result, null, 2);
+      }
+    },
+    {
+      definition: {
+        type: "function",
+        function: {
+          name: "materialize_curseforge_manifest_pack_from_server_slot",
+          description: "还原当前服务端槽位内 CurseForge manifest.json 清单包的服务端内容。仅适用于 ZIP 根目录含 manifest.json 与 overrides/ 的清单包，不适用于已可直启的完整服务端包。工具会验证清单、通过 CurseForge 官方 API 精确解析每个 required projectID/fileID、把 JAR 下载到 server/mods/，并把 overrides/ 的内容合并到 server/（不会留下 server/overrides/ 包装目录）。不会安装 Minecraft/Forge/Fabric Loader，也不会启动服务端；Forge 清单会返回官方 Forge installer URL，后续必须下载 installer、启用 forge_server_setup 并调用 setup_forge_server。需要已配置 CurseForge API Key。仅在用户已确认整合包后调用。",
+          parameters: objectSchema({})
+        }
+      },
+      execute: async () => {
+        const manifest = await ctx.fileService.inspectCurseForgeManifestServerSlot(ctx.serverId);
+        const mods = await preflightCurseForgeManifestMods(ctx, manifest);
+        const forgeVersion = parseForgeLoaderVersion(manifest.loaders);
+        const installerUrl = forgeVersion ? forgeInstallerUrl(manifest.minecraftVersion, forgeVersion) : "";
+        await requireConfirmation(ctx, {
+          title: "还原 CurseForge 清单整合包",
+          description: `Agent 准备从当前服务端槽位的 ${manifest.slot.fileName} 还原 ${manifest.name || "CurseForge 整合包"}${manifest.version ? ` ${manifest.version}` : ""}：下载 ${mods.length} 个精确版本的 required 模组到 server/mods/，并复制 overrides 内容到 server/。${forgeVersion ? `清单要求 Forge ${forgeVersion}；后续仍需安装 Forge。` : "当前工具不会安装清单要求的 Loader。"}`,
+          risk: "high"
+        });
+        const overrides = await ctx.fileService.materializeCurseForgeManifestOverrides(ctx.serverId, "server");
+        const downloadedMods = await downloadCurseForgeManifestMods(ctx, mods);
+        return JSON.stringify({
+          ok: true,
+          manifest: manifestSummary(manifest),
+          downloadedModCount: downloadedMods.length,
+          skippedOptionalModCount: manifest.files.filter((file) => !file.required).length,
+          downloadedMods,
+          copiedOverrides: overrides.copiedOverrides,
+          loaderSetup: forgeVersion
+            ? {
+              status: "pending",
+              loader: "forge",
+              forgeVersion,
+              officialInstallerUrl: installerUrl,
+              nextSteps: [
+                `使用 download_https_file_to_server 将官方 Forge installer 下载到 server/forge-${manifest.minecraftVersion}-${forgeVersion}-installer.jar`,
+                "调用 install_agent_capability(capability=forge_server_setup)",
+                "调用 setup_forge_server，并使用 manifest 的 Minecraft/Forge 版本与已安装 Java",
+                "按常规流程直启验证，再配置 MCDReforged"
+              ]
+            }
+            : {
+              status: "manual_loader_setup_required",
+              loaders: manifest.loaders,
+              message: "清单模组与 overrides 已还原，但当前仅内置 Forge 服务端安装能力；请先为该 Loader 提供受控安装能力后再尝试启动。"
+            }
+        }, null, 2);
       }
     },
     {
@@ -1311,6 +1653,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
     },
     createInstallJavaVersionTool(ctx),
     createConfigureBuiltinPythonTool(ctx),
+    createInstallMcdrPluginDependenciesTool(ctx),
     {
       definition: {
         type: "function",
@@ -1420,6 +1763,11 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
       }
     },
     createDownloadHttpsFileToServerTool(ctx),
+    createInspectMrpackServerTool(ctx),
+    createDeployMrpackServerTool(ctx),
+    createInspectClientOnlyServerModsTool(ctx),
+    createDisableClientOnlyServerModsTool(ctx),
+    createDisableServerModsTool(ctx),
     {
       definition: {
         type: "function",
@@ -1475,7 +1823,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "setup_forge_server",
-          description: "在当前服务端沙箱内运行 Forge installer -installServer，验证生成的 Forge args 文件，并写入当前服务端可启动配置。适用于 Forge 1.17+ 的 libraries/.../win_args.txt 或 unix_args.txt 启动方式。若 installer 位于已解压整合包子目录中，本工具会把 mods/config/defaultconfigs 等整合包内容提升到服务端根目录，并写入 eula.txt、server.properties、user_jvm_args.txt；minMemory/maxMemory 必须使用同一个值，优先使用上下文里的推荐内存；整合包有明确要求时可以调整但不能超过推荐内存，并向用户说明；成功后通常无需再初始化模板或重复写基础配置。",
+          description: "在当前服务端沙箱内运行 Forge installer -installServer，验证生成的 Forge args 文件，并写入当前服务端可启动配置。适用于 Forge 1.17+ 的 libraries/.../win_args.txt 或 unix_args.txt 启动方式。若根目录已有 MCDReforged 布局（config.yml + server/），本工具必须把 Forge 安装到 server/，把 mods/config 等提升到 server/，并在 server/ 写入 eula.txt、server.properties、user_jvm_args.txt；绝不把 Minecraft 服务端文件安装或提升到 MCDReforged 根目录。若 installer 位于 server/ 下的嵌套整合包子目录，会提升到 server/ 而不是根目录。minMemory/maxMemory 必须使用同一个值，优先使用上下文里的推荐内存；整合包有明确要求时可以调整但不能超过推荐内存，并向用户说明。本工具只完成 Forge 安装与 server/ 基础文件，不替代 configure_builtin_python_environment、config.yml 编辑、以及 startupCommand={python} -m mcdreforged 的最终 MCDR 配置。",
           parameters: objectSchema({
             minecraftVersion: stringProperty,
             forgeVersion: stringProperty,
@@ -1507,46 +1855,81 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         await access(javaPath).catch(() => {
           throw new Error(`Java executable not found: ${javaPath}`);
         });
+        const { layout, installRoot } = await detectMcdrInstallRoot(server.directory);
+        await mkdir(installRoot, { recursive: true });
         const argsPath = javaArgsFilePath(minecraftVersion, forgeVersion);
+        const installRootLabel = layout === "mcdr" ? "server/" : "服务端根目录";
         await requireConfirmation(ctx, {
           title: "运行 Forge 服务端安装器",
-          description: `Agent 准备在当前服务端目录内运行 ${installer.fileName} -installServer，并将启动配置设置为 @${argsPath} nogui。`,
+          description: `Agent 准备在 ${installRootLabel} 内运行 ${installer.fileName} -installServer，并将启动配置设置为 @${argsPath} nogui。MCDReforged 布局下 Minecraft 文件只会写入 server/，不会写到根目录。`,
           risk: "high"
         });
 
-        ctx.consoleLog?.(`运行 Forge installer：${javaPath} -jar ${installer.absolutePath} -installServer`);
+        ctx.consoleLog?.(`运行 Forge installer（cwd=${installRootLabel}）：${javaPath} -jar ${installer.absolutePath} -installServer`);
         const output = await runProcess(
           javaPath,
           ["-jar", installer.absolutePath, "-installServer"],
-          server.directory,
+          installRoot,
           ctx.signal,
           (stream, text) => ctx.consoleLog?.(text, stream),
           ctx.downloadProxyUrl?.()
         );
-        const absoluteArgsPath = path.join(server.directory, argsPath);
+        const absoluteArgsPath = path.join(installRoot, argsPath);
         if (!(await pathExists(absoluteArgsPath))) {
-          throw new Error(`Forge installer did not create expected args file: ${argsPath}\n最近输出：\n${output.slice(-3000)}`);
+          throw new Error(`Forge installer did not create expected args file under ${installRootLabel}: ${argsPath}\n最近输出：\n${output.slice(-3000)}`);
         }
-        const promotedContent = await promoteNestedModpackContent(server.directory, installerPath);
-        const configuredTextFiles = await ensureForgeServerTextFiles(server.directory, modpackName, minecraftVersion, minMemory, maxMemory);
-        const removedMods = await removeMatchingMods(server.directory, stringArrayInput(input, "removeClientSideModPatterns"));
+        const installerPathForPromote = path.relative(installRoot, installer.absolutePath).replaceAll("\\", "/");
+        const promoteInstallerPath = installerPathForPromote && !installerPathForPromote.startsWith("..")
+          ? installerPathForPromote
+          : installerPath;
+        const promotedContent = await promoteNestedModpackContent(installRoot, promoteInstallerPath);
+        const configuredTextFiles = await ensureForgeServerTextFiles(installRoot, modpackName, minecraftVersion, minMemory, maxMemory);
+        const removedMods = await removeMatchingMods(installRoot, stringArrayInput(input, "removeClientSideModPatterns"));
+        const rootMinecraftMarkers = await listRootMinecraftLayoutMarkers(server.directory);
+        const layoutWarnings: string[] = [];
+        if (layout === "mcdr" && rootMinecraftMarkers.length > 0) {
+          layoutWarnings.push(
+            `MCDReforged 根目录仍存在 Minecraft 文件/目录：${rootMinecraftMarkers.join(", ")}。这些应位于 server/，根目录只应保留 MCDR 的 config.yml、permission.yml、plugins/、config/、logs/ 与 server/。请用 list_server_files 核对并清理或迁移后再继续。`
+          );
+        }
+        if (layout === "mcdr") {
+          layoutWarnings.push(
+            "Forge 已安装到 server/。本工具不完成 MCDR 最终配置：直启验证后必须调用 configure_builtin_python_environment，编辑根目录 config.yml（working_directory=server，start_command 从 server/ 启动，handler 符合 Forge），再 update_current_server_config 设置 startupCommand={python} -m mcdreforged。"
+          );
+        }
+        const normalizedArgsPath = argsPath.replace(/\\/g, "/");
         const updated = await ctx.serverService.updateServer(ctx.serverId, {
           javaPath,
           javaVersion: ctx.javaService.recommendVersion(minecraftVersion),
           minMemory,
           maxMemory,
           jarFile: "",
-          startArgs: `@${argsPath.replace(/\\/g, "/")} nogui`,
+          startArgs: `@${normalizedArgsPath} nogui`,
           minecraftVersion,
           modpackName: modpackName || `Forge ${minecraftVersion}-${forgeVersion}`,
           serverType: "forge"
         });
         return JSON.stringify({
           ok: true,
-          argsPath,
+          layout,
+          installRoot: layout === "mcdr" ? "server" : ".",
+          argsPath: normalizedArgsPath,
+          argsPathRelativeToInstallRoot: normalizedArgsPath,
           promotedContent,
           configuredTextFiles,
           removedClientSideMods: removedMods,
+          rootMinecraftMarkers,
+          layoutWarnings,
+          nextSteps: layout === "mcdr"
+            ? [
+              "用 list_server_files 确认 mods/libraries/run 脚本/eula 在 server/ 内，根目录无 Minecraft 本体文件",
+              "update_current_server_config 将 startupCommand 设为 cd server && sh run.sh（或 server/ 内实际脚本）后 start_current_server 做直启验证",
+              "configure_builtin_python_environment",
+              "编辑 config.yml 后 startupCommand={python} -m mcdreforged 做最终验证"
+            ]
+            : [
+              "确认 Forge args 与 eula 已就绪后按当前 startArgs 直启验证"
+            ],
           outputTail: output.slice(-3000),
           server: updated
         }, null, 2);

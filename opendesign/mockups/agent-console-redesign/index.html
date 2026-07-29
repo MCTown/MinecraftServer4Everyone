@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Console Redesign</title>
+    <link rel="icon" href="data:," />
+    <!-- 依赖本地化，见 opendesign/vendor/。不要改回不带版本号的 CDN 地址：
+         @babel/standalone 的 latest 已是 8.x，preset-react 默认 automatic runtime，
+         会注入 import "react/jsx-runtime" 导致整页空白。 -->
+    <script src="../../vendor/react.js"></script>
+    <script src="../../vendor/react-dom.js"></script>
+    <script src="../../vendor/babel.js"></script>
+    <script src="../../vendor/lucide.js"></script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+
+      :root {
+        color-scheme: dark;
+        --ink: #eef1f3;
+        --muted: #97a0a8;
+        --faint: #67717a;
+        --bg: #121518;
+        --panel: #181c20;
+        --panel-2: #20252a;
+        --panel-3: #282e34;
+        --line: #30383e;
+        --line-bright: #465159;
+        --teal: #91b6c9;
+        --teal-soft: rgba(145, 182, 201, 0.13);
+        --amber: #e6aa64;
+        --amber-soft: rgba(230, 170, 100, 0.14);
+        --red: #ef837a;
+        --red-soft: rgba(239, 131, 122, 0.14);
+        --shadow: 0 18px 50px rgba(0, 0, 0, 0.34);
+        --radius: 8px;
+      }
+
+      * { box-sizing: border-box; }
+      html, body, #root { min-height: 100%; margin: 0; }
+      body {
+        min-width: 320px;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: 'DM Sans', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        font-size: 14px;
+      }
+      button, input, textarea { font: inherit; }
+      button { color: inherit; }
+      button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+      .prototype-shell {
+        min-height: 100vh;
+        background:
+          linear-gradient(rgba(145, 182, 201, 0.025) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(145, 182, 201, 0.025) 1px, transparent 1px),
+          var(--bg);
+        background-size: 32px 32px;
+      }
+      .prototype-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        min-height: 62px;
+        padding: 0 24px;
+        border-bottom: 1px solid var(--line);
+        background: rgba(18, 21, 24, 0.94);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .brand-lockup { display: flex; align-items: center; gap: 11px; min-width: 180px; }
+      .brand-mark {
+        width: 28px;
+        height: 28px;
+        border: 1px solid var(--teal);
+        display: grid;
+        place-items: center;
+        color: var(--teal);
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 12px;
+        box-shadow: inset 0 0 0 4px rgba(145, 182, 201, 0.05);
+      }
+      .brand-name { font-size: 14px; font-weight: 700; letter-spacing: 0.01em; }
+      .brand-sub { color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+      .direction-tabs { display: flex; gap: 3px; padding: 3px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; }
+      .direction-tab {
+        border: 0;
+        background: transparent;
+        color: var(--muted);
+        padding: 7px 11px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+        transition: background 160ms ease, color 160ms ease;
+      }
+      .direction-tab:hover { color: var(--ink); background: var(--panel-2); }
+      .direction-tab.active { color: var(--ink); background: var(--panel-3); box-shadow: 0 0 0 1px var(--line-bright); }
+      .header-meta { display: flex; align-items: center; gap: 14px; color: var(--muted); font-size: 12px; }
+      .connection { display: inline-flex; align-items: center; gap: 7px; }
+      .status-dot { width: 7px; height: 7px; background: var(--teal); border-radius: 50%; box-shadow: 0 0 0 4px rgba(145, 182, 201, 0.1); }
+      .avatar { width: 28px; height: 28px; border-radius: 50%; background: #323a42; border: 1px solid #5b6872; display: grid; place-items: center; font-size: 11px; color: #dde3e7; }
+
+      .workspace { display: grid; min-height: calc(100vh - 62px); }
+      .workspace.docked { grid-template-columns: 252px minmax(420px, 1fr) 340px; }
+      .workspace.stage { grid-template-columns: 220px minmax(0, 1fr); }
+      .workspace.bridge { grid-template-columns: 66px 276px minmax(0, 1fr); }
+
+      .rail, .server-list, .inspector, .stage-sidebar, .command-rail, .bridge-sidebar { background: rgba(24, 28, 32, 0.95); border-right: 1px solid var(--line); }
+      .rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px 9px; }
+      .rail-button { width: 42px; height: 42px; border: 1px solid transparent; background: transparent; color: var(--muted); cursor: pointer; border-radius: 6px; display: grid; place-items: center; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+      .rail-button:hover, .rail-button.active { color: var(--teal); border-color: var(--line-bright); background: var(--teal-soft); }
+      .rail-spacer { flex: 1; }
+      .panel-label { color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+      .server-list { padding: 21px 14px; overflow: hidden; }
+      .server-list-head, .panel-head, .section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+      .server-list-head { margin-bottom: 18px; }
+      .server-list-title { font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+      .icon-button { border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); width: 28px; height: 28px; border-radius: 5px; cursor: pointer; display: grid; place-items: center; }
+      .icon-button:hover { color: var(--teal); border-color: var(--teal); background: var(--teal-soft); }
+      .server-item { width: 100%; display: flex; align-items: center; gap: 10px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); padding: 11px 10px; margin-bottom: 5px; text-align: left; cursor: pointer; }
+      .server-item:hover { color: var(--ink); background: var(--panel-2); }
+      .server-item.active { color: var(--ink); background: var(--panel-3); border-color: var(--line-bright); }
+      .server-icon { width: 25px; height: 25px; display: grid; place-items: center; border: 1px solid var(--line-bright); color: var(--teal); font-family: 'IBM Plex Mono', monospace; font-size: 11px; flex: 0 0 auto; }
+      .server-item-body { min-width: 0; flex: 1; }
+      .server-item-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+      .server-item-meta { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+      .server-mini-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--faint); }
+      .server-mini-dot.live { background: var(--teal); }
+      .server-mini-dot.warn { background: var(--amber); }
+      .server-list-footer { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 15px; }
+      .server-list-footer p { margin: 0 0 10px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+      .add-server { width: 100%; border: 1px dashed var(--line-bright); background: transparent; color: var(--muted); padding: 9px; border-radius: 5px; cursor: pointer; font-size: 12px; }
+      .add-server:hover { color: var(--teal); border-color: var(--teal); background: var(--teal-soft); }
+
+      .main-stage { min-width: 0; display: flex; flex-direction: column; background: rgba(18, 21, 24, 0.83); }
+      .main-topbar { min-height: 72px; border-bottom: 1px solid var(--line); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+      .breadcrumb { color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 11px; margin-bottom: 6px; }
+      .workspace-title { font-size: 18px; margin: 0; letter-spacing: -0.02em; }
+      .title-status { display: flex; align-items: center; gap: 8px; margin-top: 6px; color: var(--muted); font-size: 11px; }
+      .run-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: flex-end; }
+      .btn { min-height: 34px; border: 1px solid var(--line-bright); background: var(--panel-2); border-radius: 5px; padding: 0 12px; cursor: pointer; font-size: 12px; transition: 150ms ease; display: inline-flex; align-items: center; gap: 7px; }
+      .btn:hover { transform: translateY(-1px); background: var(--panel-3); border-color: #61716d; }
+      .btn.primary { border-color: var(--teal); background: var(--teal); color: #172127; font-weight: 700; }
+       .btn.primary:hover { background: #afcbd8; border-color: #afcbd8; }
+       .btn.map-editor { color: var(--teal); border-color: rgba(145, 182, 201, 0.55); background: var(--teal-soft); }
+       .btn.map-editor:hover { color: #c5dce6; border-color: var(--teal); background: rgba(145, 182, 201, 0.2); }
+       .btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+      .btn.ghost:hover { background: var(--panel-2); border-color: var(--line); color: var(--ink); }
+      .btn.danger { color: var(--red); border-color: rgba(239, 131, 122, 0.45); background: transparent; }
+      .btn.danger:hover { background: var(--red-soft); }
+      .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+      .btn-icon { width: 14px; height: 14px; flex: 0 0 auto; display: inline-flex; align-items: center; }
+      .btn-icon svg { width: 14px; height: 14px; display: block; }
+
+      .chat-area { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+      .chat-toolbar { height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+      .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 12px; }
+      .mode-tag { color: var(--teal); font-family: 'IBM Plex Mono', monospace; }
+      .chat-scroll { min-height: 0; flex: 1; overflow: auto; padding: 25px max(20px, 5vw) 20px; }
+      .chat-scroll::-webkit-scrollbar, .console-scroll::-webkit-scrollbar { width: 7px; }
+      .chat-scroll::-webkit-scrollbar-thumb, .console-scroll::-webkit-scrollbar-thumb { background: var(--line-bright); border-radius: 5px; }
+      .message-row { display: flex; gap: 10px; margin-bottom: 22px; max-width: 760px; animation: rise 250ms ease both; }
+      .message-row.user { margin-left: auto; flex-direction: row-reverse; }
+      .message-avatar { width: 28px; height: 28px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid var(--line-bright); color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+      .message-row.agent .message-avatar { color: var(--teal); border-color: rgba(145, 182, 201, 0.5); background: var(--teal-soft); }
+      .message-row.user .message-avatar { color: var(--amber); border-color: rgba(230, 170, 100, 0.5); background: var(--amber-soft); }
+      .message-stack { max-width: min(640px, calc(100vw - 110px)); }
+      .message-meta { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; color: var(--faint); font-size: 10px; }
+      .message-meta strong { color: var(--muted); font-size: 11px; }
+      .message-bubble { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 12px 14px; color: #d9dfe4; line-height: 1.65; }
+      .message-row.user .message-bubble { background: #293037; border-color: #48545e; }
+      .message-bubble p { margin: 0 0 8px; }
+      .message-bubble p:last-child { margin-bottom: 0; }
+      .message-bubble code, .inline-code { color: var(--teal); font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+      .task-card { margin-top: 12px; border: 1px solid var(--line); background: #151a1e; border-radius: 5px; padding: 11px; }
+      .task-line { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; margin-top: 7px; }
+      .task-line:first-child { margin-top: 0; }
+      .task-check { width: 14px; height: 14px; border: 1px solid var(--line-bright); display: grid; place-items: center; color: var(--teal); font-size: 10px; }
+      .task-line.done .task-check { border-color: var(--teal); background: var(--teal-soft); }
+      .task-line.active { color: var(--ink); }
+      .task-line.active .task-check { border-color: var(--amber); color: var(--amber); box-shadow: 0 0 0 3px var(--amber-soft); }
+      .chat-composer { border-top: 1px solid var(--line); padding: 14px 20px 16px; background: rgba(24, 28, 32, 0.96); }
+      .composer-shell { border: 1px solid var(--line-bright); background: #151a1e; border-radius: 6px; padding: 9px; transition: border-color 150ms ease; }
+      .composer-shell:focus-within { border-color: var(--teal); }
+      .composer-shell textarea { display: block; width: 100%; border: 0; resize: none; min-height: 42px; max-height: 100px; padding: 3px 2px 8px; color: var(--ink); background: transparent; outline: none; line-height: 1.5; }
+      .composer-shell textarea::placeholder { color: var(--faint); }
+      .composer-footer { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+      .composer-tools { display: flex; align-items: center; gap: 5px; }
+      .tool-button { min-height: 28px; border: 0; background: transparent; color: var(--faint); padding: 0 7px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+      .tool-button:hover { color: var(--teal); background: var(--teal-soft); }
+      .send-button { min-height: 30px; border: 1px solid var(--teal); background: var(--teal); color: #172127; border-radius: 4px; padding: 0 14px; cursor: pointer; font-weight: 700; font-size: 11px; }
+      .send-button:hover { background: #afcbd8; }
+      .send-button:disabled { opacity: 0.45; cursor: not-allowed; }
+      .composer-hint { color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+
+      .inspector { display: flex; flex-direction: column; min-width: 0; border-right: 0; border-left: 1px solid var(--line); }
+      .inspector-section { padding: 17px 16px; border-bottom: 1px solid var(--line); }
+      .inspector-section.fill { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+      .section-head { margin-bottom: 13px; }
+      .section-title { margin: 0; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+      .section-action { border: 0; background: transparent; color: var(--faint); cursor: pointer; font-size: 11px; }
+      .section-action:hover { color: var(--teal); }
+      .metric { display: flex; align-items: end; justify-content: space-between; margin-bottom: 9px; }
+      .metric strong { font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500; }
+      .metric span { color: var(--muted); font-size: 11px; }
+      .progress { height: 5px; background: #101419; border-radius: 4px; overflow: hidden; }
+      .progress span { display: block; height: 100%; background: var(--teal); border-radius: 4px; transition: width 350ms ease; }
+      .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+      .stat-cell { padding: 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); }
+      .stat-cell span { display: block; color: var(--faint); font-size: 10px; margin-bottom: 6px; }
+      .stat-cell strong { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 500; }
+      .log-card { min-height: 0; flex: 1; display: flex; flex-direction: column; }
+      .console-scroll { min-height: 0; flex: 1; overflow: auto; padding: 2px 0; font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 1.7; }
+      .log-line { display: grid; grid-template-columns: 62px 37px minmax(0, 1fr); gap: 7px; color: var(--muted); }
+      .log-line:hover { background: var(--panel-2); }
+      .log-time { color: var(--faint); }
+      .log-level { color: var(--teal); }
+      .log-level.warn { color: var(--amber); }
+      .log-level.error { color: var(--red); }
+      .log-message { color: #bac2c8; overflow-wrap: anywhere; }
+      .log-input { display: flex; gap: 6px; margin-top: 12px; }
+      .log-input input { min-width: 0; flex: 1; border: 1px solid var(--line); background: #12171b; border-radius: 4px; color: var(--ink); padding: 8px 9px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+      .log-input button { border: 1px solid var(--line-bright); background: var(--panel-2); color: var(--teal); border-radius: 4px; padding: 0 10px; cursor: pointer; }
+
+      .stage-sidebar { padding: 20px 13px; }
+      .stage-brand { margin-bottom: 24px; }
+      .stage-brand h2 { margin: 5px 0 0; font-size: 15px; }
+      .stage-nav { display: grid; gap: 4px; }
+      .stage-nav button { border: 0; border-radius: 5px; background: transparent; color: var(--muted); padding: 10px; text-align: left; cursor: pointer; font-size: 12px; }
+      .stage-nav button:hover, .stage-nav button.active { color: var(--ink); background: var(--panel-3); }
+      .stage-nav button.active { box-shadow: inset 2px 0 var(--teal); }
+      .stage-sidebar-bottom { margin-top: auto; padding-top: 20px; }
+      .stage-sidebar-bottom .server-item { padding-left: 5px; padding-right: 5px; }
+      .stage-main { min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+      .stage-topbar { min-height: 90px; border-bottom: 1px solid var(--line); padding: 19px 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+      .stage-topbar .workspace-title { font-size: 20px; }
+      .stage-content { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
+      .stage-chat { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+      .stage-chat .chat-scroll { padding-left: clamp(24px, 7vw, 96px); padding-right: clamp(24px, 7vw, 96px); }
+      .workflow-panel { min-width: 0; padding: 22px 20px; overflow: auto; }
+      .workflow-intro { padding: 16px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; margin-bottom: 16px; }
+      .workflow-intro h3 { margin: 0 0 7px; font-size: 15px; }
+      .workflow-intro p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+      .workflow-steps { position: relative; padding-left: 26px; }
+      .workflow-steps::before { content: ''; position: absolute; left: 7px; top: 9px; bottom: 10px; width: 1px; background: var(--line-bright); }
+      .workflow-step { position: relative; padding-bottom: 22px; }
+      .workflow-step::before { content: ''; position: absolute; left: -23px; top: 4px; width: 9px; height: 9px; border-radius: 50%; background: var(--panel-3); border: 1px solid var(--line-bright); }
+      .workflow-step.done::before { background: var(--teal); border-color: var(--teal); box-shadow: 0 0 0 4px var(--teal-soft); }
+      .workflow-step.active::before { background: var(--amber); border-color: var(--amber); box-shadow: 0 0 0 4px var(--amber-soft); }
+      .workflow-step h4 { margin: 0 0 4px; font-size: 12px; }
+      .workflow-step p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+      .workflow-step-status { color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+      .workflow-step.done .workflow-step-status { color: var(--teal); }
+      .workflow-step.active .workflow-step-status { color: var(--amber); }
+      .workflow-stat { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 16px; }
+      .workflow-stat .stat-cell strong { font-size: 12px; }
+
+      .command-rail { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 15px 9px; }
+      .command-rail .brand-mark { margin-bottom: 12px; }
+      .command-rail .rail-button { width: 38px; height: 38px; }
+      .bridge-sidebar { padding: 21px 14px; }
+      .bridge-sidebar .server-list-head { margin-bottom: 22px; }
+      .bridge-sidebar .panel-label { margin-bottom: 10px; display: block; }
+      .command-palette { border: 1px solid var(--line); background: #151a1e; border-radius: 5px; padding: 7px 8px; display: flex; align-items: center; gap: 7px; margin-bottom: 17px; }
+      .command-palette span { color: var(--teal); font-family: 'IBM Plex Mono', monospace; }
+      .command-palette input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 11px; }
+      .bridge-main { min-width: 0; display: flex; flex-direction: column; }
+      .bridge-main .main-topbar { padding-left: 22px; }
+      .bridge-columns { min-height: 0; flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .bridge-chat { min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+      .bridge-terminal { min-width: 0; display: flex; flex-direction: column; padding: 17px 15px; background: #12171b; }
+      .terminal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 13px; }
+      .terminal-title { font-family: 'IBM Plex Mono', monospace; font-size: 11px; }
+      .terminal-window { min-height: 0; flex: 1; overflow: auto; border: 1px solid var(--line); background: #101419; padding: 12px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; line-height: 1.8; color: #a4afb6; }
+      .terminal-command { color: var(--teal); }
+      .terminal-output { color: #aab4bc; }
+      .terminal-prompt { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--line); margin-top: 9px; padding-top: 9px; }
+      .terminal-prompt span { color: var(--teal); font-family: 'IBM Plex Mono', monospace; }
+      .terminal-prompt input { min-width: 0; flex: 1; border: 0; background: transparent; outline: 0; color: var(--ink); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+
+       .toast { position: fixed; right: 20px; bottom: 20px; z-index: 30; border: 1px solid var(--teal); background: #1d252b; color: var(--ink); box-shadow: var(--shadow); padding: 11px 14px; border-radius: 5px; font-size: 12px; animation: rise 180ms ease both; }
+       .map-editor-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(7, 10, 12, 0.7); }
+       .map-editor-dialog { width: min(760px, 100%); max-height: calc(100dvh - 40px); display: flex; flex-direction: column; border: 1px solid var(--line-bright); border-radius: 7px; background: #161b1f; box-shadow: var(--shadow); overflow: hidden; animation: rise 180ms ease both; }
+       .map-editor-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
+       .map-editor-head h2 { margin: 4px 0 0; font-size: 17px; }
+       .map-editor-copy { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+       .map-editor-body { min-height: 0; flex: 1 1 auto; display: grid; grid-template-columns: 190px minmax(0, 1fr); overflow: auto; }
+       .map-worlds { padding: 15px; border-right: 1px solid var(--line); }
+       .map-worlds .panel-label { display: block; margin: 0 0 9px; }
+       .map-world { width: 100%; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); padding: 10px; text-align: left; cursor: pointer; }
+       .map-world:hover, .map-world.active { color: var(--ink); background: var(--panel-3); border-color: var(--line-bright); }
+       .map-world small { display: block; margin-top: 3px; color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+       .map-selector { padding: 18px 20px; }
+       .map-selector-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+       .map-selector-head strong { font-size: 13px; }
+       .map-selector-head span { color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
+       .region-grid { display: grid; grid-template-columns: repeat(6, minmax(30px, 1fr)); gap: 6px; padding: 13px; border: 1px solid var(--line); background: #101419; }
+       .region-cell { aspect-ratio: 1; border: 1px solid #354149; background: #1b2529; cursor: pointer; transition: background 150ms ease, border-color 150ms ease; }
+       .region-cell:hover { border-color: var(--teal); background: #294047; }
+       .region-cell.selected { border-color: var(--amber); background: rgba(230, 170, 100, 0.32); box-shadow: inset 0 0 0 1px rgba(230, 170, 100, 0.45); }
+       .region-cell.unavailable { cursor: not-allowed; opacity: 0.35; background: #111519; }
+       .selection-summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; color: var(--muted); font-size: 11px; }
+       .selection-summary strong { color: var(--ink); font-family: 'IBM Plex Mono', monospace; font-weight: 500; }
+       .map-editor-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line); background: rgba(18, 21, 24, 0.6); }
+      .mobile-only { display: none; }
+      .mobile-server-picker { display: none; }
+      .mobile-server-picker select { min-height: 34px; border: 1px solid var(--line-bright); border-radius: 5px; background: var(--panel-2); color: var(--ink); padding: 0 10px; }
+      @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+      @keyframes pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+
+      @media (max-width: 1100px) {
+        .workspace.docked { grid-template-columns: 220px minmax(0, 1fr); }
+        .workspace.docked .inspector { display: none; }
+        .stage-content { grid-template-columns: minmax(0, 1fr) 300px; }
+         .bridge-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+      @media (max-width: 760px) {
+        .prototype-header { padding: 0 13px; gap: 8px; }
+        .brand-lockup { min-width: auto; }
+        .brand-sub, .header-meta .connection { display: none; }
+        .direction-tabs { overflow-x: auto; max-width: 57vw; }
+        .direction-tab { white-space: nowrap; padding: 7px 8px; }
+        .workspace.docked, .workspace.stage, .workspace.bridge { display: block; min-height: calc(100vh - 62px); }
+        .rail, .command-rail { display: none; }
+        .server-list, .stage-sidebar, .bridge-sidebar { display: none; }
+        .mobile-server-picker { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+        .main-topbar, .stage-topbar { align-items: flex-start; flex-direction: column; padding: 16px; }
+        .run-actions { justify-content: flex-start; }
+        .chat-toolbar { padding: 0 16px; }
+        .chat-scroll, .stage-chat .chat-scroll { padding: 19px 16px; }
+        .chat-composer { padding: 11px 12px 13px; }
+        .message-stack { max-width: calc(100vw - 78px); }
+         .stage-content, .bridge-columns { display: block; }
+         .stage-chat, .bridge-chat { min-height: 680px; border-right: 0; }
+         .workflow-panel, .bridge-terminal { border-top: 1px solid var(--line); min-height: 450px; }
+         .map-editor-body { grid-template-columns: 1fr; }
+         .map-worlds { border-right: 0; border-bottom: 1px solid var(--line); display: flex; gap: 6px; overflow-x: auto; }
+         .map-worlds .panel-label { display: none; }
+         .map-world { min-width: 145px; }
+         .mobile-only { display: inline-flex; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useEffect, useState } = React;
+
+      const directions = [
+        { id: 'docked', label: '01 Docked Console', note: 'classic ops' },
+        { id: 'stage', label: '02 Workflow Stage', note: 'guided setup' },
+        { id: 'bridge', label: '03 Command Bridge', note: 'power user' },
+      ];
+
+      const servers = [
+        { id: 'survival', name: '生存服 · Moss Valley', version: '1.21.4', state: '运行中', dot: 'live', players: '8 / 20' },
+        { id: 'creative', name: '创造服 · Redstone Lab', version: '1.20.6', state: '已停止', dot: '', players: '0 / 10' },
+        { id: 'modpack', name: '整合包 · Skybound', version: '1.20.1', state: '待配置', dot: 'warn', players: '—' },
+      ];
+
+      const initialMessages = {
+        survival: [
+          { role: 'agent', time: '10:42', text: '早上好。我在看守 Moss Valley 生存服。你可以直接告诉我想做什么，我会先解释影响，再执行需要确认的操作。', tasks: null },
+          { role: 'user', time: '10:44', text: '帮我看看为什么玩家进不来。先不要修改配置。', tasks: null },
+          { role: 'agent', time: '10:44', text: '我会先检查服务端状态、最近的连接日志和端口监听情况，不会写入任何文件。', tasks: ['读取运行状态', '扫描最近 100 条日志', '检查端口监听'] },
+        ],
+        creative: [
+          { role: 'agent', time: '09:18', text: '创造服当前已停止。你可以上传服务端文件，或者让我从空目录开始准备一个新实例。', tasks: null },
+          { role: 'user', time: '09:20', text: '我想把它升级到 1.21.4，怎么开始？', tasks: null },
+          { role: 'agent', time: '09:20', text: '第一步是确认当前目录是否有需要保留的世界和插件。你也可以直接上传新的服务端包，我会帮你识别版本并生成启动配置。', tasks: ['检查现有目录', '识别服务端包', '生成启动配置'] },
+        ],
+        modpack: [
+          { role: 'agent', time: '昨天', text: '这是一个空的服务端工作区。把服务端 Jar 或整合包压缩文件拖到这里，我会帮你准备一个可启动的实例。', tasks: null },
+        ],
+      };
+
+      const initialLogs = [
+        ['10:44:08', 'INFO', 'Preparing spawn area: 92%'],
+        ['10:44:06', 'INFO', 'Preparing spawn area: 88%'],
+        ['10:44:01', 'INFO', 'Done (3.421s)! For help, type "help"'],
+        ['10:43:57', 'INFO', 'Loading properties'],
+        ['10:43:55', 'WARN', 'Can\'t keep up! Is the server overloaded?'],
+        ['10:43:49', 'INFO', 'Starting Minecraft server on *:25565'],
+        ['10:43:46', 'INFO', 'Loading Minecraft 1.21.4'],
+      ];
+
+      function App() {
+        const [direction, setDirection] = useState(() => localStorage.getItem('agent-direction') || 'docked');
+        const [selectedId, setSelectedId] = useState('survival');
+        const [messages, setMessages] = useState(initialMessages);
+        const [logs, setLogs] = useState(initialLogs);
+        const [draft, setDraft] = useState('');
+        const [command, setCommand] = useState('');
+        const [serverState, setServerState] = useState('运行中');
+        const [notice, setNotice] = useState('');
+        const [isBusy, setIsBusy] = useState(false);
+         const [activeNav, setActiveNav] = useState('agent');
+         const [taskProgress, setTaskProgress] = useState(72);
+         const [mapEditorOpen, setMapEditorOpen] = useState(false);
+        const selected = servers.find((server) => server.id === selectedId) || servers[0];
+
+        useEffect(() => { localStorage.setItem('agent-direction', direction); }, [direction]);
+        useEffect(() => { if (window.lucide) window.lucide.createIcons({ attrs: { 'stroke-width': '2.25' } }); });
+        useEffect(() => {
+          if (!notice) return;
+          const timer = setTimeout(() => setNotice(''), 2600);
+          return () => clearTimeout(timer);
+        }, [notice]);
+        useEffect(() => {
+          if (!isBusy) return;
+          const timer = setTimeout(() => {
+            const response = selected.id === 'survival'
+              ? '检查完成。服务端本身正在运行，端口 25565 也在监听。最近 100 条日志里没有拒绝连接记录，下一步建议确认代理端口和玩家侧地址。'
+              : '我已经完成基础检查。当前没有发现阻塞性错误，可以继续上传文件或让我生成配置。';
+            setMessages((current) => ({ ...current, [selectedId]: [...current[selectedId], { role: 'agent', time: '刚刚', text: response, tasks: null }] }));
+            setTaskProgress(100);
+            setIsBusy(false);
+            setNotice('检查完成，未修改任何文件');
+          }, 1600);
+          return () => clearTimeout(timer);
+        }, [isBusy, selected.id, selectedId]);
+
+        const changeDirection = (id) => setDirection(id);
+        const changeServer = (id) => {
+          setSelectedId(id);
+          const next = servers.find((server) => server.id === id);
+          setServerState(next?.state || '已停止');
+          setNotice(`已切换到 ${next?.name || '服务端'}`);
+        };
+        const sendMessage = (event) => {
+          event.preventDefault();
+          const value = draft.trim();
+          if (!value || isBusy) return;
+          setMessages((current) => ({ ...current, [selectedId]: [...current[selectedId], { role: 'user', time: '刚刚', text: value, tasks: null }] }));
+          setDraft('');
+          setIsBusy(true);
+          setTaskProgress(22);
+          setNotice('Agent 正在分析任务');
+        };
+        const sendCommand = (event) => {
+          event.preventDefault();
+          const value = command.trim();
+          if (!value) return;
+          setLogs((current) => [[new Date().toLocaleTimeString('zh-CN', { hour12: false }), 'CMD', value], ...current]);
+          setCommand('');
+          setNotice(`已发送命令：${value}`);
+        };
+         const runAction = (action) => {
+          const next = action === 'start' || action === 'restart' ? '启动中' : action === 'stop' || action === 'kill' ? '关闭中' : serverState;
+          setServerState(next);
+          setNotice(action === 'start' ? '正在启动服务端' : action === 'restart' ? '正在重启服务端' : action === 'kill' ? '已发送强制结束指令' : '正在停止服务端');
+          setTimeout(() => setServerState(action === 'start' || action === 'restart' ? '运行中' : '已停止'), 1100);
+         };
+         const openMapEditor = () => setMapEditorOpen(true);
+         const closeMapEditor = () => setMapEditorOpen(false);
+
+         const sharedProps = { selected, selectedId, changeServer, messages: messages[selectedId] || [], draft, setDraft, sendMessage, isBusy, serverState, runAction, openMapEditor, logs, command, setCommand, sendCommand, taskProgress, setTaskProgress, activeNav, setActiveNav };
+        return (
+          <div className="prototype-shell">
+            <PrototypeHeader direction={direction} changeDirection={changeDirection} serverState={serverState} />
+            {direction === 'docked' && <DockedConsole {...sharedProps} />}
+             {direction === 'stage' && <WorkflowStage {...sharedProps} />}
+             {direction === 'bridge' && <CommandBridge {...sharedProps} />}
+             {mapEditorOpen && <MapEditorDialog selected={selected} onClose={closeMapEditor} onLaunch={() => { closeMapEditor(); setNotice('MCA Selector 已准备启动'); }} />}
+             {notice && <div className="toast" role="status">{notice}</div>}
+          </div>
+        );
+      }
+
+      function PrototypeHeader({ direction, changeDirection, serverState }) {
+        return (
+          <header className="prototype-header">
+            <div className="brand-lockup">
+              <div className="brand-mark">A/</div>
+              <div><div className="brand-name">Server Agent</div><div className="brand-sub">control workspace</div></div>
+            </div>
+            <nav className="direction-tabs" aria-label="原型方向">
+              {directions.map((item) => <button key={item.id} className={`direction-tab ${direction === item.id ? 'active' : ''}`} onClick={() => changeDirection(item.id)}>{item.label}</button>)}
+            </nav>
+            <div className="header-meta"><span className="connection"><i className="status-dot" />本地 Agent 已连接</span><span className="avatar">AM</span></div>
+          </header>
+        );
+      }
+
+      function IconRail({ activeNav, setActiveNav, bridge = false }) {
+        const items = [['agent', 'A/'], ['files', '[]'], ['logs', '>_'], ['settings', '::']];
+        return <aside className={bridge ? 'command-rail' : 'rail'}>
+          <div className="brand-mark">A/</div>
+          {items.map(([id, label]) => <button key={id} className={`rail-button ${activeNav === id ? 'active' : ''}`} onClick={() => setActiveNav(id)} title={id}>{label}</button>)}
+          <div className="rail-spacer" />
+          <button className="rail-button" onClick={() => setActiveNav('help')} title="help">?</button>
+        </aside>;
+      }
+
+      function ServerList({ selectedId, changeServer, compact = false, activeNav, setActiveNav, collapsible = false, collapsedByDefault = false }) {
+        const [isExpanded, setIsExpanded] = useState(!collapsedByDefault);
+        return <aside className={compact ? 'stage-sidebar' : 'server-list'}>
+          <div className={compact ? 'stage-brand' : 'server-list-head'}>
+            <span className="panel-label">{compact ? 'Workspace' : 'Instances'}</span>
+            {!compact && <div style={{ display: 'flex', gap: 6 }}>{collapsible && <button className="icon-button" onClick={() => setIsExpanded((current) => !current)} aria-label={isExpanded ? '收起实例列表' : '展开实例列表'} aria-expanded={isExpanded}>{isExpanded ? '−' : '+'}</button>}<button className="icon-button" onClick={() => alert('原型：打开创建服务端对话')}>+</button></div>}
+            {compact && <><h2>服务端工作区</h2><div className="brand-sub">3 instances · 1 online</div></>}
+          </div>
+          <div className="stage-nav">{compact && <><button className={activeNav === 'agent' ? 'active' : ''} onClick={() => setActiveNav?.('agent')}>Agent 对话</button><button className={activeNav === 'files' ? 'active' : ''} onClick={() => setActiveNav?.('files')}>文件浏览器</button><button className={activeNav === 'logs' ? 'active' : ''} onClick={() => setActiveNav?.('logs')}>运行日志</button></>}</div>
+          {(compact || !collapsible || isExpanded) && <><div className="panel-label" style={{ margin: compact ? '27px 0 10px' : '0 0 10px' }}>Instances</div>
+          {servers.map((server) => <button key={server.id} className={`server-item ${selectedId === server.id ? 'active' : ''}`} onClick={() => changeServer(server.id)}>
+            <span className="server-icon">{server.name.charAt(0)}</span><span className="server-item-body"><span className="server-item-name">{server.name}</span><span className="server-item-meta"><i className={`server-mini-dot ${server.dot}`} />{server.state}<span>·</span>{server.version}</span></span>
+          </button>)}
+          {!compact && <div className="server-list-footer"><p>只运行一个服务端。切换前，Agent 会提醒你当前实例的状态。</p><button className="add-server" onClick={() => alert('原型：创建新的服务端实例')}>+ 新建服务端</button></div>}</>}
+          {compact && <div className="stage-sidebar-bottom"><button className="server-item" onClick={() => alert('原型：创建新的服务端实例')}><span className="server-icon">+</span><span className="server-item-name">新建服务端</span></button></div>}
+        </aside>;
+      }
+
+       function MainTopbar({ selected, selectedId, changeServer, serverState, runAction, openMapEditor, stage = false }) {
+        return <header className={stage ? 'stage-topbar' : 'main-topbar'}>
+          <div><div className="breadcrumb">WORKSPACE / {selected.id.toUpperCase()}</div><h1 className="workspace-title">{selected.name}</h1><div className="title-status"><i className={`server-mini-dot ${serverState === '运行中' ? 'live' : serverState === '启动中' ? 'warn' : ''}`} />{serverState} <span>·</span> Java 21 <span>·</span> 2.4 GB / 4 GB</div></div>
+           <label className="mobile-server-picker"><span>实例</span><select value={selectedId} onChange={(event) => changeServer(event.target.value)}>{servers.map((server) => <option key={server.id} value={server.id}>{server.name}</option>)}</select></label>
+           <div className="run-actions">
+             <button className="btn map-editor" onClick={openMapEditor}>
+               <i data-lucide="map" className="btn-icon" />
+               地图编辑器
+             </button>
+             <button className="btn primary" onClick={() => runAction('start')} disabled={serverState === '运行中' || serverState === '启动中'}>
+              <i data-lucide="play" className="btn-icon" />
+              启动
+            </button>
+            <button className="btn" onClick={() => runAction('restart')} disabled={serverState !== '运行中'}>
+              <i data-lucide="refresh-cw" className="btn-icon" />
+              重启
+            </button>
+            <button className="btn ghost" onClick={() => runAction('stop')} disabled={serverState !== '运行中'}>
+              <i data-lucide="square" className="btn-icon" />
+              停止
+            </button>
+            <button className="btn danger" onClick={() => runAction('kill')} disabled={serverState === '已停止'}>
+              <i data-lucide="x" className="btn-icon" />
+              强制结束
+            </button>
+          </div>
+        </header>;
+       }
+
+       function MapEditorDialog({ selected, onClose, onLaunch }) {
+         const [world, setWorld] = useState('world');
+         const [selectedRegions, setSelectedRegions] = useState([8, 9, 14, 15]);
+         const worlds = [{ id: 'world', label: '主世界', detail: 'world / 1,284 regions' }, { id: 'nether', label: '下界', detail: 'world_nether / 382 regions' }, { id: 'end', label: '末地', detail: 'world_the_end / 96 regions' }];
+         const toggleRegion = (index) => {
+           if ([0, 5, 30, 35].includes(index)) return;
+           setSelectedRegions((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
+         };
+         return <div className="map-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+           <section className="map-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="map-editor-title">
+             <header className="map-editor-head"><div><span className="panel-label">MCA SELECTOR</span><h2 id="map-editor-title">地图编辑器</h2><p className="map-editor-copy">为 {selected.name} 选择要在 MCA Selector 中打开的区域。</p></div><button className="icon-button" onClick={onClose} aria-label="关闭地图编辑器"><i data-lucide="x" className="btn-icon" /></button></header>
+             <div className="map-editor-body"><nav className="map-worlds" aria-label="世界维度"><span className="panel-label">世界</span>{worlds.map((item) => <button key={item.id} className={`map-world ${world === item.id ? 'active' : ''}`} onClick={() => setWorld(item.id)}>{item.label}<small>{item.detail}</small></button>)}</nav><div className="map-selector"><div className="map-selector-head"><strong>{worlds.find((item) => item.id === world)?.label}区域</strong><span>r.-2.-1.mca to r.3.4.mca</span></div><div className="region-grid" aria-label="MCA 区域选择网格">{Array.from({ length: 36 }, (_, index) => <button key={index} className={`region-cell ${selectedRegions.includes(index) ? 'selected' : ''} ${[0, 5, 30, 35].includes(index) ? 'unavailable' : ''}`} onClick={() => toggleRegion(index)} aria-label={`区域 ${index + 1}`} aria-pressed={selectedRegions.includes(index)} />)}</div><div className="selection-summary"><span>已选择 <strong>{selectedRegions.length}</strong> 个区域</span><span>点击网格调整选择</span></div></div></div>
+             <footer className="map-editor-foot"><button className="btn ghost" onClick={onClose}>取消</button><button className="btn primary" onClick={onLaunch} disabled={selectedRegions.length === 0}><i data-lucide="external-link" className="btn-icon" />在 MCA Selector 中打开</button></footer>
+           </section>
+         </div>;
+       }
+
+      function ChatView({ messages, draft, setDraft, sendMessage, isBusy, taskProgress, compact = false }) {
+        return <div className="chat-area">
+          <div className="chat-toolbar"><div className="toolbar-left"><span className="mode-tag">{compact ? 'AGENT / GUIDED' : 'AGENT / READY'}</span><span>上下文 18%</span></div><div className="toolbar-right"><span>思考深度：高</span><button className="section-action" onClick={() => alert('原型：打开会话设置')}>会话设置</button></div></div>
+          <div className="chat-scroll">
+            {messages.map((message, index) => <div className={`message-row ${message.role}`} key={`${message.time}-${index}`}><div className="message-avatar">{message.role === 'agent' ? 'A/' : '你'}</div><div className="message-stack"><div className="message-meta"><strong>{message.role === 'agent' ? 'Server Agent' : '你'}</strong><span>{message.time}</span></div><div className="message-bubble"><p>{message.text}</p>{message.tasks && <div className="task-card">{message.tasks.map((task, taskIndex) => <div className={`task-line ${taskProgress >= 100 || taskIndex < Math.floor(taskProgress / 34) ? 'done' : taskIndex === Math.floor(taskProgress / 34) ? 'active' : ''}`} key={task}><span className="task-check">{taskProgress >= 100 || taskIndex < Math.floor(taskProgress / 34) ? '✓' : taskIndex === Math.floor(taskProgress / 34) && isBusy ? '·' : ''}</span><span>{task}</span>{taskProgress < 100 && taskIndex === Math.floor(taskProgress / 34) && isBusy && <span style={{ marginLeft: 'auto', color: 'var(--amber)', animation: 'pulse 1.3s infinite' }}>处理中</span>}</div>)}</div>}</div></div></div>)}
+            {isBusy && <div className="message-row agent"><div className="message-avatar">A/</div><div className="message-stack"><div className="message-meta"><strong>Server Agent</strong><span>现在</span></div><div className="message-bubble" style={{ color: 'var(--muted)' }}>正在读取服务端状态<span style={{ color: 'var(--teal)' }}> ···</span></div></div></div>}
+          </div>
+          <form className="chat-composer" onSubmit={sendMessage}><div className="composer-shell"><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="告诉 Agent 你想完成什么…" rows="2" /><div className="composer-footer"><div className="composer-tools"><button type="button" className="tool-button" onClick={() => alert('原型：上传文件')}>+ 文件</button><button type="button" className="tool-button" onClick={() => setDraft('请先检查当前服务端状态，不要修改配置。')}>插入任务模板</button><span className="composer-hint">⌘ ↵ 发送</span></div><button className="send-button" type="submit" disabled={!draft.trim() || isBusy}>{isBusy ? '处理中' : '发送任务'}</button></div></div></form>
+        </div>;
+      }
+
+      function ConsolePanel({ logs, command, setCommand, sendCommand }) {
+        return <section className="inspector-section fill log-card"><div className="section-head"><h2 className="section-title">Live console</h2><button className="section-action" onClick={() => alert('原型：打开完整日志')}>查看全部</button></div><div className="console-scroll">{logs.map((line, index) => <div className="log-line" key={`${line[0]}-${index}`}><span className="log-time">{line[0]}</span><span className={`log-level ${line[1] === 'WARN' ? 'warn' : line[1] === 'ERROR' ? 'error' : ''}`}>{line[1]}</span><span className="log-message">{line[2]}</span></div>)}</div><form className="log-input" onSubmit={sendCommand}><input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="输入控制台指令" /><button type="submit">发送</button></form></section>;
+      }
+
+      function Inspector({ logs, command, setCommand, sendCommand, taskProgress }) {
+        return <aside className="inspector"><div className="inspector-section"><div className="section-head"><h2 className="section-title">Runtime</h2><button className="section-action" onClick={() => alert('原型：打开运行时详情')}>•••</button></div><div className="metric"><strong>2.4 <small style={{ fontSize: 11, color: 'var(--muted)' }}>GB</small></strong><span>内存使用</span></div><div className="progress"><span style={{ width: '60%' }} /></div></div><div className="inspector-section"><div className="stat-grid"><div className="stat-cell"><span>在线玩家</span><strong>8 / 20</strong></div><div className="stat-cell"><span>TPS</span><strong style={{ color: 'var(--teal)' }}>19.8</strong></div><div className="stat-cell"><span>版本</span><strong>1.21.4</strong></div><div className="stat-cell"><span>端口</span><strong>25565</strong></div></div></div><div className="inspector-section"><div className="section-head"><h2 className="section-title">Current task</h2><span className="panel-label">{taskProgress}%</span></div><div className="progress"><span style={{ width: `${taskProgress}%` }} /></div><p style={{ color: 'var(--muted)', fontSize: 11, lineHeight: 1.5, margin: '10px 0 0' }}>{taskProgress >= 100 ? '检查完成，等待下一步指令。' : 'Agent 正在读取最近连接记录。'}</p></div><ConsolePanel logs={logs} command={command} setCommand={setCommand} sendCommand={sendCommand} /></aside>;
+      }
+
+      function DockedConsole(props) {
+        return <div className="workspace docked"><IconRail activeNav={props.activeNav} setActiveNav={props.setActiveNav} /><ServerList selectedId={props.selectedId} changeServer={props.changeServer} /><main className="main-stage"><MainTopbar {...props} /><ChatView {...props} /></main><Inspector {...props} /></div>;
+      }
+
+      function WorkflowPanel({ taskProgress, setTaskProgress }) {
+        const steps = [['理解请求', '已确认目标和限制', 'done'], ['检查服务状态', taskProgress >= 100 ? '检查完成' : '正在读取最近连接日志', taskProgress >= 100 ? 'done' : 'active'], ['给出安全建议', taskProgress >= 100 ? '可以继续处理' : '等待上一步完成', taskProgress >= 100 ? 'done' : ''], ['执行变更', '需要你的明确确认', '']];
+        return <aside className="workflow-panel"><div className="workflow-intro"><span className="panel-label">Active workflow</span><h3>排查玩家连接问题</h3><p>Agent 正在以只读方式检查实例。任何修改配置、重启或删除操作都会单独请求确认。</p></div><div className="section-head"><h2 className="section-title">Progress</h2><span className="panel-label">{taskProgress >= 100 ? 'COMPLETE' : 'RUNNING'}</span></div><div className="progress" style={{ marginBottom: 21 }}><span style={{ width: `${taskProgress}%` }} /></div><div className="workflow-steps">{steps.map(([title, detail, state]) => <div className={`workflow-step ${state}`} key={title}><h4>{title}</h4><p>{detail}</p><span className="workflow-step-status">{state === 'done' ? 'DONE' : state === 'active' ? 'IN PROGRESS' : 'WAITING'}</span></div>)}</div><div className="workflow-stat"><div className="stat-cell"><span>只读检查</span><strong>3 项</strong></div><div className="stat-cell"><span>待确认</span><strong>0 项</strong></div></div><button className="btn" style={{ width: '100%', marginTop: 15 }} onClick={() => setTaskProgress(100)}>模拟完成检查</button></aside>;
+      }
+
+      function WorkflowStage(props) {
+        return <div className="workspace stage"><ServerList selectedId={props.selectedId} changeServer={props.changeServer} activeNav={props.activeNav} setActiveNav={props.setActiveNav} compact /><main className="stage-main"><MainTopbar {...props} stage /><div className="stage-content"><section className="stage-chat"><ChatView {...props} compact /></section><WorkflowPanel taskProgress={props.taskProgress} setTaskProgress={props.setTaskProgress} /></div></main></div>;
+      }
+
+      function CommandBridge(props) {
+        return <div className="workspace bridge"><IconRail activeNav={props.activeNav} setActiveNav={props.setActiveNav} bridge /><ServerList selectedId={props.selectedId} changeServer={props.changeServer} collapsible collapsedByDefault /><main className="bridge-main"><MainTopbar {...props} /><div className="bridge-columns"><section className="bridge-chat"><ChatView {...props} /></section><aside className="bridge-terminal"><div className="terminal-head"><span className="terminal-title">TERMINAL / LIVE</span><span className="panel-label">LOCALHOST</span></div><div className="terminal-window"><div className="terminal-command">$ agent inspect --server {props.selected.id}</div><div className="terminal-output">status: {props.serverState.toLowerCase()}</div><div className="terminal-output">version: {props.selected.version}</div><div className="terminal-output">players: 8/20</div><br />{props.logs.slice(0, 6).map((line, index) => <div className="terminal-output" key={`${line[0]}-${index}`}>[{line[0]}] {line[1]} {line[2]}</div>)}<div className="terminal-prompt"><span>$</span><input value={props.command} onChange={(event) => props.setCommand(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') props.sendCommand(event); }} placeholder="run command" /></div></div><button className="btn" style={{ marginTop: 10 }} onClick={() => alert('原型：打开完整终端窗口')}>在独立终端中打开</button></aside></div></main></div>;
+      }
+
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+  </body>
+</html>

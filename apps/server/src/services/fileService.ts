@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { copyFile, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -24,6 +25,11 @@ interface DownloadOptions {
   onProgress?: (progress: DownloadProgressUpdate) => void;
 }
 
+export interface VerifiedDownloadOptions extends DownloadOptions {
+  expectedHashes?: Record<string, string>;
+  expectedSize?: number | null;
+}
+
 interface ExtractOptions {
   onProgress?: (progress: { entriesExtracted: number; percent: number; currentEntry: string }) => void;
 }
@@ -31,6 +37,46 @@ interface ExtractOptions {
 interface ReadTextOptions {
   maxChars?: number;
   offset?: number;
+}
+
+export interface CurseForgeManifestFile {
+  projectId: string;
+  fileId: string;
+  required: boolean;
+}
+
+export interface CurseForgeManifestSlotInfo {
+  slot: ServerSlotStatus;
+  name: string;
+  version: string;
+  minecraftVersion: string;
+  loaders: string[];
+  files: CurseForgeManifestFile[];
+  overridesPath: string | null;
+}
+
+export interface MrpackFileEnvironment {
+  client: "required" | "optional" | "unsupported";
+  server: "required" | "optional" | "unsupported";
+}
+
+export interface MrpackFile {
+  path: string;
+  downloads: string[];
+  hashes: Record<string, string>;
+  fileSize: number | null;
+  env: MrpackFileEnvironment;
+}
+
+export interface MrpackSlotInfo {
+  slot: ServerSlotStatus;
+  formatVersion: number;
+  name: string;
+  versionId: string;
+  minecraftVersion: string;
+  dependencies: Record<string, string>;
+  files: MrpackFile[];
+  overrideDirectories: string[];
 }
 
 const textExtensions = new Set([
@@ -83,6 +129,172 @@ function isTarGzFile(fileName: string) {
 
 function isZipFile(fileName: string) {
   return fileName.toLowerCase().endsWith(".zip");
+}
+
+function isMrpackFile(fileName: string) {
+  return fileName.toLowerCase().endsWith(".mrpack");
+}
+
+function isSafeRelativeArchivePath(value: string) {
+  const normalized = value.replaceAll("\\", "/");
+  return Boolean(normalized)
+    && !normalized.startsWith("/")
+    && !normalized.split("/").includes("..")
+    && !/^[a-zA-Z]:/.test(normalized);
+}
+
+function mrpackEnvironment(value: unknown): MrpackFileEnvironment {
+  const environment = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+  const field = (key: "client" | "server") => {
+    const current = environment[key];
+    return current === "required" || current === "optional" || current === "unsupported"
+      ? current
+      : "required";
+  };
+  return { client: field("client"), server: field("server") };
+}
+
+function parseMrpackIndex(value: unknown, slot: ServerSlotStatus, overrideDirectories: string[]): MrpackSlotInfo {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("服务端槽位中的 modrinth.index.json 不是有效对象");
+  }
+  const index = value as Record<string, unknown>;
+  if (index.game !== "minecraft") throw new Error("modrinth.index.json 不是 Minecraft 整合包清单");
+  const formatVersion = Number(index.formatVersion);
+  if (!Number.isInteger(formatVersion) || formatVersion < 1) {
+    throw new Error("modrinth.index.json 缺少或包含无效的 formatVersion");
+  }
+  const dependenciesValue = index.dependencies;
+  if (!dependenciesValue || typeof dependenciesValue !== "object" || Array.isArray(dependenciesValue)) {
+    throw new Error("modrinth.index.json 缺少 dependencies");
+  }
+  const dependencies = Object.fromEntries(
+    Object.entries(dependenciesValue as Record<string, unknown>)
+      .flatMap(([key, dependency]) => typeof dependency === "string" && dependency.trim() ? [[key, dependency.trim()]] : [])
+  );
+  const minecraftVersion = dependencies.minecraft || "";
+  if (!minecraftVersion) throw new Error("modrinth.index.json dependencies 缺少 minecraft 版本");
+  if (!Array.isArray(index.files)) throw new Error("modrinth.index.json 缺少 files 数组");
+
+  const seenPaths = new Set<string>();
+  const files: MrpackFile[] = [];
+  for (const entry of index.files) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("modrinth.index.json 包含无效文件条目");
+    }
+    const file = entry as Record<string, unknown>;
+    const relativePath = typeof file.path === "string" ? file.path.trim().replaceAll("\\", "/") : "";
+    if (!isSafeRelativeArchivePath(relativePath)) {
+      throw new Error(`modrinth.index.json 包含不安全文件路径：${relativePath || "(空)"}`);
+    }
+    const pathKey = relativePath.toLowerCase();
+    if (seenPaths.has(pathKey)) throw new Error(`modrinth.index.json 包含重复文件路径：${relativePath}`);
+    seenPaths.add(pathKey);
+
+    const downloads = Array.isArray(file.downloads)
+      ? file.downloads.filter((download): download is string => typeof download === "string" && download.trim().length > 0)
+      : [];
+    if (downloads.length === 0) throw new Error(`modrinth.index.json 文件 ${relativePath} 缺少 downloads`);
+    for (const download of downloads) {
+      let url: URL;
+      try {
+        url = new URL(download);
+      } catch {
+        throw new Error(`modrinth.index.json 文件 ${relativePath} 包含无效下载地址：${download}`);
+      }
+      if (url.protocol !== "https:") throw new Error(`modrinth.index.json 文件 ${relativePath} 只能使用 HTTPS 下载地址`);
+    }
+
+    const hashes = file.hashes && typeof file.hashes === "object" && !Array.isArray(file.hashes)
+      ? Object.fromEntries(
+        Object.entries(file.hashes as Record<string, unknown>)
+          .flatMap(([algorithm, hash]) => typeof hash === "string" && /^[a-f0-9]+$/i.test(hash) ? [[algorithm.toLowerCase(), hash.toLowerCase()]] : [])
+      )
+      : {};
+    if (!hashes.sha512 && !hashes.sha1) throw new Error(`modrinth.index.json 文件 ${relativePath} 缺少 sha512/sha1 哈希`);
+    files.push({
+      path: relativePath,
+      downloads,
+      hashes,
+      fileSize: typeof file.fileSize === "number" && Number.isFinite(file.fileSize) ? file.fileSize : null,
+      env: mrpackEnvironment(file.env)
+    });
+  }
+
+  return {
+    slot,
+    formatVersion,
+    name: typeof index.name === "string" ? index.name.trim() : "",
+    versionId: typeof index.versionId === "string" ? index.versionId.trim() : "",
+    minecraftVersion,
+    dependencies,
+    files,
+    overrideDirectories
+  };
+}
+
+function parseCurseForgeManifest(value: unknown, slot: ServerSlotStatus): CurseForgeManifestSlotInfo {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("服务端槽位中的 manifest.json 不是有效对象");
+  }
+  const manifest = value as Record<string, unknown>;
+  if (manifest.manifestType !== "minecraftModpack") {
+    throw new Error("服务端槽位中的 manifest.json 不是 CurseForge Minecraft 整合包清单");
+  }
+  const minecraft = manifest.minecraft;
+  if (!minecraft || typeof minecraft !== "object" || Array.isArray(minecraft)) {
+    throw new Error("CurseForge manifest.json 缺少 minecraft 配置");
+  }
+  const minecraftConfig = minecraft as Record<string, unknown>;
+  const minecraftVersion = typeof minecraftConfig.version === "string" ? minecraftConfig.version.trim() : "";
+  if (!minecraftVersion) throw new Error("CurseForge manifest.json 缺少 Minecraft 版本");
+
+  const loaders = Array.isArray(minecraftConfig.modLoaders)
+    ? minecraftConfig.modLoaders.flatMap((loader) => {
+      if (!loader || typeof loader !== "object" || Array.isArray(loader)) return [];
+      const id = (loader as Record<string, unknown>).id;
+      return typeof id === "string" && id.trim() ? [id.trim()] : [];
+    })
+    : [];
+  if (loaders.length === 0) throw new Error("CurseForge manifest.json 缺少 Loader 配置");
+
+  if (!Array.isArray(manifest.files) || manifest.files.length === 0) {
+    throw new Error("CurseForge manifest.json 不包含任何模组文件");
+  }
+  const seen = new Set<string>();
+  const files: CurseForgeManifestFile[] = [];
+  for (const entry of manifest.files) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new Error("CurseForge manifest.json 包含无效的文件条目");
+    }
+    const file = entry as Record<string, unknown>;
+    const projectId = String(file.projectID ?? "").trim();
+    const fileId = String(file.fileID ?? "").trim();
+    if (!/^\d+$/.test(projectId) || !/^\d+$/.test(fileId) || Number(projectId) <= 0 || Number(fileId) <= 0) {
+      throw new Error("CurseForge manifest.json 包含无效的 projectID/fileID");
+    }
+    const key = `${projectId}:${fileId}`;
+    if (seen.has(key)) throw new Error(`CurseForge manifest.json 包含重复文件：${key}`);
+    seen.add(key);
+    files.push({ projectId, fileId, required: file.required !== false });
+  }
+
+  const rawOverrides = typeof manifest.overrides === "string" ? manifest.overrides.trim().replaceAll("\\", "/") : "";
+  if (rawOverrides && (rawOverrides.startsWith("/") || rawOverrides.split("/").includes("..") || /^[a-zA-Z]:/.test(rawOverrides))) {
+    throw new Error("CurseForge manifest.json 包含不安全的 overrides 路径");
+  }
+
+  return {
+    slot,
+    name: typeof manifest.name === "string" ? manifest.name.trim() : "",
+    version: typeof manifest.version === "string" ? manifest.version.trim() : "",
+    minecraftVersion,
+    loaders,
+    files,
+    overridesPath: rawOverrides || null
+  };
 }
 
 function safeDownloadName(url: string, fallback: string) {
@@ -293,6 +505,72 @@ export class FileService {
     }
   }
 
+  async downloadVerifiedIntoServer(serverId: string, url: string, destinationPath: string, options: VerifiedDownloadOptions = {}) {
+    const expectedHashes = Object.fromEntries(
+      Object.entries(options.expectedHashes ?? {})
+        .filter(([algorithm, value]) => /^(sha1|sha256|sha512)$/i.test(algorithm) && /^[a-f0-9]+$/i.test(value))
+        .map(([algorithm, value]) => [algorithm.toLowerCase(), value.toLowerCase()])
+    );
+    if (Object.keys(expectedHashes).length === 0) throw new Error("缺少可验证的文件哈希");
+
+    const { signal, onProgress, proxyUrl } = options;
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") throw new Error("Only HTTPS downloads are allowed");
+    const base = await this.getBase(serverId);
+    const destination = await resolveWithin(base, destinationPath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    const tempDestination = path.join(path.dirname(destination), `.${path.basename(destination)}.${Date.now()}.verified-download`);
+    let output: ReturnType<typeof createWriteStream> | null = null;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    const hashes = new Map(Object.keys(expectedHashes).map((algorithm) => [algorithm, createHash(algorithm)]));
+    let loadedBytes = 0;
+
+    try {
+      throwIfAborted(signal);
+      const response = await fetch(parsed, { headers: { "user-agent": "MinecraftServerAgent/0.1" }, signal, dispatcher: fetchDispatcher(proxyUrl) });
+      if (!response.ok || !response.body) throw new Error(`Download failed: HTTP ${response.status} ${response.statusText}`);
+      const totalBytes = Number(response.headers.get("content-length")) || options.expectedSize || null;
+      const report = (percentOverride?: number) => {
+        const percent = typeof percentOverride === "number"
+          ? percentOverride
+          : totalBytes ? Math.min(99, Math.floor((loadedBytes / totalBytes) * 100)) : 0;
+        onProgress?.({ loadedBytes, totalBytes, percent });
+      };
+      output = createWriteStream(tempDestination);
+      reader = response.body.getReader();
+      report();
+      while (true) {
+        throwIfAborted(signal);
+        const { done, value } = await reader.read();
+        throwIfAborted(signal);
+        if (done) break;
+        if (!value) continue;
+        loadedBytes += value.byteLength;
+        for (const hash of hashes.values()) hash.update(value);
+        await writeChunk(output, value);
+        report();
+      }
+      await finishStream(output);
+      output = null;
+      if (options.expectedSize !== null && options.expectedSize !== undefined && loadedBytes !== options.expectedSize) {
+        throw new Error(`文件大小校验失败：期望 ${options.expectedSize} 字节，实际 ${loadedBytes} 字节`);
+      }
+      const mismatches = [...hashes.entries()]
+        .filter(([algorithm, hash]) => hash.digest("hex") !== expectedHashes[algorithm])
+        .map(([algorithm]) => algorithm);
+      if (mismatches.length > 0) throw new Error(`文件哈希校验失败：${mismatches.join(", ")}`);
+      await rename(tempDestination, destination);
+      report(100);
+      return toRelative(base, destination);
+    } catch (error) {
+      output?.destroy();
+      await reader?.cancel().catch(() => undefined);
+      await rm(tempDestination, { force: true }).catch(() => undefined);
+      if (signal?.aborted || error instanceof Error && error.name === "AbortError") throw abortError();
+      throw error;
+    }
+  }
+
   async getServerSlotStatus(serverId: string): Promise<ServerSlotStatus> {
     const slotDir = await this.getServerSlotBase(serverId);
     const entries = await readdir(slotDir, { withFileTypes: true }).catch(() => []);
@@ -386,6 +664,9 @@ export class FileService {
   async extractServerSlotIntoServer(serverId: string, destinationPath = ".", options: ExtractOptions = {}) {
     const slot = await this.getServerSlotStatus(serverId);
     if (!slot.filePath || !slot.fileName) throw new Error("服务端槽位为空");
+    if (isMrpackFile(slot.fileName)) {
+      throw new Error("服务端槽位是 Modrinth .mrpack，不能用 extract_server_slot_to_workspace 解压。请先调用 inspect_mrpack_server_slot，再调用 deploy_mrpack_server_from_server_slot。");
+    }
     if (!isZipFile(slot.fileName) && !isTarGzFile(slot.fileName)) throw new Error("服务端槽位文件不是 zip/tar.gz/tgz，无法解压");
     const base = await this.getBase(serverId);
     const destination = await resolveWithin(base, destinationPath);
@@ -396,6 +677,78 @@ export class FileService {
     });
     options.onProgress?.({ entriesExtracted, percent: 100, currentEntry: "完成" });
     return { slot, destinationPath: toRelative(base, destination), entriesExtracted };
+  }
+
+  async inspectCurseForgeManifestServerSlot(serverId: string): Promise<CurseForgeManifestSlotInfo> {
+    return this.withStagedCurseForgeManifest(serverId, async ({ manifest }) => manifest);
+  }
+
+  async inspectMrpackServerSlot(serverId: string): Promise<MrpackSlotInfo> {
+    return this.withStagedMrpack(serverId, async ({ info }) => info);
+  }
+
+  async materializeMrpackOverrides(serverId: string, destinationPath = "server", overwrite = false) {
+    const base = await this.getBase(serverId);
+    const destination = await resolveWithin(base, destinationPath);
+    return this.withStagedMrpack(serverId, async ({ info, stagingDirectory }) => {
+      const copiedOverrides: string[] = [];
+      await mkdir(destination, { recursive: true });
+      for (const directory of info.overrideDirectories) {
+        if (directory !== "overrides" && directory !== "server-overrides") {
+          throw new Error(`不支持的 mrpack overrides 目录：${directory}`);
+        }
+        const source = await resolveWithin(stagingDirectory, directory, { mustExist: true });
+        const sourceInfo = await stat(source);
+        if (!sourceInfo.isDirectory()) throw new Error(`mrpack overrides 路径不是目录：${directory}`);
+        const entries = await readdir(source, { withFileTypes: true });
+        for (const entry of entries) {
+          const sourceEntry = path.join(source, entry.name);
+          const targetEntry = await resolveWithin(base, path.join(destinationPath, entry.name));
+          await this.copyTree(sourceEntry, targetEntry, overwrite);
+          copiedOverrides.push(toRelative(base, targetEntry));
+        }
+      }
+      return { info, copiedOverrides };
+    });
+  }
+
+  private async copyTree(source: string, destination: string, overwrite: boolean) {
+    const sourceInfo = await stat(source);
+    const destinationInfo = await stat(destination).catch(() => null);
+    if (!destinationInfo) {
+      await cp(source, destination, { recursive: true, force: false, errorOnExist: true });
+      return;
+    }
+    if (!sourceInfo.isDirectory() || !destinationInfo.isDirectory()) {
+      if (!overwrite) throw new Error(`目标文件已存在，拒绝覆盖：${destination}`);
+      await cp(source, destination, { recursive: true, force: true });
+      return;
+    }
+    const entries = await readdir(source, { withFileTypes: true });
+    for (const entry of entries) {
+      await this.copyTree(path.join(source, entry.name), path.join(destination, entry.name), overwrite);
+    }
+  }
+
+  async materializeCurseForgeManifestOverrides(serverId: string, destinationPath = "server") {
+    const base = await this.getBase(serverId);
+    const destination = await resolveWithin(base, destinationPath);
+    return this.withStagedCurseForgeManifest(serverId, async ({ manifest, stagingDirectory }) => {
+      if (!manifest.overridesPath) return { manifest, copiedOverrides: [] as string[] };
+      const overridesDirectory = await resolveWithin(stagingDirectory, manifest.overridesPath, { mustExist: true });
+      const overridesInfo = await stat(overridesDirectory);
+      if (!overridesInfo.isDirectory()) throw new Error("CurseForge manifest.json 的 overrides 不是目录");
+      await mkdir(destination, { recursive: true });
+      const entries = await readdir(overridesDirectory, { withFileTypes: true });
+      const copiedOverrides: string[] = [];
+      for (const entry of entries) {
+        const source = path.join(overridesDirectory, entry.name);
+        const target = await resolveWithin(base, path.join(destinationPath, entry.name));
+        await cp(source, target, { recursive: true, force: false, errorOnExist: true });
+        copiedOverrides.push(toRelative(base, target));
+      }
+      return { manifest, copiedOverrides };
+    });
   }
 
   async extractArchiveIntoServer(serverId: string, archivePath: string, archiveName: string, destinationPath = ".") {
@@ -421,6 +774,62 @@ export class FileService {
       return;
     }
     throw new Error("Archive is not zip/tar.gz/tgz");
+  }
+
+  private async withStagedCurseForgeManifest<T>(serverId: string, callback: (data: { manifest: CurseForgeManifestSlotInfo; stagingDirectory: string }) => Promise<T>) {
+    const slot = await this.getServerSlotStatus(serverId);
+    if (!slot.filePath || !slot.fileName) throw new Error("服务端槽位为空");
+    if (!isZipFile(slot.fileName)) throw new Error("CurseForge 清单整合包必须位于服务端槽位中的 .zip 文件");
+    const stagingDirectory = path.join(path.dirname(slot.filePath), `.curseforge-manifest-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      await this.extractZipArchive(slot.filePath, stagingDirectory);
+      const manifestPath = path.join(stagingDirectory, "manifest.json");
+      const manifestText = await readFile(manifestPath, "utf8").catch(() => {
+        throw new Error("服务端槽位 ZIP 根目录缺少 manifest.json，不能按 CurseForge 清单包安装");
+      });
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(manifestText);
+      } catch {
+        throw new Error("服务端槽位中的 manifest.json 不是有效 JSON");
+      }
+      const manifest = parseCurseForgeManifest(parsed, slot);
+      return await callback({ manifest, stagingDirectory });
+    } finally {
+      await rm(stagingDirectory, { recursive: true, force: true });
+    }
+  }
+
+  private async withStagedMrpack<T>(serverId: string, callback: (data: { info: MrpackSlotInfo; index: unknown; stagingDirectory: string; overrideDirectories: string[] }) => Promise<T>) {
+    const slot = await this.getServerSlotStatus(serverId);
+    if (!slot.filePath || !slot.fileName) throw new Error("服务端槽位为空");
+    if (!isMrpackFile(slot.fileName)) throw new Error("Modrinth 整合包必须位于服务端槽位中的 .mrpack 文件");
+    const stagingDirectory = path.join(path.dirname(slot.filePath), `.mrpack-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      await this.extractZipArchive(slot.filePath, stagingDirectory);
+      const indexPath = path.join(stagingDirectory, "modrinth.index.json");
+      const indexText = await readFile(indexPath, "utf8").catch(() => {
+        throw new Error("服务端槽位 .mrpack 根目录缺少 modrinth.index.json");
+      });
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(indexText);
+      } catch {
+        throw new Error("服务端槽位中的 modrinth.index.json 不是有效 JSON");
+      }
+      // Modrinth mrpack: overrides/ (client+server) and server-overrides/ (server only).
+      // Copy whole trees so root files like overrides/options.txt are not dropped.
+      const overrideDirectories: string[] = [];
+      for (const directory of ["overrides", "server-overrides"]) {
+        const source = path.join(stagingDirectory, directory);
+        const sourceInfo = await stat(source).catch(() => null);
+        if (sourceInfo?.isDirectory()) overrideDirectories.push(directory);
+      }
+      const info = parseMrpackIndex(parsed, slot, overrideDirectories);
+      return await callback({ info, index: parsed, stagingDirectory, overrideDirectories });
+    } finally {
+      await rm(stagingDirectory, { recursive: true, force: true });
+    }
   }
 
   private async extractZipArchive(zipPath: string, destination: string, onEntry?: (entryName: string) => void) {

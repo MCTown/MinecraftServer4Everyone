@@ -1,19 +1,42 @@
 <script setup lang="ts">
-import { Marked, Renderer } from "marked";
-import type { Tokens } from "marked";
 import type { UploadProgress } from "~/composables/useApi";
-import type { AgentConfirmationRequest, AgentDownloadProgress, AgentMessage, AgentRetryState, AgentSettings, AgentStatus, AgentToolConfigRequired, AgentToolConfigRequirement, AgentToolRecord, AgentToolSettings, AgentWorkflowProgress, AgentWorkflowStepStatus, ConsoleLogEntry, FileEntry, JavaDownloadSource, JavaDownloadSourceOption, JavaInstall, JavaInstallTask, JavaInstallTaskStatus, JavaManagementState, JavaVersionRecord, ModelConfig, ProxyTestResult, ServerRecord, ServerSlotStatus, SkillRecord, ToolConfigKey } from "~/types/app";
+import AgentConfirmationDialog from "~/components/dialogs/AgentConfirmationDialog.vue";
+import CreateServerDialog from "~/components/dialogs/CreateServerDialog.vue";
+import DeleteServerDialog from "~/components/dialogs/DeleteServerDialog.vue";
+import FileManagerDialog from "~/components/dialogs/FileManagerDialog.vue";
+import GlobalPromptEditorDialog from "~/components/dialogs/GlobalPromptEditorDialog.vue";
+import InstanceSwitcherDialog from "~/components/dialogs/InstanceSwitcherDialog.vue";
+import ProviderKeyDialog from "~/components/dialogs/ProviderKeyDialog.vue";
+import ProxyTestDialog from "~/components/dialogs/ProxyTestDialog.vue";
+import ServerConfigDialog from "~/components/dialogs/ServerConfigDialog.vue";
+import TextFileEditorDialog from "~/components/dialogs/TextFileEditorDialog.vue";
+import WorkspaceSettingsPanel from "~/components/settings/WorkspaceSettingsPanel.vue";
+import AgentPanel from "~/components/workspace/AgentPanel.vue";
+import ConsolePanel from "~/components/workspace/ConsolePanel.vue";
+import DeploymentProgressPanel from "~/components/workspace/DeploymentProgressPanel.vue";
+import EmptyWorkspaceLanding from "~/components/workspace/EmptyWorkspaceLanding.vue";
+import InstanceTopbar from "~/components/workspace/InstanceTopbar.vue";
+import ServerSidebar from "~/components/workspace/ServerSidebar.vue";
+import type { AgentConfirmationRequest, AgentContextUsage, AgentDownloadProgress, AgentMessage, AgentRetryState, AgentSettings, AgentStatus, AgentToolConfigRequired, AgentToolConfigRequirement, AgentToolRecord, AgentToolSettings, AgentWorkflowProgress, AgentWorkflowStepStatus, ConsoleLogEntry, FileEntry, JavaDownloadSource, JavaDownloadSourceOption, JavaInstall, JavaInstallTask, JavaInstallTaskStatus, JavaManagementState, JavaVersionRecord, ModelConfig, ProxyTestResult, ServerErrorDigest, ServerErrorState, ServerRecord, ServerSlotStatus, SkillRecord, ToolConfigKey } from "~/types/app";
+import { renderConsoleLogs } from "~/utils/consoleRendering";
+import type { RenderedConsoleLogEntry } from "~/utils/consoleRendering";
+import { formatBytes, formatMemoryConfig, formatMemoryMb, parseMemoryToMb } from "~/utils/formatters";
+import { useStatusBubbles } from "~/composables/useStatusBubbles";
+import type { PendingAgentAttachment, ServerConfigForm, SettingsNavItem, SettingsTab, StatusBubbleItem, StatusBubbleType, UploadState } from "~/types/ui";
 
 definePageMeta({ middleware: "auth" });
 
 const { api, upload, downloadUrl } = useApi();
 const runtime = useRuntimeConfig();
 const clock = useClock();
+const router = useRouter();
 
 const servers = ref<ServerRecord[]>([]);
 const serversLoaded = ref(false);
 const selectedServerId = ref("");
 const logs = ref<ConsoleLogEntry[]>([]);
+const serverErrorStates = ref<Record<string, ServerErrorState>>({});
+const errorAnalysisSending = ref(false);
 const files = ref<FileEntry[]>([]);
 const currentPath = ref(".");
 const agentMessages = ref<AgentMessage[]>([]);
@@ -41,77 +64,56 @@ const agentDownloadProxyUrl = ref("");
 const agentMemoryMb = ref(2048);
 const systemMemoryMb = ref(2048);
 const consoleCommand = ref("");
+const consoleCommandHistories = ref<Record<string, string[]>>({});
+const consoleCommandHistory = computed(() => consoleCommandHistories.value[selectedServerId.value] ?? []);
 const agentInput = ref("");
 const agentReasoningEffort = ref<"minimal" | "low" | "medium" | "high">("high");
 const agentStatus = ref<AgentStatus>("idle");
-const agentMessageList = ref<HTMLElement | null>(null);
-const consoleLogList = ref<HTMLElement | null>(null);
 const showAgentScrollToBottom = ref(false);
-const agentUploadInput = ref<HTMLInputElement | null>(null);
-const serverUploadInput = ref<HTMLInputElement | null>(null);
 const settingsOpen = ref(false);
-const sidebarCollapsed = ref(false);
+const settingsTab = ref<SettingsTab>("model");
+const settingsNavItems: SettingsNavItem[] = [
+  { id: "model", label: "模型配置", desc: "Base URL / 模型 / 上下文" },
+  { id: "skills", label: "Skills", desc: "Agent 技能与开关" },
+  { id: "tools", label: "Tools", desc: "Agent 工具与 API Key" },
+  { id: "agent", label: "Agent 设置", desc: "内存 / 代理 / Prompt" },
+  { id: "java", label: "JAVA 管理", desc: "安装与版本管理" }
+];
+const loggingOut = ref(false);
+const instanceMenuOpen = ref(false);
+const restoreInstanceMenuFocus = ref(false);
+const pendingInstanceMenuAction = ref<(() => void) | null>(null);
+const serverSidebar = ref<InstanceType<typeof ServerSidebar> | null>(null);
+const agentPanel = ref<InstanceType<typeof AgentPanel> | null>(null);
+const consolePanel = ref<InstanceType<typeof ConsolePanel> | null>(null);
 const deploymentProgressDismissed = ref(false);
 const fileDialogOpen = ref(false);
 const configDialogOpen = ref(false);
 const textEditor = reactive({ open: false, path: "", content: "" });
+const promptEditor = reactive({ open: false, draft: "", saving: false });
 const createDialogOpen = ref(false);
 const deleteDialog = reactive<{ open: boolean; server: ServerRecord | null; confirmName: string; deleting: boolean; error: string }>({ open: false, server: null, confirmName: "", deleting: false, error: "" });
 const newServerName = ref("我的 Minecraft 服务端");
-const newFolderName = ref("");
+
 const selectedFilePaths = ref<string[]>([]);
 const fileSelectionAnchorPath = ref("");
 const fileDragSelecting = ref(false);
 const filesLoading = ref(false);
 const fixedModelDisplayName = "OpenAI Compatible";
-const modelForm = reactive({ displayName: fixedModelDisplayName, baseUrl: "https://api.openai.com/v1", modelName: "gpt-4o-mini", apiKey: "", isDefault: true });
+const modelForm = reactive({ displayName: fixedModelDisplayName, baseUrl: "https://api.openai.com/v1", modelName: "gpt-4o-mini", apiKey: "", isDefault: true, contextSizeK: 120 });
+const agentContextUsage = ref<AgentContextUsage>({
+  contextSizeK: 120,
+  maxTokens: 120000,
+  usedTokens: 0,
+  remainingTokens: 120000,
+  remainingRatio: 1,
+  remainingPercent: 100
+});
 const modelSaving = ref(false);
 const modelTesting = ref(false);
-const serverForm = reactive({ name: "", javaPath: "", javaVersion: "", minMemory: "1G", maxMemory: "2G", jarFile: "server.jar", startArgs: "nogui", startupCommand: "", minecraftVersion: "", modpackName: "", promptOverride: "", useGlobalPrompt: true });
+const serverForm = reactive<ServerConfigForm>({ name: "", javaPath: "", javaVersion: "", minMemory: "1G", maxMemory: "2G", jarFile: "server.jar", startArgs: "nogui", startupCommand: "", minecraftVersion: "", modpackName: "", promptOverride: "", useGlobalPrompt: true });
 const javaVersionToInstall = ref("21");
 const javaDownloadSource = ref<JavaDownloadSource>("auto-cn");
-
-type StatusBubbleType = "idle" | "loading" | "success" | "error";
-
-interface StatusBubbleItem {
-  id: number;
-  type?: StatusBubbleType;
-  message: string;
-  durationMs?: number;
-  progressKey?: number;
-  download?: AgentDownloadProgress;
-  actionLabel?: string;
-  actionKey?: string;
-}
-
-interface UploadState {
-  active: boolean;
-  fileName: string;
-  loaded: number;
-  total: number;
-  percent: number;
-  done: boolean;
-}
-
-interface PendingAgentAttachment {
-  path: string;
-  originalName: string;
-}
-
-interface ConsoleTextStyle {
-  foreground: string | null;
-  background: string | null;
-  bold: boolean;
-  dim: boolean;
-  italic: boolean;
-  underline: boolean;
-  strike: boolean;
-  inverse: boolean;
-}
-
-interface RenderedConsoleLogEntry extends ConsoleLogEntry {
-  html: string;
-}
 
 type DeploymentProgressState = "not_started" | "running" | "progress" | "completed" | "failed" | "cancelled";
 
@@ -123,15 +125,13 @@ const agentWorkflow = ref<AgentWorkflowProgress | null>(null);
 const serverSlot = ref<ServerSlotStatus | null>(null);
 const agentRetry = ref<AgentRetryState | null>(null);
 const agentRetryNowSending = ref(false);
-const statusBubbles = ref<StatusBubbleItem[]>([]);
+const { items: statusBubbles, clear: clearStatusBubbles, dismiss: dismissStatusBubble, has: hasStatusBubble, show: showStatusBubble, upsert: upsertStatusBubble } = useStatusBubbles();
 
 let consoleSocket: WebSocket | undefined;
 let agentSocket: WebSocket | undefined;
 let javaPollTimer: ReturnType<typeof setInterval> | undefined;
 let socketReconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let agentRetryClockTimer: ReturnType<typeof setInterval> | undefined;
-let nextStatusBubbleId = 0;
-let nextStatusBubbleProgressKey = 0;
 let modelStatusBubbleId: number | undefined;
 let providerKeyStatusBubbleId: number | undefined;
 let socketStatusBubbleId: number | undefined;
@@ -142,32 +142,10 @@ let socketsClosedIntentionally = false;
 let fileDragSelectedPaths = new Set<string>();
 let consoleScrollFrame: number | undefined;
 let agentScrollFrame: number | undefined;
-const statusBubbleTimers = new Map<number, ReturnType<typeof setTimeout>>();
 
-const agentTypewriterDelayMs = 12;
 const agentRetryClock = ref(Date.now());
 const socketReconnectBaseDelayMs = 1000;
 const socketReconnectMaxDelayMs = 10000;
-const agentStreamBuffers = new Map<string, { queue: string[]; timer: ReturnType<typeof setTimeout> | null; serverId: string }>();
-const markdownRenderer = new Renderer();
-
-markdownRenderer.html = ({ text }: Tokens.HTML | Tokens.Tag) => escapeHtml(text);
-markdownRenderer.link = function (this: Renderer, { href, title, tokens }: Tokens.Link) {
-  const label = this.parser.parseInline(tokens);
-  const safeHref = safeMarkdownHref(href);
-  if (!safeHref) return `<span class="markdown-link-disabled">${label}</span>`;
-  const safeTitle = title ? ` title="${escapeHtml(title)}"` : "";
-  return `<a href="${escapeHtml(safeHref)}"${safeTitle} target="_blank" rel="noreferrer noopener">${label}</a>`;
-};
-markdownRenderer.image = ({ href, text }: Tokens.Image) => {
-  const safeHref = safeMarkdownHref(href);
-  const label = escapeHtml(text || href);
-  if (!safeHref) return `<span class="markdown-image-link">图片：${label}</span>`;
-  return `<a class="markdown-image-link" href="${escapeHtml(safeHref)}" target="_blank" rel="noreferrer noopener">图片：${label}</a>`;
-};
-
-const agentMarkdown = new Marked({ async: false, breaks: true, gfm: true, renderer: markdownRenderer });
-
 const selectedServer = computed(() => servers.value.find((server) => server.id === selectedServerId.value) ?? null);
 const hasServers = computed(() => servers.value.length > 0);
 const showEmptyLanding = computed(() => serversLoaded.value && !hasServers.value);
@@ -189,10 +167,38 @@ const hasUnsavedApiKey = computed(() => modelForm.apiKey.length > 0);
 const modelBusy = computed(() => modelSaving.value || modelTesting.value);
 const statusClass = computed(() => selectedServer.value ? `status-${selectedServer.value.status}` : "");
 const serverStatusText = computed(() => selectedServer.value ? statusText(selectedServer.value.status) : "未选择");
-const agentStatusText = computed(() => agentStatusLabel(agentStatus.value));
 const runningServerCount = computed(() => servers.value.filter((server) => server.status === "running").length);
 const crashedServerCount = computed(() => servers.value.filter((server) => server.status === "crashed" || server.status === "orphaned").length);
+const erroredServerIds = computed(() => {
+  const ids = new Set<string>();
+  for (const server of servers.value) {
+    if (serverErrorStates.value[server.id]?.hasError || server.status === "crashed" || server.status === "orphaned") ids.add(server.id);
+  }
+  return ids;
+});
+const selectedServerErrorState = computed(() => selectedServerId.value ? serverErrorStates.value[selectedServerId.value] ?? null : null);
+const selectedServerHasError = computed(() => Boolean(selectedServerId.value && erroredServerIds.value.has(selectedServerId.value)));
 const agentBusy = computed(() => ["thinking", "running", "waiting_confirmation", "retrying"].includes(agentStatus.value));
+const contextRemainingPercent = computed(() => Math.max(0, Math.min(100, agentContextUsage.value.remainingPercent)));
+const contextRingStyle = computed(() => {
+  const remaining = contextRemainingPercent.value;
+  const color = remaining > 40 ? "var(--green)" : remaining > 15 ? "var(--blue)" : "#e57373";
+  return {
+    background: `conic-gradient(${color} ${remaining * 3.6}deg, rgba(255, 255, 255, 0.12) 0deg)`
+  };
+});
+const contextRemainingLabel = computed(() => {
+  const used = agentContextUsage.value.usedTokens;
+  const remaining = agentContextUsage.value.remainingTokens;
+  const max = agentContextUsage.value.maxTokens;
+  const maxK = agentContextUsage.value.contextSizeK;
+  return [
+    `剩余 ${contextRemainingPercent.value}%`,
+    `已用 ${used.toLocaleString()} tokens`,
+    `剩余 ${remaining.toLocaleString()} tokens`,
+    `上限 ${max.toLocaleString()} tokens (${maxK}K)`
+  ].join("\n");
+});
 const selectedJavaVersion = computed(() => javaVersions.value.find((version) => version.version === javaVersionToInstall.value) ?? null);
 const selectedJavaTask = computed(() => selectedJavaVersion.value?.task ?? javaTasks.value.find((task) => task.version === javaVersionToInstall.value) ?? null);
 const selectedJavaInstalled = computed(() => selectedJavaVersion.value?.installed ?? javaInstalls.value.some((java) => java.version === javaVersionToInstall.value && java.available));
@@ -304,299 +310,6 @@ watch(settingsOpen, (open) => {
   }
 });
 
-function escapeHtml(value: string) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function safeMarkdownHref(href: string) {
-  const trimmed = href.trim();
-  if (!trimmed) return "";
-  const scheme = trimmed.match(/^([a-z][a-z\d+.-]*):/i)?.[1]?.toLowerCase();
-  if (scheme && !["http", "https", "mailto"].includes(scheme)) return "";
-  if (trimmed.startsWith("//")) return `https:${trimmed}`;
-  return trimmed;
-}
-
-function renderAgentMarkdown(content: string) {
-  return agentMarkdown.parse(content) as string;
-}
-
-function createConsoleTextStyle(): ConsoleTextStyle {
-  return {
-    foreground: null,
-    background: null,
-    bold: false,
-    dim: false,
-    italic: false,
-    underline: false,
-    strike: false,
-    inverse: false
-  };
-}
-
-function resetConsoleTextStyle(style: ConsoleTextStyle) {
-  Object.assign(style, createConsoleTextStyle());
-}
-
-const ansiBasicColors = [
-  "#0f172a",
-  "#ef4444",
-  "#22c55e",
-  "#eab308",
-  "#3b82f6",
-  "#d946ef",
-  "#06b6d4",
-  "#e5e7eb"
-];
-
-const ansiBrightColors = [
-  "#64748b",
-  "#f87171",
-  "#4ade80",
-  "#fde047",
-  "#60a5fa",
-  "#e879f9",
-  "#22d3ee",
-  "#ffffff"
-];
-
-const minecraftLegacyColors: Record<string, string> = {
-  "0": "#000000",
-  "1": "#0000aa",
-  "2": "#00aa00",
-  "3": "#00aaaa",
-  "4": "#aa0000",
-  "5": "#aa00aa",
-  "6": "#ffaa00",
-  "7": "#aaaaaa",
-  "8": "#555555",
-  "9": "#5555ff",
-  a: "#55ff55",
-  b: "#55ffff",
-  c: "#ff5555",
-  d: "#ff55ff",
-  e: "#ffff55",
-  f: "#ffffff"
-};
-
-function renderConsoleLogs(entries: ConsoleLogEntry[]) {
-  const style = createConsoleTextStyle();
-  let pendingAnsiControl = "";
-  return entries.map((entry) => {
-    const rendered = renderConsoleText(`${pendingAnsiControl}${entry.text}`, style);
-    pendingAnsiControl = rendered.pendingAnsiControl;
-    return { ...entry, html: rendered.html };
-  });
-}
-
-function renderConsoleText(text: string, style: ConsoleTextStyle) {
-  let html = "";
-  let index = 0;
-  let pendingAnsiControl = "";
-
-  while (index < text.length) {
-    const ansiIndex = text.indexOf("\u001B", index);
-    const minecraftIndex = text.indexOf("§", index);
-    const controlIndex = nextConsoleControlIndex(ansiIndex, minecraftIndex);
-
-    if (controlIndex === -1) {
-      html += renderStyledConsoleText(text.slice(index), style);
-      break;
-    }
-
-    html += renderStyledConsoleText(text.slice(index, controlIndex), style);
-
-    if (controlIndex === ansiIndex) {
-      const consumed = consumeAnsiControl(text, controlIndex, style);
-      if (!consumed) {
-        pendingAnsiControl = text.slice(controlIndex);
-        break;
-      }
-      index = consumed;
-    } else {
-      const consumed = consumeMinecraftLegacyControl(text, controlIndex, style);
-      if (consumed) index = consumed;
-      else {
-        html += renderStyledConsoleText(text[controlIndex] ?? "", style);
-        index = controlIndex + 1;
-      }
-    }
-  }
-
-  return { html, pendingAnsiControl };
-}
-
-function nextConsoleControlIndex(first: number, second: number) {
-  if (first === -1) return second;
-  if (second === -1) return first;
-  return Math.min(first, second);
-}
-
-function renderStyledConsoleText(text: string, style: ConsoleTextStyle) {
-  if (!text) return "";
-  const escaped = escapeHtml(text);
-  const styleAttribute = consoleTextStyleAttribute(style);
-  return styleAttribute ? `<span${styleAttribute}>${escaped}</span>` : escaped;
-}
-
-function consoleTextStyleAttribute(style: ConsoleTextStyle) {
-  const declarations: string[] = [];
-  const foreground = style.inverse ? style.background ?? "#05080d" : style.foreground;
-  const background = style.inverse ? style.foreground ?? "#e5e7eb" : style.background;
-  const decorations: string[] = [];
-
-  if (foreground) declarations.push(`color: ${foreground}`);
-  if (background) declarations.push(`background-color: ${background}`);
-  if (style.bold) declarations.push("font-weight: 700");
-  if (style.dim) declarations.push("opacity: 0.72");
-  if (style.italic) declarations.push("font-style: italic");
-  if (style.underline) decorations.push("underline");
-  if (style.strike) decorations.push("line-through");
-  if (decorations.length) declarations.push(`text-decoration: ${decorations.join(" ")}`);
-
-  return declarations.length ? ` style="${declarations.join("; " )}"` : "";
-}
-
-function consumeAnsiControl(text: string, start: number, style: ConsoleTextStyle) {
-  const introducer = text[start + 1];
-  if (!introducer) return null;
-
-  if (introducer === "[") {
-    for (let cursor = start + 2; cursor < text.length; cursor += 1) {
-      const code = text.charCodeAt(cursor);
-      if (code >= 0x40 && code <= 0x7e) {
-        if (text[cursor] === "m") applyAnsiSgr(text.slice(start + 2, cursor), style);
-        return cursor + 1;
-      }
-    }
-    return text.length - start > 128 ? start + 1 : null;
-  }
-
-  if (introducer === "]") {
-    const bellIndex = text.indexOf("\u0007", start + 2);
-    const stringTerminatorIndex = text.indexOf("\u001B\\", start + 2);
-    if (bellIndex === -1 && stringTerminatorIndex === -1) return text.length - start > 1024 ? start + 1 : null;
-    if (bellIndex === -1) return stringTerminatorIndex + 2;
-    if (stringTerminatorIndex === -1) return bellIndex + 1;
-    return Math.min(bellIndex + 1, stringTerminatorIndex + 2);
-  }
-
-  if ("()*+-./#%".includes(introducer)) return text[start + 2] ? start + 3 : null;
-  return start + 2;
-}
-
-function applyAnsiSgr(parameters: string, style: ConsoleTextStyle) {
-  const codes = parameters.trim()
-    ? parameters.split(/[;:]/).filter(Boolean).map((value) => Number(value)).filter(Number.isFinite)
-    : [0];
-  if (codes.length === 0) codes.push(0);
-
-  for (let index = 0; index < codes.length; index += 1) {
-    const code = codes[index] ?? 0;
-    if (code === 0) resetConsoleTextStyle(style);
-    else if (code === 1) style.bold = true;
-    else if (code === 2) style.dim = true;
-    else if (code === 3) style.italic = true;
-    else if (code === 4) style.underline = true;
-    else if (code === 7) style.inverse = true;
-    else if (code === 9) style.strike = true;
-    else if (code === 22) {
-      style.bold = false;
-      style.dim = false;
-    } else if (code === 23) style.italic = false;
-    else if (code === 24) style.underline = false;
-    else if (code === 27) style.inverse = false;
-    else if (code === 29) style.strike = false;
-    else if (code >= 30 && code <= 37) style.foreground = ansiBasicColors[code - 30] ?? null;
-    else if (code === 39) style.foreground = null;
-    else if (code >= 40 && code <= 47) style.background = ansiBasicColors[code - 40] ?? null;
-    else if (code === 49) style.background = null;
-    else if (code >= 90 && code <= 97) style.foreground = ansiBrightColors[code - 90] ?? null;
-    else if (code >= 100 && code <= 107) style.background = ansiBrightColors[code - 100] ?? null;
-    else if (code === 38 || code === 48) {
-      const color = readExtendedAnsiColor(codes, index + 1);
-      if (color) {
-        if (code === 38) style.foreground = color.value;
-        else style.background = color.value;
-        index = color.nextIndex - 1;
-      }
-    }
-  }
-}
-
-function readExtendedAnsiColor(codes: number[], start: number) {
-  const mode = codes[start];
-  if (mode === 5 && Number.isFinite(codes[start + 1])) {
-    return { value: ansi256Color(codes[start + 1] ?? 0), nextIndex: start + 2 };
-  }
-  if (mode === 2 && Number.isFinite(codes[start + 1]) && Number.isFinite(codes[start + 2]) && Number.isFinite(codes[start + 3])) {
-    return { value: rgbColor(codes[start + 1] ?? 0, codes[start + 2] ?? 0, codes[start + 3] ?? 0), nextIndex: start + 4 };
-  }
-  return null;
-}
-
-function ansi256Color(value: number) {
-  const index = clampColorByte(value);
-  if (index < 8) return ansiBasicColors[index] ?? "#ffffff";
-  if (index < 16) return ansiBrightColors[index - 8] ?? "#ffffff";
-  if (index >= 232) {
-    const level = 8 + (index - 232) * 10;
-    return rgbColor(level, level, level);
-  }
-
-  const colorIndex = index - 16;
-  const levels = [0, 95, 135, 175, 215, 255];
-  return rgbColor(
-    levels[Math.floor(colorIndex / 36) % 6] ?? 0,
-    levels[Math.floor(colorIndex / 6) % 6] ?? 0,
-    levels[colorIndex % 6] ?? 0
-  );
-}
-
-function rgbColor(red: number, green: number, blue: number) {
-  return `rgb(${clampColorByte(red)}, ${clampColorByte(green)}, ${clampColorByte(blue)})`;
-}
-
-function clampColorByte(value: number) {
-  return Math.min(255, Math.max(0, Math.round(value)));
-}
-
-function consumeMinecraftLegacyControl(text: string, start: number, style: ConsoleTextStyle) {
-  const code = text[start + 1]?.toLowerCase();
-  if (!code) return null;
-  const color = minecraftLegacyColors[code];
-  if (color) {
-    resetConsoleTextStyle(style);
-    style.foreground = color;
-    return start + 2;
-  }
-
-  if (code === "r") resetConsoleTextStyle(style);
-  else if (code === "l") style.bold = true;
-  else if (code === "m") style.strike = true;
-  else if (code === "n") style.underline = true;
-  else if (code === "o") style.italic = true;
-  else if (code !== "k") return null;
-  return start + 2;
-}
-
-function collapsibleAgentLogTitle(content: string) {
-  const firstLine = content.trim().split(/\r?\n/, 1)[0] ?? "";
-  if (firstLine.startsWith("调用工具：")) return firstLine;
-  if (firstLine.startsWith("工具结果：")) return firstLine;
-  if (firstLine.startsWith("工具调用失败")) return firstLine;
-  return "";
-}
-
-function isCollapsibleAgentLog(content: string) {
-  return Boolean(collapsibleAgentLogTitle(content));
-}
-
 function statusText(status: ServerRecord["status"]) {
   const labels: Record<ServerRecord["status"], string> = {
     running: "运行中",
@@ -607,83 +320,6 @@ function statusText(status: ServerRecord["status"]) {
     orphaned: "疑似后台残留"
   };
   return labels[status];
-}
-
-function agentStatusLabel(status: AgentStatus) {
-  return {
-    idle: "空闲",
-    thinking: "分析中",
-    running: "执行中",
-    waiting_confirmation: "等待确认",
-    retrying: "等待重试",
-    completed: "已完成",
-    failed: "失败",
-    cancelled: "已取消"
-  }[status];
-}
-
-function dismissStatusBubble(id: number | undefined) {
-  if (id === undefined) return;
-  const timer = statusBubbleTimers.get(id);
-  if (timer) clearTimeout(timer);
-  statusBubbleTimers.delete(id);
-  statusBubbles.value = statusBubbles.value.filter((bubble) => bubble.id !== id);
-  if (modelStatusBubbleId === id) modelStatusBubbleId = undefined;
-  if (providerKeyStatusBubbleId === id) providerKeyStatusBubbleId = undefined;
-  if (socketStatusBubbleId === id) socketStatusBubbleId = undefined;
-  for (const [downloadId, bubbleId] of agentDownloadStatusBubbleIds.entries()) {
-    if (bubbleId === id) agentDownloadStatusBubbleIds.delete(downloadId);
-  }
-}
-
-function scheduleStatusBubbleDismiss(id: number, durationMs: number) {
-  const timer = statusBubbleTimers.get(id);
-  if (timer) clearTimeout(timer);
-  statusBubbleTimers.delete(id);
-  if (durationMs > 0) {
-    statusBubbleTimers.set(id, setTimeout(() => dismissStatusBubble(id), durationMs));
-  }
-}
-
-function showStatusBubble(type: StatusBubbleType, message: string, durationMs = 0, download?: AgentDownloadProgress, action?: { label: string; key: string }) {
-  const id = ++nextStatusBubbleId;
-  statusBubbles.value = [...statusBubbles.value, { id, type, message, durationMs, progressKey: ++nextStatusBubbleProgressKey, download, actionLabel: action?.label, actionKey: action?.key }];
-  scheduleStatusBubbleDismiss(id, durationMs);
-  return id;
-}
-
-function updateStatusBubble(id: number, type: StatusBubbleType, message: string, durationMs = 0, download?: AgentDownloadProgress, action?: { label: string; key: string }) {
-  let updated = false;
-  statusBubbles.value = statusBubbles.value.map((bubble) => {
-    if (bubble.id !== id) return bubble;
-    updated = true;
-    return { ...bubble, type, message, durationMs, progressKey: ++nextStatusBubbleProgressKey, download, actionLabel: action?.label, actionKey: action?.key };
-  });
-  if (!updated) return undefined;
-  scheduleStatusBubbleDismiss(id, durationMs);
-  return id;
-}
-
-function upsertStatusBubble(id: number | undefined, type: StatusBubbleType, message: string, durationMs = 0, download?: AgentDownloadProgress, action?: { label: string; key: string }) {
-  if (id !== undefined) {
-    const updatedId = updateStatusBubble(id, type, message, durationMs, download, action);
-    if (updatedId !== undefined) return updatedId;
-  }
-  return showStatusBubble(type, message, durationMs, download, action);
-}
-
-function hasStatusBubble(id: number | undefined) {
-  return id !== undefined && statusBubbles.value.some((bubble) => bubble.id === id);
-}
-
-function clearStatusBubbles() {
-  for (const timer of statusBubbleTimers.values()) clearTimeout(timer);
-  statusBubbleTimers.clear();
-  statusBubbles.value = [];
-  modelStatusBubbleId = undefined;
-  providerKeyStatusBubbleId = undefined;
-  socketStatusBubbleId = undefined;
-  agentDownloadStatusBubbleIds.clear();
 }
 
 function showModelStatus(type: "loading" | "success" | "error", message: string) {
@@ -700,7 +336,8 @@ function showProviderKeyStatus(type: "loading" | "success" | "error", message: s
   else providerKeyStatusBubbleId = undefined;
 }
 
-function openSettings() {
+function openSettings(tab?: SettingsTab) {
+  if (tab) settingsTab.value = tab;
   settingsOpen.value = true;
 }
 
@@ -715,14 +352,14 @@ function openProviderKeyDialog(requirement?: AgentToolConfigRequirement | AgentT
     };
   }
   providerKeyDialogOpen.value = true;
-  settingsOpen.value = true;
+  openSettings("agent");
 }
 
 function openProxyTestDialog() {
   proxyTestTarget.value = proxyTestTarget.value.trim() || "www.google.com";
   proxyTestResult.value = null;
   proxyTestDialogOpen.value = true;
-  settingsOpen.value = true;
+  openSettings("agent");
 }
 
 function closeProxyTestDialog() {
@@ -738,16 +375,15 @@ function proxyTestResultText(result: ProxyTestResult) {
   return `连接失败：${result.error || "未知错误"}，耗时 ${result.elapsedMs}ms`;
 }
 
-function compactText(value: string, maxLength = 52) {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
+function toolNeedsConfig(tool: AgentToolRecord) {
+  return Boolean(tool.configRequirements?.some((requirement) => requirement.required && !requirement.configured));
 }
 
-function toolMeta(tool: AgentToolRecord) {
-  const parts = [tool.category || "Tool"];
-  if (tool.configRequirements?.some((requirement) => requirement.required && !requirement.configured)) parts.push("需配置");
-  return parts.join(" · ");
+function toolConfigSummary(tool: AgentToolRecord) {
+  if (!tool.configRequirements?.length) return "无需额外配置";
+  const missing = tool.configRequirements.filter((requirement) => requirement.required && !requirement.configured);
+  if (missing.length) return `待配置：${missing.map((item) => item.label).join("、")}`;
+  return "所需配置已就绪";
 }
 
 function closeProviderKeyDialog() {
@@ -774,6 +410,57 @@ function openConfigDialog() {
   configDialogOpen.value = true;
   fileDialogOpen.value = false;
   void loadJavaState().catch(() => undefined);
+}
+
+function openInstanceMenu() {
+  restoreInstanceMenuFocus.value = true;
+  instanceMenuOpen.value = true;
+}
+
+function closeInstanceMenu(restoreFocus = true) {
+  instanceMenuOpen.value = false;
+  restoreInstanceMenuFocus.value = restoreFocus;
+}
+
+function handleInstanceMenuAfterLeave() {
+  const action = pendingInstanceMenuAction.value;
+  pendingInstanceMenuAction.value = null;
+  if (action) {
+    action();
+    return;
+  }
+  if (restoreInstanceMenuFocus.value) void nextTick(() => serverSidebar.value?.focusInstanceMenuTrigger());
+}
+
+async function selectServerWithFeedback(id: string) {
+  try {
+    await selectServer(id);
+  } catch (error) {
+    showStatusBubble("error", `切换实例失败：${getErrorMessage(error)}`, 6200);
+  }
+}
+
+async function selectServerFromMenu(id: string) {
+  closeInstanceMenu(false);
+  await selectServerWithFeedback(id);
+}
+
+function openCreateServerDialogFromMenu() {
+  pendingInstanceMenuAction.value = openCreateServerDialog;
+  closeInstanceMenu(false);
+}
+
+function openDeleteServerFromMenu(server: ServerRecord) {
+  pendingInstanceMenuAction.value = () => openDeleteServer(server);
+  closeInstanceMenu(false);
+}
+
+function toggleWorkspaceSettings() {
+  if (settingsOpen.value) {
+    settingsOpen.value = false;
+    return;
+  }
+  openSettings();
 }
 
 function canRunAction(action: "start" | "stop" | "kill" | "restart") {
@@ -866,31 +553,36 @@ function isNearListBottom(list: HTMLElement, threshold = 72) {
 }
 
 function updateAgentScrollState() {
-  const list = agentMessageList.value;
+  const list = agentPanel.value?.getMessageList();
   showAgentScrollToBottom.value = Boolean(list && !isNearListBottom(list));
 }
 
 function shouldStickAgentToBottom(role?: AgentMessage["role"]) {
   if (role === "user") return true;
-  const list = agentMessageList.value;
+  const list = agentPanel.value?.getMessageList();
+  return !list || isNearListBottom(list);
+}
+
+function shouldStickConsoleToBottom() {
+  const list = consolePanel.value?.getLogList();
   return !list || isNearListBottom(list);
 }
 
 function scrollConsoleHistoryToBottom() {
-  scrollHistoryListToBottom(() => consoleLogList.value);
+  scrollHistoryListToBottom(() => consolePanel.value?.getLogList() ?? null);
 }
 
 function scrollAgentHistoryToBottom() {
-  scrollHistoryListToBottom(() => agentMessageList.value);
+  scrollHistoryListToBottom(() => agentPanel.value?.getMessageList() ?? null);
   showAgentScrollToBottom.value = false;
 }
 
 function resetHistoryScrollPositions() {
   if (!process.client) return;
   void nextTick(() => {
-    const list = consoleLogList.value;
+    const list = consolePanel.value?.getLogList();
     if (list) list.scrollTop = 0;
-    const messages = agentMessageList.value;
+    const messages = agentPanel.value?.getMessageList();
     if (messages) messages.scrollTop = 0;
   });
 }
@@ -921,13 +613,15 @@ function upsertAgentMessage(id: string, role: AgentMessage["role"], content: str
   else updateAgentScrollState();
 }
 
-function appendAgentMessageDeltaNow(id: string, delta: string, serverId = selectedServerId.value) {
+function appendAgentMessageDelta(id: string, delta: string, serverId = selectedServerId.value) {
+  if (!delta) return;
   const shouldScroll = shouldStickAgentToBottom("agent");
   const existingIndex = agentMessages.value.findIndex((message) => message.id === id);
   if (existingIndex >= 0) {
     const existing = agentMessages.value[existingIndex];
     if (!existing) return;
     existing.content += delta;
+    existing.status = existing.status ?? "running";
     if (existingIndex !== agentMessages.value.length - 1) {
       agentMessages.value.splice(existingIndex, 1);
       agentMessages.value.push(existing);
@@ -937,46 +631,6 @@ function appendAgentMessageDeltaNow(id: string, delta: string, serverId = select
   }
   if (shouldScroll) scrollAgentHistoryToBottom();
   else updateAgentScrollState();
-}
-
-function appendAgentMessageDelta(id: string, delta: string, serverId = selectedServerId.value) {
-  if (!delta) return;
-  const buffer = agentStreamBuffers.get(id) ?? { queue: [], timer: null, serverId };
-  buffer.serverId = serverId;
-  buffer.queue.push(...Array.from(delta));
-  agentStreamBuffers.set(id, buffer);
-  scheduleAgentMessageDrain(id);
-}
-
-function scheduleAgentMessageDrain(id: string) {
-  const buffer = agentStreamBuffers.get(id);
-  if (!buffer || buffer.timer) return;
-  buffer.timer = setTimeout(() => {
-    buffer.timer = null;
-    const next = buffer.queue.shift();
-    if (next) appendAgentMessageDeltaNow(id, next, buffer.serverId);
-    if (buffer.queue.length > 0) {
-      scheduleAgentMessageDrain(id);
-    } else {
-      agentStreamBuffers.delete(id);
-    }
-  }, agentTypewriterDelayMs);
-}
-
-function flushAgentMessageBuffer(id: string) {
-  const buffer = agentStreamBuffers.get(id);
-  if (!buffer) return;
-  if (buffer.timer) clearTimeout(buffer.timer);
-  const remaining = buffer.queue.join("");
-  agentStreamBuffers.delete(id);
-  if (remaining) appendAgentMessageDeltaNow(id, remaining, buffer.serverId);
-}
-
-function clearAgentMessageBuffers() {
-  for (const buffer of agentStreamBuffers.values()) {
-    if (buffer.timer) clearTimeout(buffer.timer);
-  }
-  agentStreamBuffers.clear();
 }
 
 function isTerminalAgentStatus(status?: AgentStatus) {
@@ -994,23 +648,24 @@ async function refreshAfterAgentRun() {
 
 async function syncAfterSocketReconnect(serverId: string) {
   if (serverId !== selectedServerId.value) return;
-  await Promise.all([loadAgentMessages(), loadPendingConfirmation(), loadServerSlotStatus(), loadServerDetail(), loadFiles()]);
+  await Promise.all([loadAgentMessages(), loadPendingConfirmation(), loadServerSlotStatus(), loadServerDetail(), loadFiles(), loadServerErrorState(serverId)]);
 }
 
 async function loadServers() {
   servers.value = await api<ServerRecord[]>("/api/servers");
   serversLoaded.value = true;
   if (!selectedServerId.value && servers.value[0]) selectedServerId.value = servers.value[0].id;
+  await loadServerErrorStates();
 }
 
 async function selectServer(id: string) {
   closeSockets();
   selectedServerId.value = id;
+  consoleCommand.value = "";
   currentPath.value = ".";
   settingsOpen.value = false;
   fileDialogOpen.value = false;
   configDialogOpen.value = false;
-  clearAgentMessageBuffers();
   pendingAgentAttachments.value = [];
   agentDownloads.value = [];
   agentWorkflow.value = null;
@@ -1138,12 +793,65 @@ async function loadLogs() {
   if (!selectedServerId.value) return;
   logs.value = await api<ConsoleLogEntry[]>(`/api/servers/${selectedServerId.value}/logs?limit=500`);
   scrollConsoleHistoryToBottom();
+  await loadServerErrorState();
+}
+
+async function loadServerErrorStates() {
+  try {
+    const states = await api<ServerErrorState[]>("/api/server-errors");
+    serverErrorStates.value = Object.fromEntries(states.map((state) => [state.serverId, state]));
+  } catch {
+    // The red markers are advisory; keep the previous snapshot if the probe fails.
+  }
+}
+
+async function loadServerErrorState(serverId = selectedServerId.value) {
+  if (!serverId) return;
+  try {
+    const state = await api<ServerErrorState>(`/api/servers/${serverId}/errors`);
+    serverErrorStates.value = { ...serverErrorStates.value, [state.serverId]: state };
+  } catch {
+    // Ignore: status-derived fallback still marks crashed instances red.
+  }
+}
+
+/**
+ * Pulls the error-relevant slice of the terminal from the backend and hands it to the
+ * Agent as a normal task, so the analysis lands in the Agent conversation.
+ */
+async function analyzeConsoleErrors() {
+  if (!selectedServerId.value || errorAnalysisSending.value) return;
+  if (agentBusy.value) {
+    showStatusBubble("error", "Agent 正在处理其他任务，请等待完成后再分析错误", 4200);
+    return;
+  }
+  const serverId = selectedServerId.value;
+  errorAnalysisSending.value = true;
+  try {
+    const digest = await api<ServerErrorDigest>(`/api/servers/${serverId}/errors/digest`);
+    if (serverId !== selectedServerId.value) return;
+    if (!digest.excerpt && !digest.hasError) {
+      showStatusBubble("error", "终端里没有检测到报错内容", 3600);
+      return;
+    }
+    agentInput.value = digest.prompt;
+    pendingAgentAttachments.value = [];
+    agentPanel.value?.focusPanel();
+    await sendAgentMessage();
+    if (digest.truncated) showStatusBubble("success", "错误日志较长，已截取报错相关片段发送给模型", 4200);
+  } catch (error) {
+    showStatusBubble("error", `分析错误失败：${getErrorMessage(error)}`, 6200);
+  } finally {
+    errorAnalysisSending.value = false;
+  }
 }
 
 async function sendCommand() {
   if (!selectedServerId.value || !consoleCommand.value.trim()) return;
   const command = consoleCommand.value.trim();
   consoleCommand.value = "";
+  const history = consoleCommandHistories.value[selectedServerId.value] ??= [];
+  if (history.at(-1) !== command) history.push(command);
   if (consoleSocket?.readyState === WebSocket.OPEN) {
     consoleSocket.send(JSON.stringify({ type: "command", command }));
   } else {
@@ -1181,11 +889,17 @@ async function goUp() {
   await loadFiles();
 }
 
-async function createFolder() {
-  if (!selectedServerId.value || !newFolderName.value.trim()) return;
-  const path = currentPath.value === "." ? newFolderName.value : `${currentPath.value}/${newFolderName.value}`;
+async function createFolder(name: string) {
+  if (!selectedServerId.value || !name.trim()) return;
+  const path = currentPath.value === "." ? name : `${currentPath.value}/${name}`;
   await safe(() => api(`/api/servers/${selectedServerId.value}/files/folder`, { method: "POST", body: { path } }));
-  newFolderName.value = "";
+  await loadFiles();
+}
+
+async function createFile(name: string) {
+  if (!selectedServerId.value || !name.trim()) return;
+  const path = currentPath.value === "." ? name : `${currentPath.value}/${name}`;
+  await safe(() => api(`/api/servers/${selectedServerId.value}/files`, { method: "POST", body: { path, content: "" } }));
   await loadFiles();
 }
 
@@ -1341,7 +1055,28 @@ async function uploadServerFile(event: Event) {
 async function loadAgentMessages() {
   if (!selectedServerId.value) return;
   agentMessages.value = await api<AgentMessage[]>(`/api/servers/${selectedServerId.value}/agent/messages`);
+  await loadAgentContextUsage();
   scrollAgentHistoryToBottom();
+}
+
+async function loadAgentContextUsage() {
+  if (!selectedServerId.value) {
+    const maxTokens = (modelForm.contextSizeK || 120) * 1000;
+    agentContextUsage.value = {
+      contextSizeK: modelForm.contextSizeK || 120,
+      maxTokens,
+      usedTokens: 0,
+      remainingTokens: maxTokens,
+      remainingRatio: 1,
+      remainingPercent: 100
+    };
+    return;
+  }
+  try {
+    agentContextUsage.value = await api<AgentContextUsage>(`/api/servers/${selectedServerId.value}/agent/context-usage`);
+  } catch {
+    // keep previous estimate if endpoint is temporarily unavailable
+  }
 }
 
 async function loadPendingConfirmation() {
@@ -1382,6 +1117,7 @@ async function sendAgentMessage() {
         appendAgentMessage("agent", result.response, result.response.startsWith("执行失败：") ? "failed" : "completed", serverId);
         agentStatus.value = result.response.startsWith("执行失败：") ? "failed" : "completed";
         await refreshAfterAgentRun();
+        await loadAgentContextUsage();
       }
     } catch {
       if (serverId === selectedServerId.value) {
@@ -1456,7 +1192,6 @@ async function clearAgentContext() {
   const serverId = selectedServerId.value;
   await safe(() => api(`/api/servers/${serverId}/agent/context`, { method: "DELETE" }), serverId);
   if (serverId !== selectedServerId.value) return;
-  clearAgentMessageBuffers();
   agentMessages.value = [];
   pendingConfirmation.value = null;
   pendingAgentAttachments.value = [];
@@ -1465,6 +1200,7 @@ async function clearAgentContext() {
   agentRetry.value = null;
   agentRetryNowSending.value = false;
   agentStatus.value = "idle";
+  await loadAgentContextUsage();
 }
 
 async function uploadAgentFile(event: Event) {
@@ -1501,7 +1237,7 @@ function openAgentUploadPicker() {
     appendAgentMessage("system", "Agent 正在处理当前任务，请等待完成后再上传文件。", null);
     return;
   }
-  agentUploadInput.value?.click();
+  agentPanel.value?.openUploadPicker();
 }
 
 async function loadSettings() {
@@ -1522,8 +1258,17 @@ async function loadSettings() {
       baseUrl: model.baseUrl,
       modelName: model.modelName,
       apiKey: "",
-      isDefault: true
+      isDefault: true,
+      contextSizeK: model.contextSizeK || 120
     });
+    agentContextUsage.value = {
+      ...agentContextUsage.value,
+      contextSizeK: model.contextSizeK || 120,
+      maxTokens: (model.contextSizeK || 120) * 1000,
+      remainingTokens: Math.max(0, (model.contextSizeK || 120) * 1000 - agentContextUsage.value.usedTokens),
+      remainingRatio: Math.max(0, 1 - agentContextUsage.value.usedTokens / ((model.contextSizeK || 120) * 1000)),
+      remainingPercent: Math.round(Math.max(0, 1 - agentContextUsage.value.usedTokens / ((model.contextSizeK || 120) * 1000)) * 100)
+    };
   }
   skills.value = skillData;
   agentTools.value = toolData;
@@ -1551,10 +1296,9 @@ function applyJavaState(state: JavaManagementState) {
   if (!javaVersions.value.some((version) => version.version === javaVersionToInstall.value)) {
     javaVersionToInstall.value = javaVersions.value.find((version) => version.version === "21")?.version ?? javaVersions.value[0]?.version ?? javaVersionToInstall.value;
   }
-  if (!serverForm.javaVersion || !javaVersions.value.some((version) => version.version === serverForm.javaVersion && version.installed && version.installPath)) {
+  if (!serverForm.javaVersion) {
     serverForm.javaVersion = javaVersions.value.find((version) => version.installed && version.installPath)?.version ?? "";
   }
-  applyServerJavaSelection();
   if (!javaDownloadSources.value.some((source) => source.id === javaDownloadSource.value)) {
     javaDownloadSource.value = javaDownloadSources.value.find((source) => source.id === "auto-cn")?.id ?? javaDownloadSources.value[0]?.id ?? javaDownloadSource.value;
   }
@@ -1570,7 +1314,8 @@ async function saveModel() {
     baseUrl: modelForm.baseUrl,
     modelName: modelForm.modelName,
     apiKey: modelForm.apiKey || undefined,
-    isDefault: true
+    isDefault: true,
+    contextSizeK: Math.min(2000, Math.max(8, Math.round(Number(modelForm.contextSizeK) || 120)))
   };
   try {
     const currentModelId = models.value[0]?.id;
@@ -1584,8 +1329,10 @@ async function saveModel() {
         baseUrl: saved.baseUrl,
         modelName: saved.modelName,
         apiKey: "",
-        isDefault: true
+        isDefault: true,
+        contextSizeK: saved.contextSizeK || 120
       });
+      await loadAgentContextUsage();
     } else {
       modelForm.apiKey = "";
     }
@@ -1615,13 +1362,37 @@ async function testModel(id?: string) {
   }
 }
 
-async function saveGlobalPrompt() {
-  await safe(() => api("/api/prompts/global", { method: "PUT", body: { prompt: globalPrompt.value } }));
+function openPromptEditor() {
+  promptEditor.draft = globalPrompt.value;
+  promptEditor.saving = false;
+  promptEditor.open = true;
+}
+
+function closePromptEditor() {
+  if (promptEditor.saving) return;
+  promptEditor.open = false;
+}
+
+async function savePromptFromEditor() {
+  if (promptEditor.saving) return;
+  promptEditor.saving = true;
+  try {
+    const result = await safe(() => api<{ prompt: string }>("/api/prompts/global", {
+      method: "PUT",
+      body: { prompt: promptEditor.draft }
+    }));
+    if (!result) return;
+    globalPrompt.value = result.prompt;
+    promptEditor.open = false;
+  } finally {
+    promptEditor.saving = false;
+  }
 }
 
 async function resetGlobalPrompt() {
   const result = await safe(() => api<{ prompt: string }>("/api/prompts/global/reset", { method: "POST" }));
   globalPrompt.value = result?.prompt ?? globalPrompt.value;
+  if (promptEditor.open) promptEditor.draft = globalPrompt.value;
 }
 
 async function saveAgentSettings() {
@@ -1640,6 +1411,16 @@ async function saveAgentSettings() {
   agentDownloadProxyUrl.value = result.downloadProxyUrl;
   agentMemoryMb.value = result.memoryMb;
   systemMemoryMb.value = result.systemMemoryMb;
+}
+
+function updateAgentMemorySetting(value: number) {
+  agentMemoryMb.value = value;
+  void saveAgentSettings();
+}
+
+function updateAgentProxyEnabled(value: boolean) {
+  agentDownloadProxyEnabled.value = value;
+  void saveAgentSettings();
 }
 
 async function testProxyConnectivity() {
@@ -1735,24 +1516,13 @@ async function useJavaVersion(java: JavaVersionRecord) {
   await saveServerConfig();
 }
 
-function parseMemoryToMb(value: string | number | null | undefined) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : minimumServerMemoryMb;
-  const text = String(value ?? "").trim();
-  const match = text.match(/^(\d+(?:\.\d+)?)\s*([gGmM])?$/);
-  if (!match) return minimumServerMemoryMb;
-  const amount = Number(match[1]);
-  if (!Number.isFinite(amount)) return minimumServerMemoryMb;
-  return match[2]?.toLowerCase() === "g" ? amount * 1024 : amount;
-}
-
 function clampServerMemoryMb(value: number) {
   const max = serverMemoryMaxMb.value || systemMemoryMb.value || minimumServerMemoryMb;
   return Math.min(max, Math.max(minimumServerMemoryMb, Math.round(value / 512) * 512));
 }
 
 function memoryConfigValue(valueMb: number) {
-  const normalized = clampServerMemoryMb(valueMb);
-  return normalized % 1024 === 0 ? `${normalized / 1024}G` : `${normalized}M`;
+  return formatMemoryConfig(clampServerMemoryMb(valueMb));
 }
 
 function applyServerJavaSelection() {
@@ -1783,17 +1553,6 @@ function javaStatusClass(java: JavaVersionRecord) {
   if (java.task && isJavaTaskActive(java.task.status)) return "risk-medium";
   if (java.installed) return "status-running";
   return "";
-}
-
-function formatBytes(bytes: number) {
-  if (bytes <= 0) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** index).toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
-}
-
-function formatMemoryMb(value: number) {
-  return value >= 1024 ? `${(value / 1024).toFixed(value % 1024 === 0 ? 0 : 1)} GB` : `${value} MB`;
 }
 
 function beginUpload(state: UploadState, file: File) {
@@ -1931,8 +1690,25 @@ function closeSockets() {
   dismissStatusBubble(socketStatusBubbleId);
 }
 
+async function logout() {
+  if (loggingOut.value) return;
+  loggingOut.value = true;
+  closeSockets();
+  try {
+    await api("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Clear the client-visible token even if the server is unavailable.
+  } finally {
+    document.cookie = "mcsa_token=; path=/; max-age=0; SameSite=Lax";
+    await router.replace("/login");
+    loggingOut.value = false;
+  }
+}
+
 function scheduleSocketReconnect(serverId: string, generation: number) {
   if (!process.client || socketsClosedIntentionally || serverId !== selectedServerId.value || generation !== socketReconnectGeneration) return;
+  // Console and agent sockets often close together; they share one reconnect attempt.
+  if (socketReconnectTimer) return;
   socketReconnectAttempt += 1;
   const delay = Math.min(socketReconnectMaxDelayMs, socketReconnectBaseDelayMs * 2 ** Math.min(socketReconnectAttempt - 1, 4));
   showSocketStatus("loading", `实时连接已断开，${Math.ceil(delay / 1000)} 秒后自动重连（第 ${socketReconnectAttempt} 次）`);
@@ -1972,35 +1748,56 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
     }
     else if (hasStatusBubble(socketStatusBubbleId)) showSocketStatus("success", "实时连接已建立", 1200);
   };
-  const handleSocketClose = () => {
+  const handleSocketClose = (socket: WebSocket) => {
+    // A previous connection can finish closing after its replacement is open.
+    if (socket !== consoleSocket && socket !== agentSocket) return;
     if (serverId !== selectedServerId.value || generation !== socketReconnectGeneration || socketsClosedIntentionally) return;
     scheduleSocketReconnect(serverId, generation);
   };
-  consoleSocket = new WebSocket(`${wsBase}/ws/console/${serverId}${wsQuery}`);
-  consoleSocket.onopen = () => {
+  const nextConsoleSocket = new WebSocket(`${wsBase}/ws/console/${serverId}${wsQuery}`);
+  consoleSocket = nextConsoleSocket;
+  nextConsoleSocket.onopen = () => {
+    if (consoleSocket !== nextConsoleSocket) return;
     consoleConnected = true;
     markSocketOpen();
   };
-  consoleSocket.onmessage = (event) => {
-    if (serverId !== selectedServerId.value) return;
+  nextConsoleSocket.onmessage = (event) => {
+    if (consoleSocket !== nextConsoleSocket || serverId !== selectedServerId.value) return;
     const payload = JSON.parse(event.data);
     if (payload.type === "clear") logs.value = [];
-    if (payload.type === "log") {
+    if (payload.type === "error_state" && payload.errorState?.serverId) {
+      serverErrorStates.value = { ...serverErrorStates.value, [payload.errorState.serverId]: payload.errorState };
+    }
+    if (payload.type === "snapshot" && Array.isArray(payload.entries)) {
+      const shouldScroll = shouldStickConsoleToBottom();
+      logs.value = payload.entries;
+      if (logs.value.length > 800) logs.value.splice(0, logs.value.length - 800);
+      if (shouldScroll) scrollConsoleHistoryToBottom();
+    }
+    if (payload.type === "log" && payload.entry) {
+      // Deduplicate: REST loadLogs + WS snapshot/reconnect must not replay the same lines.
+      if (logs.value.some((log) => log.id === payload.entry.id)) return;
+      const shouldScroll = shouldStickConsoleToBottom();
       logs.value.push(payload.entry);
       if (logs.value.length > 800) logs.value.splice(0, logs.value.length - 800);
-      scrollConsoleHistoryToBottom();
+      if (shouldScroll) scrollConsoleHistoryToBottom();
     }
-    if (payload.type === "status") loadServers();
+    if (payload.type === "status") {
+      loadServers();
+      loadServerErrorState(serverId).catch(() => undefined);
+    }
   };
-  consoleSocket.onclose = handleSocketClose;
-  consoleSocket.onerror = () => consoleSocket?.close();
-  agentSocket = new WebSocket(`${wsBase}/ws/agent/${serverId}${wsQuery}`);
-  agentSocket.onopen = () => {
+  nextConsoleSocket.onclose = () => handleSocketClose(nextConsoleSocket);
+  nextConsoleSocket.onerror = () => nextConsoleSocket.close();
+  const nextAgentSocket = new WebSocket(`${wsBase}/ws/agent/${serverId}${wsQuery}`);
+  agentSocket = nextAgentSocket;
+  nextAgentSocket.onopen = () => {
+    if (agentSocket !== nextAgentSocket) return;
     agentConnected = true;
     markSocketOpen();
   };
-  agentSocket.onmessage = (event) => {
-    if (serverId !== selectedServerId.value) return;
+  nextAgentSocket.onmessage = (event) => {
+    if (agentSocket !== nextAgentSocket || serverId !== selectedServerId.value) return;
     const payload = JSON.parse(event.data) as { type?: string; status?: AgentStatus; content?: string; messageId?: string; confirmation?: AgentConfirmationRequest; toolConfigRequired?: AgentToolConfigRequired; retry?: AgentRetryState; download?: AgentDownloadProgress; workflow?: AgentWorkflowProgress; serverSlot?: ServerSlotStatus };
     if (payload.type === "status" && payload.status) {
       agentStatus.value = payload.status;
@@ -2012,7 +1809,7 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
       pendingToolConfig.value = payload.toolConfigRequired;
       showProviderKeyStatus("error", payload.toolConfigRequired.message, true);
       providerKeyDialogOpen.value = true;
-      settingsOpen.value = true;
+      openSettings("agent");
     }
     if (payload.type === "retry_scheduled" && payload.retry) {
       agentRetry.value = payload.retry;
@@ -2032,9 +1829,15 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
     }
     if (payload.type === "message" && payload.messageId) {
       if (isTerminalAgentStatus(payload.status)) agentRetry.value = null;
-      if (isTerminalAgentStatus(payload.status)) flushAgentMessageBuffer(payload.messageId);
       const existing = agentMessages.value.find((message) => message.id === payload.messageId);
-      upsertAgentMessage(payload.messageId, "agent", payload.content ?? existing?.content ?? "", payload.status ?? "completed", serverId);
+      // Empty content is intentional for clearing the shared streaming bubble between tool rounds.
+      // For terminal statuses, never replace a non-empty bubble with an empty string.
+      const nextContent = payload.content === undefined || payload.content === null
+        ? (existing?.content ?? "")
+        : (isTerminalAgentStatus(payload.status) && !payload.content && existing?.content
+          ? existing.content
+          : payload.content);
+      upsertAgentMessage(payload.messageId, "agent", nextContent, payload.status ?? "completed", serverId);
     } else if (payload.type === "message" && payload.content) {
       if (isTerminalAgentStatus(payload.status)) agentRetry.value = null;
       appendAgentMessage("agent", payload.content, payload.status ?? "completed", serverId);
@@ -2044,7 +1847,6 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
     }
     if (payload.type === "error" && payload.content && payload.messageId) {
       agentRetry.value = null;
-      flushAgentMessageBuffer(payload.messageId);
       upsertAgentMessage(payload.messageId, "agent", payload.content, payload.status ?? "failed", serverId);
       if (payload.status) agentStatus.value = payload.status;
     } else if (payload.type === "error" && payload.content) {
@@ -2054,16 +1856,14 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
     if (payload.type === "done") {
       agentRetry.value = null;
       agentRetryNowSending.value = false;
-      for (const id of agentStreamBuffers.keys()) flushAgentMessageBuffer(id);
       if (payload.status) agentStatus.value = payload.status;
       window.setTimeout(clearTerminalAgentDownloads, 1600);
       refreshAfterAgentRun().catch(() => undefined);
+      loadAgentContextUsage().catch(() => undefined);
     }
   };
-  agentSocket.onclose = () => {
-    handleSocketClose();
-  };
-  agentSocket.onerror = () => agentSocket?.close();
+  nextAgentSocket.onclose = () => handleSocketClose(nextAgentSocket);
+  nextAgentSocket.onerror = () => nextAgentSocket.close();
 }
 
 onMounted(async () => {
@@ -2079,7 +1879,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("mouseup", endFileDragSelection);
-  clearAgentMessageBuffers();
   clearStatusBubbles();
   closeSockets();
   if (javaPollTimer) clearInterval(javaPollTimer);
@@ -2088,7 +1887,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'sidebar-collapsed': sidebarCollapsed }">
+  <div class="app-shell">
     <div class="background-field" aria-hidden="true">
       <div class="orb orb-a" />
       <div class="orb orb-b" />
@@ -2097,514 +1896,219 @@ onBeforeUnmount(() => {
 
     <StatusBubble :items="statusBubbles" @action="handleStatusBubbleAction" />
 
-    <Transition name="modal">
-      <div v-if="providerKeyDialogOpen" class="modal-backdrop">
-        <form class="card stack provider-key-dialog" @submit.prevent="saveProviderKeys">
-          <div class="card-header">
-            <div>
-              <p class="eyebrow">Provider Keys</p>
-              <h2 class="card-title">配置平台 API Key</h2>
-            </div>
-            <button type="button" :disabled="providerKeySaving" @click="closeProviderKeyDialog">关闭</button>
-          </div>
-          <p v-if="pendingToolConfig" class="danger-note">{{ pendingToolConfig.message }}</p>
-          <div class="settings-field-grid">
-            <label class="stack">
-              <span class="muted">CurseForge API Key</span>
-              <input v-model="providerKeyForm.curseForgeApiKey" type="password" :placeholder="providerKeyPlaceholder('curseForgeApiKey')" autocomplete="off" />
-              <small class="muted">状态：{{ providerKeySettings.curseForgeApiKeyConfigured ? '已配置' : '未配置' }} · <a href="https://console.curseforge.com/?#/api-keys" target="_blank" rel="noreferrer noopener">申请/管理</a></small>
-            </label>
-            <label class="stack">
-              <span class="muted">Modrinth Personal Access Token</span>
-              <input v-model="providerKeyForm.modrinthApiKey" type="password" :placeholder="providerKeyPlaceholder('modrinthApiKey')" autocomplete="off" />
-              <small class="muted">状态：{{ providerKeySettings.modrinthApiKeyConfigured ? '已配置' : '未配置' }} · <a href="https://modrinth.com/settings/pats" target="_blank" rel="noreferrer noopener">申请/管理</a></small>
-            </label>
-          </div>
-          <small class="muted">留空会保留已保存的 Key；保存后只显示脱敏提示，不回显明文。</small>
-          <div class="row">
-            <button class="primary" type="submit" :disabled="providerKeySaving">{{ providerKeySaving ? "保存中" : "保存 Key" }}</button>
-            <button type="button" :disabled="providerKeySaving" @click="closeProviderKeyDialog">取消</button>
-          </div>
-        </form>
-      </div>
-    </Transition>
+    <ProviderKeyDialog
+      :form="providerKeyForm"
+      :open="providerKeyDialogOpen"
+      :pending-config="pendingToolConfig"
+      :placeholder="providerKeyPlaceholder"
+      :saving="providerKeySaving"
+      :settings="providerKeySettings"
+      @close="closeProviderKeyDialog"
+      @save="saveProviderKeys"
+      @update:curse-forge-api-key="providerKeyForm.curseForgeApiKey = $event"
+      @update:modrinth-api-key="providerKeyForm.modrinthApiKey = $event"
+    />
 
-    <Transition name="modal">
-      <div v-if="proxyTestDialogOpen" class="modal-backdrop">
-        <form class="card stack proxy-test-dialog" @submit.prevent="testProxyConnectivity">
-          <div class="card-header">
-            <div>
-              <p class="eyebrow">Proxy Probe</p>
-              <h2 class="card-title">检测 Agent 代理连通性</h2>
-            </div>
-            <button type="button" :disabled="proxyTesting" @click="closeProxyTestDialog">关闭</button>
-          </div>
-          <label class="stack">
-            <span class="muted">检测地址</span>
-            <input v-model.trim="proxyTestTarget" placeholder="www.google.com" autocomplete="off" />
-          </label>
-          <small class="muted">当前模式：{{ proxyTestModeLabel }}。未写协议时会自动使用 https://。</small>
-          <div v-if="proxyTestResult" class="proxy-test-result" :class="proxyTestResult.ok ? 'proxy-test-ok' : 'proxy-test-failed'">
-            <strong>{{ proxyTestResult.ok ? "连通性确认通过" : "连通性确认失败" }}</strong>
-            <span>{{ proxyTestResultText(proxyTestResult) }}</span>
-            <small>目标：{{ proxyTestResult.targetUrl }}</small>
-            <small>最终地址：{{ proxyTestResult.finalUrl }}</small>
-            <small>代理：{{ proxyTestResult.usedProxy ? "已使用" : "未使用" }}</small>
-          </div>
-          <div class="row proxy-test-actions">
-            <button class="primary" type="submit" :disabled="proxyTesting || !proxyTestTarget.trim()">{{ proxyTesting ? "检测中" : "确认检测" }}</button>
-            <button type="button" :disabled="proxyTesting" @click="closeProxyTestDialog">取消</button>
-          </div>
-        </form>
-      </div>
-    </Transition>
+    <ProxyTestDialog
+      :mode-label="proxyTestModeLabel"
+      :open="proxyTestDialogOpen"
+      :result="proxyTestResult"
+      :result-text="proxyTestResultText"
+      :target="proxyTestTarget"
+      :testing="proxyTesting"
+      @close="closeProxyTestDialog"
+      @test="testProxyConnectivity"
+      @update:target="proxyTestTarget = $event"
+    />
 
-    <Transition name="modal">
-    <div v-if="createDialogOpen" class="modal-backdrop">
-      <form class="card create-dialog stack" @submit.prevent="createServer">
-        <div>
-          <p class="eyebrow">Create Instance</p>
-          <h2 class="card-title">新建实例</h2>
-        </div>
-        <label class="stack">
-          <span class="muted">请输入服务端名称</span>
-          <input v-model="newServerName" placeholder="例如：Survival-01" autocomplete="off" autofocus />
-        </label>
-        <div class="row">
-          <button class="primary" type="submit" :disabled="!newServerName.trim()">创建并进入控制台</button>
-          <button type="button" @click="closeCreateServerDialog">取消</button>
-        </div>
-      </form>
-    </div>
-    </Transition>
+    <CreateServerDialog v-model:name="newServerName" :open="createDialogOpen" @close="closeCreateServerDialog" @create="createServer" />
 
-    <section v-if="showEmptyLanding" class="landing-shell" aria-labelledby="landing-title">
-      <div class="landing-hero card">
-        <div class="brand landing-brand">
-          <div class="brand-mark">MCTM</div>
-          <div>
-            <div class="brand-title">MCTManager</div>
-            <div class="brand-subtitle">Agent Ops Panel</div>
-          </div>
-        </div>
+    <EmptyWorkspaceLanding v-if="showEmptyLanding" @create="openCreateServerDialog" />
 
-        <div class="landing-copy">
-          <p class="eyebrow">Instance Panel</p>
-          <h1 id="landing-title">Agent 驱动的 Minecraft 服务端</h1>
-<!--          <p class="muted">创建后可以直接进入实例工作台，在同一屏完成终端控制、文件管理、启动配置和 Agent 部署排错。</p>-->
-        </div>
-      </div>
+    <InstanceSwitcherDialog
+      :open="instanceMenuOpen"
+      :selected-server="selectedServer"
+      :selected-server-id="selectedServerId"
+      :servers="servers"
+      :status-text="statusText"
+      @close="closeInstanceMenu"
+      @after-leave="handleInstanceMenuAfterLeave"
+      @create="openCreateServerDialogFromMenu"
+      @delete="openDeleteServerFromMenu"
+      @select="selectServerFromMenu"
+    />
 
-      <div class="card stack landing-card">
-        <div class="card-header">
-          <div>
-            <p class="eyebrow">Create Instance</p>
-            <h2 class="card-title">新建实例</h2>
-          </div>
-<!--          <span class="status-pill">空工作区</span>-->
-        </div>
-<!--        <p class="muted">点击创建后输入实例名称，系统会为它准备独立目录。</p>-->
-        <button class="primary landing-create-button" type="button" @click="openCreateServerDialog">开始</button>
-      </div>
-    </section>
-
-    <aside v-else-if="hasServers" class="sidebar" :class="{ collapsed: sidebarCollapsed }">
-      <div class="sidebar-head">
-        <div class="brand">
-          <div class="brand-mark">MCTM</div>
-          <div class="brand-copy">
-            <div class="brand-title">MCTManager</div>
-            <div class="brand-subtitle">Agent Ops Panel</div>
-          </div>
-        </div>
-        <button class="sidebar-toggle" :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="sidebarCollapsed = !sidebarCollapsed">
-          {{ sidebarCollapsed ? "»" : "«" }}
-        </button>
-      </div>
-
-      <div class="stack sidebar-create">
-        <button class="primary" type="button" @click="openCreateServerDialog">创建实例</button>
-      </div>
-
-      <div class="sidebar-stats" aria-label="实例状态统计">
-        <div><strong>{{ servers.length }}</strong><span>实例</span></div>
-        <div><strong>{{ runningServerCount }}</strong><span>运行</span></div>
-        <div><strong>{{ crashedServerCount }}</strong><span>异常</span></div>
-      </div>
-
-      <TransitionGroup name="server-stack" tag="div" class="server-list">
-        <div
-          v-for="server in servers"
-          :key="server.id"
-          class="server-item-shell"
-          :class="{ active: server.id === selectedServerId }"
-        >
-          <button class="server-item" :title="server.name" @click="selectServer(server.id)">
-            <span class="server-initial">{{ server.name.slice(0, 2).toUpperCase() }}</span>
-            <span class="server-item-copy">
-              <strong>{{ server.name }}</strong>
-              <small class="muted">{{ server.directory.split(/[\\/]/).filter(Boolean).at(-1) || server.id }}</small>
-            </span>
-          </button>
-          <button class="server-delete" :disabled="server.status !== 'stopped' && server.status !== 'crashed'" title="删除服务端" @click="openDeleteServer(server)">删除</button>
-        </div>
-      </TransitionGroup>
-
-      <div style="margin-top: auto" class="stack sidebar-footer">
-        <div class="muted">{{ clock }}</div>
-        <button @click="settingsOpen ? settingsOpen = false : openSettings()">{{ settingsOpen ? "返回实例" : "全局设置" }}</button>
-      </div>
-    </aside>
+    <ServerSidebar
+      v-if="hasServers"
+      ref="serverSidebar"
+       :servers="servers"
+       :selected-server-id="selectedServerId"
+       :errored-server-ids="erroredServerIds"
+       :settings-open="settingsOpen"
+       @create="openCreateServerDialog"
+       @open-instance-menu="openInstanceMenu"
+       @open-settings="toggleWorkspaceSettings"
+       @logout="logout"
+       @select="selectServerWithFeedback"
+    />
 
     <main v-if="hasServers" class="main">
-      <Transition name="modal">
-      <div v-if="pendingConfirmation" class="modal-backdrop">
-        <section class="card confirmation-dialog stack">
-          <div class="card-header">
-            <h2 class="card-title">需要确认：{{ pendingConfirmation.title }}</h2>
-            <span class="status-pill" :class="pendingConfirmation.risk === 'high' ? 'risk-high' : 'risk-medium'">{{ pendingConfirmation.risk }}</span>
-          </div>
-          <p class="message-content">{{ pendingConfirmation.description }}</p>
-          <p class="muted">该操作会影响当前服务端目录以外的应用工作区、全局配置或数据库。确认后 Agent 才会继续执行。</p>
-          <div class="row">
-            <button class="primary" @click="resolveAgentConfirmation(true)">确认执行</button>
-            <button class="danger" @click="resolveAgentConfirmation(false)">拒绝</button>
-          </div>
-        </section>
-      </div>
-      </Transition>
+      <AgentConfirmationDialog :confirmation="pendingConfirmation" @resolve="resolveAgentConfirmation" />
 
-      <Transition name="modal">
-      <div v-if="deleteDialog.open && deleteDialog.server" class="modal-backdrop">
-        <section class="card delete-dialog stack">
-          <div class="card-header">
-            <div>
-              <p class="eyebrow">Permanent Delete</p>
-              <h2 class="card-title">删除服务端：{{ deleteDialog.server.name }}</h2>
-            </div>
-            <span class="status-pill risk-high">包含文件</span>
-          </div>
-          <p class="message-content">这会删除服务端记录、控制台日志、Agent 对话、临时上传记录，以及磁盘上的完整服务端文件夹：</p>
-          <code class="path-preview">{{ deleteDialog.server.directory }}</code>
-          <p v-if="deleteServerBlocked" class="danger-note">该服务端当前状态为 {{ deleteDialog.server.status }}，必须先关闭到 stopped 或 crashed，且不能存在后台残留进程，才能删除。</p>
-          <label class="stack">
-            <span class="muted">请输入完整服务端名称以确认删除</span>
-            <input v-model="deleteDialog.confirmName" :placeholder="deleteDialog.server.name" autocomplete="off" />
-          </label>
-          <p v-if="deleteDialog.error" class="danger-note">删除失败：{{ deleteDialog.error }}</p>
-          <div class="row">
-            <button class="danger" :disabled="deleteDialog.deleting || deleteServerBlocked || !deleteConfirmMatches" @click="deleteServer">
-              {{ deleteDialog.deleting ? "正在删除" : "永久删除" }}
-            </button>
-            <button :disabled="deleteDialog.deleting" @click="closeDeleteServer">取消</button>
-          </div>
-        </section>
-      </div>
-      </Transition>
+      <DeleteServerDialog
+        v-model:confirm-name="deleteDialog.confirmName"
+        :open="deleteDialog.open"
+        :server="deleteDialog.server"
+        :deleting="deleteDialog.deleting"
+        :error="deleteDialog.error"
+        :blocked="deleteServerBlocked"
+        :confirmation-matches="deleteConfirmMatches"
+        @close="closeDeleteServer"
+        @confirm="deleteServer"
+      />
 
       <div class="content-stage">
-      <Transition name="server-switch" mode="out-in">
-        <section v-if="settingsOpen" key="settings" class="settings-panel">
-          <div class="settings-column">
-            <div class="card stack settings-card settings-model-card">
-              <div class="card-header"><h2 class="card-title">模型配置</h2><button @click="loadSettings">刷新</button></div>
-              <div class="settings-field-grid">
-                <input :value="fixedModelDisplayName" readonly aria-readonly="true" placeholder="显示名称" />
-                <input v-model="modelForm.baseUrl" placeholder="Base URL" />
-                <input v-model="modelForm.modelName" placeholder="模型名称" />
-                <input v-model="modelForm.apiKey" :placeholder="apiKeyPlaceholder" type="password" />
-              </div>
-              <small class="muted">API Key 留空会保留已保存的 Key；已配置时显示脱敏提示。</small>
-              <div class="row">
-                <button class="primary" :disabled="modelBusy" @click="saveModel">{{ modelSaving ? "保存中" : "保存" }}</button>
-                <button :disabled="modelBusy || hasUnsavedApiKey" @click="testModel()">{{ modelTesting ? "测试中" : "测试" }}</button>
-              </div>
-            </div>
-
-            <div class="card stack settings-card settings-tools-skills-card">
-              <div class="card-header"><h2 class="card-title">Tools & Skills</h2></div>
-              <div class="settings-list settings-tools-skills-list">
-                <div v-for="skill in skills" :key="skill.id" class="file-row compact-capability-row" :title="skill.description">
-                  <span class="capability-copy">
-                    <strong>{{ skill.name }} v{{ skill.version }}</strong>
-                    <span class="status-pill status-running">Skill</span><br />
-                    <small class="muted">{{ compactText(skill.description, 44) }}</small>
-                  </span>
-                  <button @click="toggleSkill(skill)">修改</button>
-                </div>
-                <div v-for="tool in agentTools" :key="tool.name" class="file-row tool-row compact-capability-row" :title="tool.description">
-                  <span class="capability-copy">
-                    <strong>{{ tool.name }}</strong>
-                    <span class="status-pill status-running">Tool</span><br />
-                    <small class="muted">{{ toolMeta(tool) }}</small>
-                  </span>
-                  <div v-if="tool.configRequirements?.length" class="row tool-config-actions">
-                    <button type="button" @click="openProviderKeyDialog()">配置 API Key</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="card stack settings-card settings-agent-card">
-            <div class="card-header"><h2 class="card-title">Agent设置</h2></div>
-            <div class="settings-agent-section stack">
-              <div class="card-header"><h3 class="card-title">Agent 默认内存</h3><strong>{{ agentMemoryLabel }}</strong></div>
-              <input v-model.number="agentMemoryMb" type="range" min="512" :max="systemMemoryMb" step="512" @change="saveAgentSettings" />
-              <div class="row">
-                <small class="muted">512 MB</small>
-                <small class="muted">设备最大内存 {{ systemMemoryLabel }}</small>
-              </div>
-              <small v-if="agentMemoryWarning" class="danger-note">当前设置超过设备内存的 90%，可能导致系统或服务端不稳定。</small>
-              <small class="muted">此处设置只影响 Agent 配置服务端时使用的推荐内存大小，不会影响已经存在的服务端。Agent 会优先使用这个内存；如果整合包有明确要求，可以调整，但不能超过推荐内存，并需要说明调整情况。</small>
-              <div class="row">
-                <button type="button" @click="saveAgentSettings">保存默认内存</button>
-              </div>
-            </div>
-            <div class="settings-agent-section stack">
-              <div class="card-header"><h3 class="card-title">Agent 代理</h3></div>
-              <label class="row inline-check settings-proxy-toggle" title="影响 Agent 联网工具、Java 安装、Forge installer 和服务端启动进程，不影响模型请求。">
-                <input v-model="agentDownloadProxyEnabled" type="checkbox" @change="saveAgentSettings" />
-                <span>Agent 与服务端使用代理</span>
-              </label>
-              <div class="row settings-proxy-controls">
-                <input v-model.trim="agentDownloadProxyUrl" placeholder="http://127.0.0.1:7890" :disabled="!agentDownloadProxyEnabled" @keyup.enter="saveAgentSettings" />
-                <button type="button" :disabled="agentDownloadProxyEnabled && !agentDownloadProxyUrl.trim()" @click="saveAgentSettings">保存代理</button>
-                <button type="button" @click="openProxyTestDialog">检测代理</button>
-              </div>
-              <small class="muted">支持 HTTP/HTTPS 代理地址，例如 Clash 或 v2rayN 的本地 HTTP 端口；开启后 Agent 工具、Forge 安装器和服务端 JVM 会继承代理。</small>
-            </div>
-            <div class="settings-agent-section stack">
-              <div class="card-header"><h3 class="card-title">平台 API Key</h3><button type="button" @click="openProviderKeyDialog()">配置</button></div>
-              <div class="provider-key-summary">
-                <small class="muted">CurseForge：{{ providerKeySettings.curseForgeApiKeyHint }}</small>
-                <small class="muted">Modrinth：{{ providerKeySettings.modrinthApiKeyHint }}</small>
-              </div>
-              <small class="muted">CurseForge 下载需要 API Key；Modrinth PAT 通常可选，遇到 401/403 时再配置。</small>
-            </div>
-            <div class="settings-agent-section settings-prompt-section stack">
-              <div class="card-header"><h3 class="card-title">Prompt 设置</h3><button @click="resetGlobalPrompt">恢复默认</button></div>
-              <textarea v-model="globalPrompt" class="settings-prompt-input" />
-              <button class="primary" @click="saveGlobalPrompt">保存全局 Prompt</button>
-            </div>
-          </div>
-
-          <div class="card stack settings-card settings-java-card">
-            <div class="card-header"><h2 class="card-title">JAVA 管理</h2><button @click="loadSettings">刷新</button></div>
-            <form class="row settings-java-controls" @submit.prevent="installJava(javaVersionToInstall)">
-              <select v-model="javaVersionToInstall" class="compact-input">
-                <option v-for="java in javaVersions" :key="java.version" :value="java.version">
-                  {{ java.label }} - {{ javaStatusText(java) }}
-                </option>
-              </select>
-              <select v-model="javaDownloadSource" class="compact-input">
-                <option v-for="source in javaDownloadSources" :key="source.id" :value="source.id">
-                  {{ source.label }}
-                </option>
-              </select>
-              <button class="primary" type="submit" :disabled="selectedJavaInstalled || selectedJavaBusy">
-                {{ selectedJavaInstalled ? "已安装" : selectedJavaBusy ? "安装中" : "安装所选版本" }}
-              </button>
-              <button v-if="selectedJavaTask && isJavaTaskActive(selectedJavaTask.status)" class="danger" type="button" :disabled="!isJavaTaskCancellable(selectedJavaTask.status)" @click="cancelJavaInstall(selectedJavaTask.version)">
-                {{ selectedJavaTask.status === "cancelling" ? "取消中" : "取消安装" }}
-              </button>
-            </form>
-            <div v-if="selectedJavaTask" class="java-progress stack">
-              <div class="row">
-                <span class="status-pill" :class="selectedJavaTask.status === 'failed' ? 'risk-high' : selectedJavaTask.status === 'installed' ? 'status-running' : isJavaTaskActive(selectedJavaTask.status) ? 'risk-medium' : ''">{{ selectedJavaTask.status }}</span>
-                <small class="muted">{{ javaTaskDetail(selectedJavaTask) }}</small>
-              </div>
-              <div v-if="isJavaTaskActive(selectedJavaTask.status)" class="progress-track"><span :style="{ width: `${selectedJavaTask.progress}%` }" /></div>
-            </div>
-            <small class="muted settings-help">下拉框来自 Adoptium 可用主版本清单；默认使用国内高速源并自动回退官方源，安装中可随时取消，不会修改系统 Java。</small>
-            <div class="java-version-list">
-              <div v-for="java in javaVersions" :key="java.version" class="file-row java-version-row">
-                <span>
-                  {{ java.label }}
-                  <span class="status-pill" :class="javaStatusClass(java)">{{ javaStatusText(java) }}</span><br />
-                  <small class="muted">{{ java.installPath || java.task?.message || "未安装到应用 workspace" }}</small>
-                  <template v-if="java.task">
-                    <br /><small :class="java.task.status === 'failed' ? 'danger-note inline-note' : 'muted'">{{ javaTaskDetail(java.task) }}</small>
-                    <div v-if="isJavaTaskActive(java.task.status)" class="progress-track"><span :style="{ width: `${java.task.progress}%` }" /></div>
-                  </template>
-                </span>
-                <div class="row java-row-actions">
-                  <button v-if="java.task && isJavaTaskActive(java.task.status)" class="danger" :disabled="!isJavaTaskCancellable(java.task.status)" @click="cancelJavaInstall(java.version)">
-                    {{ java.task.status === "cancelling" ? "取消中" : "取消" }}
-                  </button>
-                  <button v-else-if="!java.installed" @click="installJava(java.version)">
-                    安装
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+       <Transition name="server-switch" mode="out-in">
+        <WorkspaceSettingsPanel
+          v-if="settingsOpen"
+          key="settings"
+           :agent-memory-label="agentMemoryLabel"
+           :agent-memory-mb="agentMemoryMb"
+           :agent-memory-warning="agentMemoryWarning"
+           :auto-confirm="agentAutoConfirm"
+          :agent-tools="agentTools"
+          :api-key-placeholder="apiKeyPlaceholder"
+          :fixed-model-display-name="fixedModelDisplayName"
+          :global-prompt="globalPrompt"
+          :has-unsaved-api-key="hasUnsavedApiKey"
+          :java-download-source="javaDownloadSource"
+          :java-download-sources="javaDownloadSources"
+          :java-version-to-install="javaVersionToInstall"
+          :java-versions="javaVersions"
+          :model-busy="modelBusy"
+          :model-form="modelForm"
+          :model-saving="modelSaving"
+          :model-testing="modelTesting"
+          :provider-key-settings="providerKeySettings"
+          :proxy-enabled="agentDownloadProxyEnabled"
+          :proxy-url="agentDownloadProxyUrl"
+          :selected-java-busy="selectedJavaBusy"
+          :selected-java-installed="selectedJavaInstalled"
+          :selected-java-task="selectedJavaTask"
+          :settings-nav-items="settingsNavItems"
+          :settings-tab="settingsTab"
+          :skills="skills"
+          :system-memory-label="systemMemoryLabel"
+          :system-memory-mb="systemMemoryMb"
+          :tool-config-summary="toolConfigSummary"
+          :tool-needs-config="toolNeedsConfig"
+          :is-java-task-active="isJavaTaskActive"
+          :is-java-task-cancellable="isJavaTaskCancellable"
+          :java-status-class="javaStatusClass"
+          :java-status-text="javaStatusText"
+          :java-task-detail="javaTaskDetail"
+          @cancel-java="cancelJavaInstall"
+          @edit-prompt="openPromptEditor"
+          @install-java="installJava"
+          @open-provider-keys="openProviderKeyDialog"
+          @open-proxy-test="openProxyTestDialog"
+          @refresh="loadSettings"
+          @reset-prompt="resetGlobalPrompt"
+          @save-agent-settings="saveAgentSettings"
+          @save-model="saveModel"
+          @test-model="testModel()"
+          @toggle-skill="toggleSkill"
+           @update:agent-memory-mb="updateAgentMemorySetting"
+           @update:auto-confirm="agentAutoConfirm = $event; saveAgentSettings()"
+          @update:java-download-source="javaDownloadSource = $event"
+          @update:java-version-to-install="javaVersionToInstall = $event"
+          @update:model-api-key="modelForm.apiKey = $event"
+          @update:model-base-url="modelForm.baseUrl = $event"
+          @update:model-context-size-k="modelForm.contextSizeK = $event"
+          @update:model-name="modelForm.modelName = $event"
+          @update:proxy-enabled="updateAgentProxyEnabled"
+          @update:proxy-url="agentDownloadProxyUrl = $event"
+          @update:settings-tab="settingsTab = $event"
+        />
 
         <section v-else-if="selectedServer" :key="selectedServer.id" class="workspace single-workspace">
-          <header class="instance-topbar card">
-            <div class="instance-title-block">
-              <p class="eyebrow">Instance</p>
-              <h1>{{ selectedServer.name }}</h1>
-            </div>
-            <div class="instance-actions">
-              <span class="status-chip" :class="statusClass">
-                <span class="status-chip-icon" aria-hidden="true" />
-                <span>{{ serverStatusText }}</span>
-              </span>
-              <button class="primary" :disabled="!canRunAction('start')" @click="serverAction('start')">启动</button>
-              <button :disabled="!canRunAction('stop')" @click="serverAction('stop')">停止</button>
-              <button :disabled="!canRunAction('restart')" @click="serverAction('restart')">重启</button>
-              <button class="danger" :disabled="!canRunAction('kill')" @click="serverAction('kill')">强制结束</button>
-              <button type="button" @click="openFileDialog">文件</button>
-              <button type="button" @click="openConfigDialog">配置</button>
-            </div>
-          </header>
+          <InstanceTopbar
+            :server="selectedServer"
+            :status-class="statusClass"
+            :status-text="serverStatusText"
+            :can-run-action="canRunAction"
+            @action="serverAction($event)"
+            @open-config="openConfigDialog"
+            @open-files="openFileDialog"
+          />
 
-            <div class="operation-grid">
+          <div class="operation-grid">
             <div class="left-operation-stack">
-              <section class="card stack workspace-card console-card single-console-panel">
-                <div class="card-header">
-                  <h2 class="card-title">实例终端</h2>
-                  <div class="row">
-                    <button type="button" @click="loadLogs">刷新日志</button>
-                  </div>
-                </div>
-                <div ref="consoleLogList" class="console">
-                  <p v-if="logs.length === 0" class="console-empty">暂无日志，启动实例后会显示实时输出。</p>
-                  <div v-for="log in renderedConsoleLogs" :key="log.id" :class="['console-entry', log.stream]" v-html="log.html" />
-                </div>
-                <form class="row command-bar" @submit.prevent="sendCommand">
-                  <input v-model="consoleCommand" placeholder="输入服务端控制台指令" />
-                  <button class="primary" type="submit">发送</button>
-                </form>
-              </section>
+              <ConsolePanel
+                ref="consolePanel"
+                v-model:command="consoleCommand"
+                :analyzing="errorAnalysisSending"
+                :command-history="consoleCommandHistory"
+                :error-state="selectedServerErrorState"
+                :has-error="selectedServerHasError"
+                :logs="logs"
+                :rendered-logs="renderedConsoleLogs"
+                @analyze="analyzeConsoleErrors"
+                @refresh="loadLogs"
+                @send="sendCommand"
+              />
 
-              <div v-if="showDeploymentProgressCard" class="deployment-progress-shell" :class="[`workflow-${deploymentProgressCardStatus}`, { dismissed: deploymentProgressDismissed }]">
-                  <div class="deployment-progress-panel">
-                    <button type="button" class="deployment-progress-sticky-caret" :aria-label="deploymentProgressDismissed ? '显示部署进度' : '隐藏部署进度'" @click="deploymentProgressDismissed = !deploymentProgressDismissed"><span aria-hidden="true" /></button>
-                    <section class="card stack deployment-progress-card" :class="`workflow-${deploymentProgressCardStatus}`" role="status" aria-live="polite">
-                    <div class="card-header deployment-progress-header">
-                      <div>
-                        <p class="eyebrow">Deployment</p>
-                      </div>
-                      <div class="row deployment-progress-actions">
-                        <span class="status-pill" :class="deploymentProgressCardStatus === 'failed' ? 'risk-high' : 'status-running'">{{ deploymentProgressLabel }}</span>
-                      </div>
-                    </div>
-                    <div class="server-slot-card" :class="{ occupied: serverSlot?.occupied }">
-                      <div>
-                        <p class="eyebrow">Server Package</p>
-                        <strong>{{ serverSlot?.occupied ? "已准备服务端包" : "等待服务端包" }}</strong>
-                        <small class="muted">{{ serverSlotDetail(serverSlot) }}</small>
-                      </div>
-                      <button type="button" @click="loadServerSlotStatus">刷新状态</button>
-                    </div>
-                    <div class="workflow-progress-panel" :class="`workflow-${deploymentProgressCardStatus}`">
-                      <div class="row workflow-head">
-                        <strong>{{ deploymentWorkflow?.title ?? "服务端部署" }}</strong>
-                        <span>{{ deploymentProgressPercent }}%</span>
-                      </div>
-                      <div class="progress-track"><span :style="{ width: `${deploymentProgressPercent}%` }" /></div>
-                      <div v-if="deploymentWorkflow" class="workflow-steps" tabindex="0" aria-label="部署步骤">
-                        <div v-for="step in deploymentWorkflow.steps" :key="step.id" class="workflow-step" :class="[`step-${step.status}`, { active: step.id === deploymentWorkflow.currentStepId }]" :data-workflow-step-id="step.id">
-                          <div class="row">
-                            <strong>{{ step.label }}</strong>
-                            <span v-if="step.status === 'failed'" class="status-pill" :class="workflowStepClass(step.status)">{{ workflowStatusText(step.status) }}</span>
-                          </div>
-                          <div class="progress-track"><span :style="{ width: `${step.progress}%` }" /></div>
-                          <small class="muted">{{ step.detail || `${step.progress}%` }}</small>
-                        </div>
-                      </div>
-                      <small v-else class="muted">当前服务端包已准备好，可继续启动或调整配置。</small>
-                    </div>
-                    </section>
-                  </div>
-              </div>
+              <DeploymentProgressPanel
+                v-if="showDeploymentProgressCard"
+                :dismissed="deploymentProgressDismissed"
+                :label="deploymentProgressLabel"
+                :percent="deploymentProgressPercent"
+                :slot="serverSlot"
+                :slot-detail="serverSlotDetail"
+                :status="deploymentProgressCardStatus"
+                :workflow="deploymentWorkflow"
+                :workflow-status-class="workflowStepClass"
+                :workflow-status-text="workflowStatusText"
+                @refresh="loadServerSlotStatus"
+                @toggle-dismissed="deploymentProgressDismissed = !deploymentProgressDismissed"
+              />
 
             </div>
 
-            <section class="card stack agent-card workspace-card single-agent-panel">
-              <div class="card-header">
-                <h2 class="card-title">Agent</h2>
-                <div class="row">
-                  <span class="status-pill">{{ agentStatusText }}</span>
-                  <button class="danger" type="button" :disabled="agentBusy || agentMessages.length === 0" @click="clearAgentContext">清除上下文</button>
-                </div>
-              </div>
-              <div class="agent-message-shell">
-                <div ref="agentMessageList" class="message-list" @scroll="updateAgentScrollState">
-                  <TransitionGroup name="message-stream" tag="div" class="message-stream">
-                    <div v-for="message in agentMessages" :key="message.id" class="message" :class="[message.role, { failed: message.status === 'failed' }]">
-                      <strong>{{ message.role }}</strong>
-                      <div v-if="message.role === 'agent'" class="message-content markdown-content" v-html="renderAgentMarkdown(message.content)" />
-                      <details v-else-if="message.role === 'system' && isCollapsibleAgentLog(message.content)" class="message-content agent-log-details">
-                        <summary>{{ collapsibleAgentLogTitle(message.content) }}</summary>
-                        <pre>{{ message.content }}</pre>
-                      </details>
-                      <div v-else class="message-content">{{ message.content }}</div>
-                    </div>
-                  </TransitionGroup>
-                </div>
-                <Transition name="agent-scroll-bottom">
-                  <button v-if="showAgentScrollToBottom" class="agent-scroll-bottom" type="button" @click="scrollAgentHistoryToBottom">回到底部</button>
-                </Transition>
-              </div>
-              <div v-if="pendingAgentAttachments.length" class="agent-attachments">
-                <span class="muted">已上传到服务端目录，将随下一条消息引用</span>
-                <div v-for="attachment in pendingAgentAttachments" :key="attachment.path" class="agent-attachment-chip">
-                  <span>{{ attachment.originalName }}</span>
-                  <code>{{ attachment.path }}</code>
-                  <button type="button" :disabled="agentBusy" @click="removePendingAgentAttachment(attachment.path)">移除</button>
-                </div>
-              </div>
-              <div v-if="agentUpload.active" class="upload-progress" role="status" aria-live="polite">
-                <div class="row">
-                  <strong>{{ agentUpload.done ? "上传完成" : "正在上传" }} {{ agentUpload.fileName }}</strong>
-                  <span>{{ agentUpload.percent }}%</span>
-                </div>
-                <div class="progress-track"><span :style="{ width: `${agentUpload.percent}%` }" /></div>
-                <small class="muted">{{ uploadDetail(agentUpload) }}</small>
-              </div>
-              <div v-if="agentRetry" class="agent-download-progress download-retrying" role="status" aria-live="polite">
-                <div class="row">
-                  <strong>{{ agentRetryMessage }}</strong>
-                  <button type="button" :disabled="agentRetryNowSending" @click="retryAgentNow">{{ agentRetryNowSending ? "重试中" : "立即重试" }}</button>
-                </div>
-                <small class="muted">{{ agentRetry.message }}</small>
-              </div>
-              <Transition name="agent-input">
-                <div v-if="showAgentOutputLoading" class="agent-output-loading" role="status" aria-live="polite">
-                  <div class="agent-loader-core" aria-hidden="true"><span /><span /><span /></div>
-                  <div>
-                    <strong>{{ agentOutputLoadingText }}</strong>
-                  </div>
-                </div>
-                <textarea v-else-if="!agentBusy" v-model="agentInput" :placeholder="agentPlaceholder" @keydown.ctrl.enter.prevent="sendAgentMessage" />
-              </Transition>
-              <div class="row agent-command-row">
-                <label class="row reasoning-control">
-                  <span class="muted">思考深度</span>
-                  <select v-model="agentReasoningEffort" :disabled="agentBusy">
-                    <option value="minimal">Minimal</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </select>
-                </label>
-                <button v-if="agentStatus === 'retrying'" type="button" :disabled="agentRetryNowSending" @click="retryAgentNow">
-                  {{ agentRetryNowSending ? "重试中" : "立即重试" }}
-                </button>
-                <button v-if="agentBusy" class="danger" type="button" @click="cancelAgentRun">中断</button>
-                <label class="row inline-check agent-auto-confirm" title="开启后 Agent 请求确认的操作会自动放行，不再弹出确认窗口。">
-                  <input v-model="agentAutoConfirm" type="checkbox" @change="saveAgentSettings" />
-                  <span>自动确认</span>
-                </label>
-                <button class="primary" :disabled="agentBusy || (!agentInput.trim() && pendingAgentAttachments.length === 0)" @click="sendAgentMessage">{{ agentBusy ? "处理中" : "发送任务" }}</button>
-                <input ref="agentUploadInput" class="visually-hidden" type="file" @change="uploadAgentFile" />
-                <button type="button" :disabled="agentUpload.active" @click="openAgentUploadPicker">{{ agentUpload.active ? "上传中" : "上传文件" }}</button>
-              </div>
-            </section>
+            <AgentPanel
+              ref="agentPanel"
+              :attachments="pendingAgentAttachments"
+              :auto-confirm="agentAutoConfirm"
+              :busy="agentBusy"
+              :context-remaining-label="contextRemainingLabel"
+              :context-ring-style="contextRingStyle"
+              :context-usage="agentContextUsage"
+              :input="agentInput"
+              :messages="agentMessages"
+              :output-loading="showAgentOutputLoading"
+              :output-loading-text="agentOutputLoadingText"
+              :placeholder="agentPlaceholder"
+              :reasoning-effort="agentReasoningEffort"
+              :retry="agentRetry"
+              :retry-message="agentRetryMessage"
+              :retry-now-sending="agentRetryNowSending"
+              :scroll-to-bottom-visible="showAgentScrollToBottom"
+              :status="agentStatus"
+              :upload="agentUpload"
+              :upload-detail="uploadDetail"
+              @cancel="cancelAgentRun"
+              @clear="clearAgentContext"
+              @message-scroll="updateAgentScrollState"
+              @remove-attachment="removePendingAgentAttachment"
+              @retry="retryAgentNow"
+              @scroll-to-bottom="scrollAgentHistoryToBottom"
+              @send="sendAgentMessage"
+              @update:auto-confirm="agentAutoConfirm = $event; saveAgentSettings()"
+              @update:input="agentInput = $event"
+              @update:reasoning-effort="agentReasoningEffort = $event"
+              @upload="uploadAgentFile"
+              @upload-requested="openAgentUploadPicker"
+            />
           </div>
         </section>
       </Transition>
@@ -2612,135 +2116,74 @@ onBeforeUnmount(() => {
 
       <Transition name="modal">
         <div v-if="fileDialogOpen && selectedServer" class="modal-backdrop">
-          <section class="card stack management-dialog files-dialog">
-            <div class="card-header">
-              <div>
-                <p class="eyebrow">File Manager</p>
-                <h2 class="card-title">{{ selectedServer.name }} 文件</h2>
-                <p class="muted">当前路径：{{ currentPath }}</p>
-              </div>
-              <div class="row">
-                <button type="button" @click="goUp">上级</button>
-                <button type="button" @click="loadFiles">刷新</button>
-                <button type="button" @click="fileDialogOpen = false">关闭</button>
-              </div>
-            </div>
-
-            <div class="row file-toolbar">
-              <input v-model="newFolderName" placeholder="新文件夹名称" />
-              <button type="button" @click="createFolder">新建文件夹</button>
-              <input ref="serverUploadInput" class="visually-hidden" type="file" @change="uploadServerFile" />
-              <button type="button" :disabled="serverUpload.active" @click="serverUploadInput?.click()">{{ serverUpload.active ? "上传中" : "上传文件" }}</button>
-              <template v-if="selectedFiles.length > 0">
-                <span class="file-selection-count">已选 {{ selectedFiles.length }} 项</span>
-                <button v-if="selectedFile" type="button" @click="showFileProperties(selectedFile)">属性</button>
-                <button v-if="selectedFile" type="button" @click="renameFile(selectedFile.path)">重命名</button>
-                <button class="danger" type="button" @click="removeSelectedFiles">删除</button>
-              </template>
-            </div>
-
-            <div v-if="serverUpload.active" class="upload-progress" role="status" aria-live="polite">
-              <div class="row">
-                <strong>{{ serverUpload.done ? "上传完成" : "正在上传" }} {{ serverUpload.fileName }}</strong>
-                <span>{{ serverUpload.percent }}%</span>
-              </div>
-              <div class="progress-track"><span :style="{ width: `${serverUpload.percent}%` }" /></div>
-              <small class="muted">{{ uploadDetail(serverUpload) }}</small>
-            </div>
-
-            <TransitionGroup name="file-list-switch" tag="div" class="file-list dialog-file-list">
-              <div v-if="filesLoading" key="loading" class="file-row file-loading-row">
-                <span class="file-loading-spinner" aria-hidden="true"></span>
-                <span class="muted">正在获取文件...</span>
-              </div>
-              <div v-else-if="sortedFiles.length === 0" key="empty" class="file-row empty-row">
-                <span class="muted">当前目录为空</span>
-              </div>
-              <div v-if="!filesLoading && parentDirectoryPath" key="parent" class="file-row file-row-parent" role="button" tabindex="0" @click="openFolder(parentDirectoryPath)" @keydown.enter="openFolder(parentDirectoryPath)">
-                <div class="file-name">
-                  <span class="file-icon file-icon-parent" aria-hidden="true"></span>
-                  <span class="visually-hidden">上一级</span>
-                  <span>../</span>
-                </div>
-                <div class="row"></div>
-              </div>
-              <div v-for="file in filesLoading ? [] : sortedFiles" :key="file.path" :class="['file-row', 'dialog-file-row', selectedFilePaths.includes(file.path) ? 'selected' : '']" role="button" tabindex="0" @mousedown="beginFileDragSelection(file.path, $event)" @mouseenter="dragSelectFile(file.path)" @dblclick="openFileEntry(file)" @keydown.enter="openFileEntry(file)">
-                <label class="file-check" :aria-label="`选择 ${file.name}`" @mousedown.stop @click.stop>
-                  <input type="checkbox" :checked="selectedFilePaths.includes(file.path)" @change="toggleSelectedFile(file.path)" />
-                  <span aria-hidden="true"></span>
-                </label>
-                <div class="file-name">
-                  <span :class="['file-icon', file.type === 'directory' ? 'file-icon-directory' : 'file-icon-file']" aria-hidden="true"></span>
-                  <span class="visually-hidden">{{ file.type === "directory" ? "文件夹" : "文件" }}</span>
-                  <span>{{ file.name }}</span>
-                  <small v-if="file.type === 'file'" class="muted">{{ formatBytes(file.size) }}</small>
-                </div>
-                <div class="row">
-                  <a v-if="file.type === 'file'" :href="downloadUrl(`/api/servers/${selectedServer.id}/files/download?path=${encodeURIComponent(file.path)}`)" @click.stop><button>下载</button></a>
-                </div>
-              </div>
-            </TransitionGroup>
-          </section>
+          <FileManagerDialog
+            :current-path="currentPath"
+            :download-url="downloadUrl"
+            :files="sortedFiles"
+            :format-bytes="formatBytes"
+            :loading="filesLoading"
+            :parent-directory-path="parentDirectoryPath"
+            :selected-file="selectedFile ?? null"
+            :selected-file-paths="selectedFilePaths"
+            :selected-files="selectedFiles"
+            :server="selectedServer"
+            :upload="serverUpload"
+            :upload-detail="uploadDetail"
+            @begin-selection="beginFileDragSelection"
+            @close="fileDialogOpen = false"
+            @create-file="createFile"
+            @create-folder="createFolder"
+            @drag-select="dragSelectFile"
+            @go-up="goUp"
+            @open-entry="openFileEntry"
+            @open-folder="openFolder"
+            @refresh="loadFiles"
+            @remove-selected="removeSelectedFiles"
+            @rename-file="renameFile"
+            @show-properties="showFileProperties"
+            @toggle-selected="toggleSelectedFile"
+            @upload="uploadServerFile"
+          />
         </div>
       </Transition>
 
       <Transition name="modal">
         <div v-if="configDialogOpen && selectedServer" class="modal-backdrop">
-          <form class="card stack management-dialog config-dialog" @submit.prevent="saveServerConfig">
-            <div class="card-header">
-              <div>
-                <p class="eyebrow">Instance Config</p>
-                <h2 class="card-title">服务端配置</h2>
-              </div>
-              <div class="row">
-                <button class="primary" type="submit">保存</button>
-                <button type="button" @click="configDialogOpen = false">关闭</button>
-              </div>
-            </div>
-            <label class="config-field stack">
-              <span class="muted">服务端名字</span>
-              <input v-model.trim="serverForm.name" placeholder="服务端名字" />
-            </label>
-            <label class="config-field stack">
-              <span class="muted">使用内存大小</span>
-              <div class="memory-config-panel">
-                <div class="memory-config-head">
-                  <strong>{{ serverMemoryLabel }}</strong>
-                  <input v-model.number="serverMemoryMb" type="number" :min="minimumServerMemoryMb" :max="serverMemoryMaxMb" step="512" inputmode="numeric" />
-                </div>
-                <input v-model.number="serverMemoryMb" class="memory-slider" type="range" :min="minimumServerMemoryMb" :max="serverMemoryMaxMb" step="512" />
-                <div class="row memory-range-labels">
-                  <small class="muted">{{ formatMemoryMb(minimumServerMemoryMb) }}</small>
-                  <small class="muted">设备最大内存 {{ systemMemoryLabel }}</small>
-                </div>
-                <small v-if="serverMemoryWarning" class="danger-note">当前设置超过设备内存的 90%，可能导致系统或服务端不稳定。</small>
-              </div>
-            </label>
-            <label class="config-field stack">
-              <span class="muted">使用 Java 版本</span>
-              <select v-model="serverForm.javaVersion" @change="applyServerJavaSelection">
-                <option v-for="java in configJavaVersionOptions" :key="java.version" :value="java.version">
-                  {{ java.label }}{{ java.installed ? "（已安装）" : "" }}
-                </option>
-              </select>
-            </label>
-            <label class="config-field stack">
-              <span class="muted">启动指令</span>
-              <textarea v-model.trim="serverForm.startupCommand" class="startup-command-input" placeholder="留空则自动使用服务端脚本或 Jar。可用变量：{java} {javaHome} {memory} {minMemory} {maxMemory} {jarFile} {startArgs}" />
-            </label>
-          </form>
+          <ServerConfigDialog
+            :form="serverForm"
+            :format-memory="formatMemoryMb"
+            :java-versions="configJavaVersionOptions"
+            :memory-label="serverMemoryLabel"
+            :memory-max-mb="serverMemoryMaxMb"
+            :memory-mb="serverMemoryMb"
+            :memory-warning="serverMemoryWarning"
+            :minimum-memory-mb="minimumServerMemoryMb"
+            :system-memory-label="systemMemoryLabel"
+            @close="configDialogOpen = false"
+            @save="saveServerConfig"
+            @select-java="applyServerJavaSelection"
+            @update:memory-mb="serverMemoryMb = $event"
+          />
         </div>
       </Transition>
 
-      <Transition name="modal">
-        <div v-if="textEditor.open" class="modal-backdrop">
-          <section class="card stack editor-dialog">
-            <div class="card-header"><h2 class="card-title">编辑 {{ textEditor.path }}</h2><button @click="textEditor.open = false">关闭</button></div>
-            <textarea v-model="textEditor.content" class="code-editor" />
-            <button class="primary" @click="saveTextFile">保存文件</button>
-          </section>
-        </div>
-      </Transition>
+      <TextFileEditorDialog
+        :content="textEditor.content"
+        :open="textEditor.open"
+        :path="textEditor.path"
+        @close="textEditor.open = false"
+        @save="saveTextFile"
+        @update:content="textEditor.content = $event"
+      />
+
+      <GlobalPromptEditorDialog
+        :draft="promptEditor.draft"
+        :open="promptEditor.open"
+        :saving="promptEditor.saving"
+        @close="closePromptEditor"
+        @save="savePromptFromEditor"
+        @update:draft="promptEditor.draft = $event"
+      />
     </main>
   </div>
 </template>

@@ -36,6 +36,7 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="login-page">
+    <LoginParticleBackground />
     <div class="login-card">
       <div class="login-logo">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="40" height="40">
@@ -71,6 +72,7 @@ function onKeydown(e: KeyboardEvent) {
   min-height: 100dvh;
   background: var(--bg-deep);
   position: relative;
+  isolation: isolate;
 }
 
 .login-page::before {
@@ -79,14 +81,14 @@ function onKeydown(e: KeyboardEvent) {
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(circle at 10% 6%, rgba(59, 130, 246, 0.18), transparent 26rem),
-    radial-gradient(circle at 92% 12%, rgba(34, 197, 94, 0.11), transparent 24rem),
-    linear-gradient(180deg, #0d1420 0%, #090d14 48%, #070a10 100%);
+    radial-gradient(circle at 10% 6%, rgba(229, 169, 0, 0.14), transparent 26rem),
+    radial-gradient(circle at 92% 12%, rgba(102, 172, 105, 0.08), transparent 24rem),
+    linear-gradient(180deg, rgba(20, 16, 14, 0.88) 0%, rgba(14, 10, 9, 0.9) 48%, rgba(12, 9, 8, 0.94) 100%);
 }
 
 .login-card {
   position: relative;
-  z-index: 1;
+  z-index: 2;
   width: min(22rem, 90vw);
   background: var(--panel);
   border: 1px solid var(--line);
@@ -140,12 +142,12 @@ function onKeydown(e: KeyboardEvent) {
   font-weight: 600;
   background: var(--blue);
   border-color: var(--blue);
-  color: #fff;
+  color: #110c0b;
 }
 
 .login-form button:hover:not(:disabled) {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: #c48f00;
+  border-color: #c48f00;
 }
 
 .login-error {

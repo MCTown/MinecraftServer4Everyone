@@ -14,6 +14,7 @@ import { JavaService } from "./services/javaService.js";
 import { ModelService } from "./services/modelService.js";
 import { ProcessManager } from "./services/processManager.js";
 import { PromptService } from "./services/promptService.js";
+import { ServerErrorService } from "./services/serverErrorService.js";
 import { ServerService } from "./services/serverService.js";
 import { SkillService } from "./services/skillService.js";
 import { UploadService } from "./services/uploadService.js";
@@ -24,6 +25,7 @@ async function bootstrap() {
 
   const serverService = new ServerService();
   const consoleLogService = new ConsoleLogService();
+  const serverErrorService = new ServerErrorService(serverService, consoleLogService);
   const fileService = new FileService(serverService);
   const modelService = new ModelService();
   const skillService = new SkillService();
@@ -54,6 +56,7 @@ async function bootstrap() {
   registerErrorHandling(app);
   registerRoutes(app, {
     serverService,
+    serverErrorService,
     consoleLogService,
     fileService,
     processManager,

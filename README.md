@@ -9,14 +9,14 @@ npm install
 npm run dev
 ```
 
-对外访问默认只需要暴露 proxy 端口 `3000`：`http://<服务器IP>:3000`。
+对外访问默认只需要暴露 proxy 端口 `1143`：`http://<服务器IP>:1143`。
 
-后端默认监听 `0.0.0.0:8787`，前端默认监听 `0.0.0.0:3001`，proxy 默认监听 `0.0.0.0:3000`，并将 `/api`、`/ws` 转发到后端，其它请求转发到前端。
+后端默认监听 `0.0.0.0:8787`，前端默认监听 `0.0.0.0:3000`，proxy 默认监听 `0.0.0.0:1143`，并将 `/api`、`/ws` 转发到后端，其它请求转发到前端。
 
 可通过环境变量覆盖端口和目标：
 
 ```bash
-APP_PORT=8787 NUXT_PORT=3001 PROXY_PORT=3000 npm run dev
+APP_PORT=8787 NUXT_PORT=3000 PROXY_PORT=1143 npm run dev
 ```
 
 也可以单独启动三个进程：`npm run dev:server`、`npm run dev:web`、`npm run dev:proxy`。

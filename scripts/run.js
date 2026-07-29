@@ -6,7 +6,7 @@ const npmExecPath = process.env.npm_execpath;
 const runNpmWithNode = npmExecPath && /\.[cm]?js$/i.test(npmExecPath);
 const npm = runNpmWithNode ? process.execPath : "npm";
 const serverPort = process.env.APP_PORT ?? "8787";
-const webPort = process.env.NUXT_PORT ?? process.env.NITRO_PORT ?? "3001";
+const webPort = process.env.NUXT_PORT ?? process.env.NITRO_PORT ?? "3000";
 const children = [];
 let shuttingDown = false;
 
@@ -97,7 +97,7 @@ startProcess("web", npm, npmArgs(["run", mode, "--workspace", "@mc-agent/web"]),
 
 startProcess("proxy", process.execPath, ["proxy.js"], withDefaults({
   PROXY_HOST: "0.0.0.0",
-  PROXY_PORT: process.env.PROXY_PORT ?? process.env.PORT ?? "3000",
+  PROXY_PORT: process.env.PROXY_PORT ?? process.env.PORT ?? "1143",
   PROXY_API_TARGET: `http://127.0.0.1:${serverPort}`,
   PROXY_WEB_TARGET: `http://127.0.0.1:${webPort}`
 }));

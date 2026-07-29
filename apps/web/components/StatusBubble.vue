@@ -1,28 +1,6 @@
 <script setup lang="ts">
-type StatusBubbleType = "idle" | "loading" | "success" | "error";
-
-interface AgentDownloadProgress {
-  id: string;
-  url: string;
-  fileName: string;
-  destinationPath: string;
-  loadedBytes: number;
-  totalBytes: number | null;
-  percent: number;
-  status: "starting" | "downloading" | "completed" | "cancelled" | "failed";
-  error?: string;
-}
-
-interface StatusBubbleItem {
-  id: number;
-  message: string;
-  type?: StatusBubbleType;
-  durationMs?: number;
-  progressKey?: number;
-  download?: AgentDownloadProgress;
-  actionLabel?: string;
-  actionKey?: string;
-}
+import type { AgentDownloadProgress } from "~/types/app";
+import type { StatusBubbleItem } from "~/types/ui";
 
 defineProps<{
   items: StatusBubbleItem[];
