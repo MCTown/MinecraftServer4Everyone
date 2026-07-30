@@ -31,6 +31,119 @@ export interface FileEntry {
   editable: boolean;
 }
 
+export type MapWorldDimension = "overworld" | "nether" | "end" | "custom";
+
+export interface MapWorldDirectory {
+  id: string;
+  dimension: MapWorldDimension;
+  label: string;
+  worldPath: string;
+  regionPath: string;
+  regionFileCount: number;
+}
+
+export interface MapWorldDiscovery {
+  worlds: MapWorldDirectory[];
+  truncated: boolean;
+}
+
+export interface McaRegionFile {
+  path: string;
+  name: string;
+  regionX: number;
+  regionZ: number;
+  size: number;
+  modifiedAt: string;
+}
+
+export interface McaRegionPage {
+  regions: McaRegionFile[];
+  offset: number;
+  limit: number;
+  total: number;
+}
+
+export interface McaHeaderChunk {
+  localX: number;
+  localZ: number;
+  chunkX: number;
+  chunkZ: number;
+  sectorOffset: number;
+  sectorCount: number;
+  timestamp: string | null;
+  valid: boolean;
+}
+
+export interface McaHeaderScan {
+  region: McaRegionFile & {
+    occupiedChunkCount: number;
+    invalidChunkCount: number;
+  };
+  chunks: McaHeaderChunk[];
+}
+
+export interface MapChunkPreviewCell {
+  localX: number;
+  localZ: number;
+  height: number;
+  block: string;
+  color: string;
+}
+
+export interface MapChunkPreview {
+  path: string;
+  regionX: number;
+  regionZ: number;
+  localX: number;
+  localZ: number;
+  chunkX: number;
+  chunkZ: number;
+  dataVersion: number | null;
+  cells: MapChunkPreviewCell[];
+  unsupportedReason: string | null;
+}
+
+export type MapMutationMode = "chunks" | "rectangle" | "region";
+
+export interface MapMutationSelection {
+  regionPath: string;
+  regionFilePath: string;
+  mode: MapMutationMode;
+  chunks?: Array<{ localX: number; localZ: number }>;
+  rectangle?: { minX: number; minZ: number; maxX: number; maxZ: number };
+}
+
+export interface MapMutationPlan {
+  mode: MapMutationMode;
+  confirmationPhrase: string;
+  selectionToken: string;
+  affectedPaths: string[];
+  affectedChunkCount: number | null;
+  externalChunkFiles: string[];
+  requiresStoppedServer: true;
+  serverStatus: ServerStatus;
+}
+
+export interface MapSnapshotFile {
+  path: string;
+  backupName: string;
+  size: number;
+  modifiedAt: string;
+  missing: boolean;
+}
+
+export interface MapSnapshot {
+  id: string;
+  serverId: string;
+  name: string;
+  description: string;
+  reason: "manual" | "delete";
+  createdAt: string;
+  files: MapSnapshotFile[];
+  rollbackConfirmationPhrase: string;
+  deleteConfirmationPhrase: string;
+}
+
 export interface ConsoleLogEntry {
   id: string;
   serverId: string;

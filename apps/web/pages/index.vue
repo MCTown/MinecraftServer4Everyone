@@ -6,6 +6,7 @@ import DeleteServerDialog from "~/components/dialogs/DeleteServerDialog.vue";
 import FileManagerDialog from "~/components/dialogs/FileManagerDialog.vue";
 import GlobalPromptEditorDialog from "~/components/dialogs/GlobalPromptEditorDialog.vue";
 import InstanceSwitcherDialog from "~/components/dialogs/InstanceSwitcherDialog.vue";
+import MapEditorDialog from "~/components/dialogs/MapEditorDialog.vue";
 import ProviderKeyDialog from "~/components/dialogs/ProviderKeyDialog.vue";
 import ProxyTestDialog from "~/components/dialogs/ProxyTestDialog.vue";
 import ServerConfigDialog from "~/components/dialogs/ServerConfigDialog.vue";
@@ -84,11 +85,16 @@ const instanceMenuOpen = ref(false);
 const restoreInstanceMenuFocus = ref(false);
 const pendingInstanceMenuAction = ref<(() => void) | null>(null);
 const serverSidebar = ref<InstanceType<typeof ServerSidebar> | null>(null);
+const instanceTopbar = ref<InstanceType<typeof InstanceTopbar> | null>(null);
+const fileManagerDialog = ref<InstanceType<typeof FileManagerDialog> | null>(null);
 const agentPanel = ref<InstanceType<typeof AgentPanel> | null>(null);
 const consolePanel = ref<InstanceType<typeof ConsolePanel> | null>(null);
 const deploymentProgressDismissed = ref(false);
 const fileDialogOpen = ref(false);
 const configDialogOpen = ref(false);
+const mapEditorDialogOpen = ref(false);
+const restoreMapEditorFocus = ref(false);
+const fileDialogFocusTarget = ref<"files" | "map" | null>(null);
 const textEditor = reactive({ open: false, path: "", content: "" });
 const promptEditor = reactive({ open: false, draft: "", saving: false });
 const createDialogOpen = ref(false);
@@ -400,16 +406,50 @@ function handleStatusBubbleAction(item: StatusBubbleItem) {
   if (item.actionKey === "provider-keys") openProviderKeyDialog(pendingToolConfig.value ?? undefined);
 }
 
-function openFileDialog() {
+function openFileDialog(path?: string) {
+  const openedFromMapEditor = path !== undefined;
+  if (path) currentPath.value = path;
   fileDialogOpen.value = true;
   configDialogOpen.value = false;
+  mapEditorDialogOpen.value = false;
+  restoreMapEditorFocus.value = false;
+  fileDialogFocusTarget.value = openedFromMapEditor ? "map" : "files";
+  void nextTick(() => fileManagerDialog.value?.focusInitialAction());
   void loadFiles().catch(() => undefined);
+}
+
+function closeFileDialog() {
+  fileDialogOpen.value = false;
+}
+
+function handleFileDialogAfterLeave() {
+  if (fileDialogFocusTarget.value === "map") instanceTopbar.value?.focusMapEditorTrigger();
+  if (fileDialogFocusTarget.value === "files") instanceTopbar.value?.focusFilesTrigger();
+  fileDialogFocusTarget.value = null;
 }
 
 function openConfigDialog() {
   configDialogOpen.value = true;
   fileDialogOpen.value = false;
+  mapEditorDialogOpen.value = false;
   void loadJavaState().catch(() => undefined);
+}
+
+function openMapEditorDialog() {
+  restoreMapEditorFocus.value = false;
+  mapEditorDialogOpen.value = true;
+  fileDialogOpen.value = false;
+  configDialogOpen.value = false;
+}
+
+function closeMapEditorDialog() {
+  restoreMapEditorFocus.value = true;
+  mapEditorDialogOpen.value = false;
+}
+
+function handleMapEditorAfterLeave() {
+  if (restoreMapEditorFocus.value) instanceTopbar.value?.focusMapEditorTrigger();
+  restoreMapEditorFocus.value = false;
 }
 
 function openInstanceMenu() {
@@ -666,6 +706,7 @@ async function selectServer(id: string) {
   settingsOpen.value = false;
   fileDialogOpen.value = false;
   configDialogOpen.value = false;
+  mapEditorDialogOpen.value = false;
   pendingAgentAttachments.value = [];
   agentDownloads.value = [];
   agentWorkflow.value = null;
@@ -2033,6 +2074,7 @@ onBeforeUnmount(() => {
 
         <section v-else-if="selectedServer" :key="selectedServer.id" class="workspace single-workspace">
           <InstanceTopbar
+            ref="instanceTopbar"
             :server="selectedServer"
             :status-class="statusClass"
             :status-text="serverStatusText"
@@ -2040,6 +2082,7 @@ onBeforeUnmount(() => {
             @action="serverAction($event)"
             @open-config="openConfigDialog"
             @open-files="openFileDialog"
+            @open-map-editor="openMapEditorDialog"
           />
 
           <div class="operation-grid">
@@ -2114,9 +2157,19 @@ onBeforeUnmount(() => {
       </Transition>
       </div>
 
-      <Transition name="modal">
-        <div v-if="fileDialogOpen && selectedServer" class="modal-backdrop">
+      <Transition name="modal" @after-leave="handleMapEditorAfterLeave">
+        <div v-if="mapEditorDialogOpen && selectedServer" class="modal-backdrop" @click.self="closeMapEditorDialog">
+          <MapEditorDialog
+            :server="selectedServer"
+            @close="closeMapEditorDialog"
+          />
+        </div>
+      </Transition>
+
+      <Transition name="modal" @after-leave="handleFileDialogAfterLeave">
+        <div v-if="fileDialogOpen && selectedServer" class="modal-backdrop" @click.self="closeFileDialog">
           <FileManagerDialog
+            ref="fileManagerDialog"
             :current-path="currentPath"
             :download-url="downloadUrl"
             :files="sortedFiles"
@@ -2130,7 +2183,7 @@ onBeforeUnmount(() => {
             :upload="serverUpload"
             :upload-detail="uploadDetail"
             @begin-selection="beginFileDragSelection"
-            @close="fileDialogOpen = false"
+            @close="closeFileDialog"
             @create-file="createFile"
             @create-folder="createFolder"
             @drag-select="dragSelectFile"

@@ -35,14 +35,63 @@ const emit = defineEmits<{
 }>();
 
 const uploadInput = ref<HTMLInputElement | null>(null);
+const closeButton = ref<HTMLButtonElement | null>(null);
+const dialog = ref<HTMLElement | null>(null);
+const createDialog = ref<HTMLElement | null>(null);
 const dropdownOpen = ref(false);
 const createDialogOpen = ref(false);
 const createDialogType = ref<"folder" | "file">("folder");
 const createInputName = ref("");
 const createInputRef = ref<HTMLInputElement | null>(null);
+const createTrigger = ref<HTMLButtonElement | null>(null);
 
 function requestUpload() {
   uploadInput.value?.click();
+}
+
+function focusInitialAction() {
+  closeButton.value?.focus();
+}
+
+function handleKeydown(event: KeyboardEvent) {
+  if (createDialogOpen.value) return;
+  if (event.key === "Escape") {
+    emit("close");
+    return;
+  }
+  if (event.key !== "Tab" || !dialog.value) return;
+  const focusable = [...dialog.value.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), [tabindex]:not([tabindex='-1'])")]
+    .filter((element) => element.offsetParent !== null);
+  if (!focusable.length) return;
+  const first = focusable[0]!;
+  const last = focusable.at(-1)!;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function handleCreateKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    cancelCreate();
+    return;
+  }
+  if (event.key !== "Tab" || !createDialog.value) return;
+  const focusable = [...createDialog.value.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled)")];
+  if (!focusable.length) return;
+  const first = focusable[0]!;
+  const last = focusable.at(-1)!;
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function openCreate(type: "folder" | "file") {
@@ -63,11 +112,13 @@ function confirmCreate() {
   }
   createDialogOpen.value = false;
   createInputName.value = "";
+  void nextTick(() => createTrigger.value?.focus());
 }
 
 function cancelCreate() {
   createDialogOpen.value = false;
   createInputName.value = "";
+  void nextTick(() => createTrigger.value?.focus());
 }
 
 function downloadSelected() {
@@ -94,21 +145,21 @@ function fileType(file: FileEntry): string {
   return "文件";
 }
 
-defineExpose({ requestUpload });
+defineExpose({ requestUpload, focusInitialAction });
 </script>
 
 <template>
-  <section class="card stack management-dialog files-dialog">
+  <section ref="dialog" class="card stack management-dialog files-dialog" role="dialog" aria-modal="true" :aria-label="`${props.server.name} 文件管理器`" @keydown="handleKeydown">
     <!-- Inline create dialog overlay -->
     <div v-if="createDialogOpen" class="create-name-overlay" @click.self="cancelCreate">
-      <div class="create-name-dialog card">
+      <div ref="createDialog" class="create-name-dialog card" role="dialog" aria-modal="true" :aria-label="createDialogType === 'folder' ? '新建文件夹' : '新建文件'" @keydown.stop="handleCreateKeydown">
         <p class="eyebrow">{{ createDialogType === "folder" ? "新建文件夹" : "新建文件" }}</p>
         <input
           ref="createInputRef"
           v-model="createInputName"
+          :aria-label="createDialogType === 'folder' ? '文件夹名称' : '文件名称'"
           :placeholder="createDialogType === 'folder' ? '文件夹名称' : '文件名称'"
           @keydown.enter="confirmCreate"
-          @keydown.esc="cancelCreate"
         />
         <div class="row">
           <button type="button" @click="cancelCreate">取消</button>
@@ -127,14 +178,14 @@ defineExpose({ requestUpload });
         <button v-if="props.selectedFiles.filter(f => f.type === 'file').length > 0" type="button" @click="downloadSelected">下载</button>
         <button type="button" @click="emit('go-up')">上级</button>
         <button type="button" @click="emit('refresh')">刷新</button>
-        <button type="button" @click="emit('close')">关闭</button>
+        <button ref="closeButton" type="button" @click="emit('close')">关闭</button>
       </div>
     </div>
 
     <div class="row file-toolbar">
       <!-- Dropdown: 新建 -->
       <div class="new-dropdown">
-        <button type="button" @click="dropdownOpen = !dropdownOpen">新建 ▾</button>
+        <button ref="createTrigger" type="button" @click="dropdownOpen = !dropdownOpen">新建 ▾</button>
         <div v-if="dropdownOpen" class="new-dropdown-backdrop" @click="dropdownOpen = false" />
         <div v-if="dropdownOpen" class="new-dropdown-menu">
           <button type="button" class="new-dropdown-item" @click="openCreate('folder')">
