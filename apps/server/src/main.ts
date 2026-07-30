@@ -12,6 +12,7 @@ import { ConsoleLogService } from "./services/consoleLogService.js";
 import { FileService } from "./services/fileService.js";
 import { JavaService } from "./services/javaService.js";
 import { ModelService } from "./services/modelService.js";
+import { MapService } from "./services/mapService.js";
 import { ProcessManager } from "./services/processManager.js";
 import { PromptService } from "./services/promptService.js";
 import { ServerErrorService } from "./services/serverErrorService.js";
@@ -32,6 +33,7 @@ async function bootstrap() {
   const promptService = new PromptService(serverService, skillService);
   const javaService = new JavaService(() => promptService.getAgentDownloadProxyUrl());
   const processManager = new ProcessManager(serverService, consoleLogService, promptService, javaService);
+  const mapService = new MapService(serverService, processManager);
   const uploadService = new UploadService();
   const agentService = new AgentService(
     serverService,
@@ -59,6 +61,7 @@ async function bootstrap() {
     serverErrorService,
     consoleLogService,
     fileService,
+    mapService,
     processManager,
     modelService,
     promptService,

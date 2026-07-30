@@ -1,14 +1,14 @@
 import { once } from "node:events";
 import { createHash } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { copyFile, cp, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { constants, createWriteStream } from "node:fs";
+import { copyFile, cp, mkdir, open, readdir, readFile, realpath, rename, rm, stat, writeFile, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import extractZip from "extract-zip";
 import { extract as extractTar } from "tar";
 import { fetch } from "undici";
 import { appConfig } from "../config.js";
-import type { FileEntry, ServerSlotStatus } from "../types.js";
+import type { FileEntry, MapWorldDirectory, MapWorldDiscovery, McaHeaderChunk, McaHeaderScan, McaRegionFile, McaRegionPage, ServerSlotStatus } from "../types.js";
 import { resolveWithin } from "../security/pathSandbox.js";
 import { fetchDispatcher } from "./proxySupport.js";
 import { ServerService } from "./serverService.js";
@@ -101,6 +101,35 @@ const textExtensions = new Set([
   ".yaml",
   ".yml"
 ]);
+
+const mcaRegionFilePattern = /^r\.(-?(?:0|[1-9]\d{0,8}))\.(-?(?:0|[1-9]\d{0,8}))\.mca$/i;
+const mapDiscoveryMaxDepth = 8;
+const mapDiscoveryMaxDirectories = 1_000;
+
+function mapDimension(regionPath: string) {
+  const parts = regionPath.split("/");
+  const dimensionDirectory = parts.at(-2);
+  if (dimensionDirectory === "DIM-1") return "nether" as const;
+  if (dimensionDirectory === "DIM1") return "end" as const;
+  if (parts.includes("dimensions")) return "custom" as const;
+  return "overworld" as const;
+}
+
+function mapWorldPath(regionPath: string, dimension: ReturnType<typeof mapDimension>) {
+  const parent = path.posix.dirname(regionPath);
+  return dimension === "nether" || dimension === "end" ? path.posix.dirname(parent) : parent;
+}
+
+function mapWorldLabel(dimension: ReturnType<typeof mapDimension>, worldPath: string) {
+  const prefix = dimension === "overworld"
+    ? "主世界"
+    : dimension === "nether"
+      ? "下界"
+      : dimension === "end"
+        ? "末地"
+        : "自定义维度";
+  return worldPath === "." ? prefix : `${prefix} · ${worldPath}`;
+}
 
 function toRelative(base: string, target: string) {
   const relative = path.relative(base, target).replaceAll(path.sep, "/");
@@ -328,6 +357,44 @@ export class FileService {
     return server.directory;
   }
 
+  private async getExistingBase(serverId: string) {
+    const server = await this.serverService.requireServer(serverId);
+    const info = await stat(server.directory);
+    if (!info.isDirectory()) throw new Error("服务端工作目录不可用");
+    return realpath(server.directory);
+  }
+
+  private requireSecureMapFilesystem() {
+    if (process.platform !== "linux") {
+      throw new Error("MCA 只读检查器目前仅支持 Linux 服务器环境");
+    }
+  }
+
+  private async openMapDirectory(base: string, target: string) {
+    const handle = await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    try {
+      const info = await handle.stat();
+      if (!info.isDirectory()) throw new Error("MCA 区域目录不可用");
+      const currentPath = await realpath(target);
+      const relative = path.relative(base, currentPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("MCA 目录在读取时离开了服务端工作目录");
+      }
+      const currentInfo = await stat(currentPath);
+      if (currentInfo.dev !== info.dev || currentInfo.ino !== info.ino) {
+        throw new Error("MCA 目录在读取时发生变化");
+      }
+      return handle;
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+  }
+
+  private mapDirectoryPath(handle: FileHandle) {
+    return `/proc/self/fd/${handle.fd}`;
+  }
+
   private async getServerSlotBase(serverId: string) {
     await this.serverService.requireServer(serverId);
     await mkdir(appConfig.serverSlotsDir, { recursive: true });
@@ -359,6 +426,241 @@ export class FileService {
       });
     }
     return result.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+  }
+
+  async discoverMapWorlds(serverId: string): Promise<MapWorldDiscovery> {
+    this.requireSecureMapFilesystem();
+    const base = await this.getExistingBase(serverId);
+    const rootHandle = await this.openMapDirectory(base, base);
+    const worlds: MapWorldDirectory[] = [];
+    let directoriesSeen = 0;
+    let truncated = false;
+
+    const scanDirectory = async (current: { directory: string; relative: string; depth: number; handle: FileHandle }): Promise<void> => {
+      if (directoriesSeen >= mapDiscoveryMaxDirectories) {
+        truncated = true;
+        return;
+      }
+      directoriesSeen += 1;
+      let entries;
+      try {
+        entries = await readdir(this.mapDirectoryPath(current.handle), { withFileTypes: true });
+      } catch {
+        truncated = true;
+        return;
+      }
+
+      const normalizedDirectory = current.relative;
+      if (path.posix.basename(normalizedDirectory) === "region") {
+        const regionFiles: string[] = [];
+        for (const entry of entries) {
+          if (!entry.isFile() || !mcaRegionFilePattern.test(entry.name)) continue;
+          let fileHandle: FileHandle | undefined;
+          try {
+            fileHandle = await open(path.join(this.mapDirectoryPath(current.handle), entry.name), constants.O_RDONLY | constants.O_NOFOLLOW);
+            const fileInfo = await fileHandle.stat();
+            if (fileInfo.isFile() && fileInfo.nlink === 1) regionFiles.push(entry.name);
+          } catch {
+            truncated = true;
+          } finally {
+            await fileHandle?.close();
+          }
+        }
+        if (regionFiles.length > 0) {
+          const dimension = mapDimension(normalizedDirectory);
+          const worldPath = mapWorldPath(normalizedDirectory, dimension);
+          worlds.push({
+            id: normalizedDirectory,
+            dimension,
+            label: mapWorldLabel(dimension, worldPath),
+            worldPath,
+            regionPath: normalizedDirectory,
+            regionFileCount: regionFiles.length
+          });
+        }
+      }
+
+      if (current.depth >= mapDiscoveryMaxDepth) {
+        if (entries.some((entry) => entry.isDirectory() && !entry.isSymbolicLink())) truncated = true;
+        return;
+      }
+      for (const entry of entries) {
+        if (directoriesSeen >= mapDiscoveryMaxDirectories) {
+          truncated = true;
+          break;
+        }
+        if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+        const child = path.join(this.mapDirectoryPath(current.handle), entry.name);
+        try {
+          const handle = await this.openMapDirectory(base, child);
+          const relative = current.relative === "." ? entry.name : `${current.relative}/${entry.name}`;
+          try {
+            await scanDirectory({ directory: child, relative, depth: current.depth + 1, handle });
+          } finally {
+            await handle.close();
+          }
+        } catch {
+          truncated = true;
+        }
+      }
+    };
+
+    try {
+      await scanDirectory({ directory: base, relative: ".", depth: 0, handle: rootHandle });
+    } finally {
+      await rootHandle.close();
+    }
+
+    const dimensionOrder = { overworld: 0, nether: 1, end: 2, custom: 3 };
+    return {
+      worlds: worlds.sort((a, b) => dimensionOrder[a.dimension] - dimensionOrder[b.dimension] || a.regionPath.localeCompare(b.regionPath)),
+      truncated
+    };
+  }
+
+  async listMcaRegions(serverId: string, regionDirectoryPath: string, offset = 0, limit = 256): Promise<McaRegionPage> {
+    this.requireSecureMapFilesystem();
+    const base = await this.getExistingBase(serverId);
+    const { worlds } = await this.discoverMapWorlds(serverId);
+    const world = worlds.find((candidate) => candidate.regionPath === regionDirectoryPath);
+    if (!world) throw new Error("未找到可用的 MCA 区域目录");
+
+    const directory = await resolveWithin(base, world.regionPath, { mustExist: true });
+    const directoryHandle = await this.openMapDirectory(base, directory);
+    let entries;
+    let regions: McaRegionFile[] = [];
+    try {
+      entries = await readdir(this.mapDirectoryPath(directoryHandle), { withFileTypes: true });
+      const candidates = entries
+        .flatMap((entry) => {
+          const match = entry.isFile() ? mcaRegionFilePattern.exec(entry.name) : null;
+          return match ? [{ entry, regionX: Number(match[1]), regionZ: Number(match[2]) }] : [];
+        })
+        .sort((a, b) => a.regionZ - b.regionZ || a.regionX - b.regionX);
+      const total = candidates.length;
+      const pageOffset = total === 0 ? 0 : Math.min(offset, Math.floor((total - 1) / limit) * limit);
+      for (const candidate of candidates.slice(pageOffset, pageOffset + limit)) {
+        const target = path.join(this.mapDirectoryPath(directoryHandle), candidate.entry.name);
+        let fileHandle: FileHandle | undefined;
+        try {
+          fileHandle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+          const fileInfo = await fileHandle.stat();
+          if (!fileInfo.isFile() || fileInfo.nlink !== 1) continue;
+          regions.push({
+            path: path.posix.join(world.regionPath, candidate.entry.name),
+            name: candidate.entry.name,
+            regionX: candidate.regionX,
+            regionZ: candidate.regionZ,
+            size: fileInfo.size,
+            modifiedAt: fileInfo.mtime.toISOString()
+          });
+        } catch {
+          // A region file may disappear or change while the page is being read.
+        } finally {
+          await fileHandle?.close();
+        }
+      }
+      return { regions, offset: pageOffset, limit, total };
+    } finally {
+      await directoryHandle.close();
+    }
+  }
+
+  async scanMcaHeader(serverId: string, userPath: string): Promise<McaHeaderScan> {
+    this.requireSecureMapFilesystem();
+    const base = await this.getExistingBase(serverId);
+    const target = await resolveWithin(base, userPath, { mustExist: true });
+    const fileName = path.basename(target);
+    const match = mcaRegionFilePattern.exec(fileName);
+    if (!match) throw new Error("目标不是有效的 MCA 区域文件");
+
+    const { worlds } = await this.discoverMapWorlds(serverId);
+    const parentPath = toRelative(base, path.dirname(target));
+    if (!worlds.some((world) => world.regionPath === parentPath)) {
+      throw new Error("目标不在已发现的 MCA 区域目录中");
+    }
+
+    const regionDirectory = await resolveWithin(base, parentPath, { mustExist: true });
+    const directoryHandle = await this.openMapDirectory(base, regionDirectory);
+    const header = Buffer.alloc(8_192);
+    // Keep both the parent directory and file descriptors pinned through the full scan.
+    let handle: FileHandle | undefined;
+    try {
+      handle = await open(path.join(this.mapDirectoryPath(directoryHandle), fileName), constants.O_RDONLY | constants.O_NOFOLLOW);
+      const info = await handle.stat();
+      if (!info.isFile()) throw new Error("目标不是文件");
+      if (info.nlink !== 1) throw new Error("MCA 文件包含不支持的硬链接");
+      const currentPath = await realpath(target);
+      const relative = path.relative(base, currentPath);
+      if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        throw new Error("MCA 文件在读取时离开了服务端工作目录");
+      }
+      const currentInfo = await stat(currentPath);
+      if (currentInfo.dev !== info.dev || currentInfo.ino !== info.ino) {
+        throw new Error("MCA 文件在读取时发生变化");
+      }
+      if (info.size < 8_192) throw new Error("MCA 文件头不足 8192 字节");
+      const { bytesRead } = await handle.read(header, 0, header.length, 0);
+      if (bytesRead !== header.length) throw new Error("无法完整读取 MCA 文件头");
+
+      const regionX = Number(match[1]);
+      const regionZ = Number(match[2]);
+      const fileSectors = Math.floor(info.size / 4_096);
+      const chunks: McaHeaderChunk[] = [];
+      for (let index = 0; index < 1_024; index += 1) {
+        const locationOffset = index * 4;
+        const sectorOffset = header.readUIntBE(locationOffset, 3);
+        const sectorCount = header[locationOffset + 3]!;
+        if (sectorOffset === 0 && sectorCount === 0) continue;
+        const localX = index & 31;
+        const localZ = index >> 5;
+        const timestampSeconds = header.readUInt32BE(4_096 + locationOffset);
+        const valid = sectorOffset >= 2 && sectorCount > 0 && sectorOffset + sectorCount <= fileSectors;
+        chunks.push({
+          localX,
+          localZ,
+          chunkX: regionX * 32 + localX,
+          chunkZ: regionZ * 32 + localZ,
+          sectorOffset,
+          sectorCount,
+          timestamp: timestampSeconds > 0 ? new Date(timestampSeconds * 1_000).toISOString() : null,
+          valid
+        });
+      }
+
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index]!;
+        if (chunk.sectorOffset < 2 || chunk.sectorCount === 0) continue;
+        const chunkEnd = Math.min(chunk.sectorOffset + chunk.sectorCount, fileSectors);
+        for (let comparison = index + 1; comparison < chunks.length; comparison += 1) {
+          const other = chunks[comparison]!;
+          if (other.sectorOffset < 2 || other.sectorCount === 0) continue;
+          const otherEnd = Math.min(other.sectorOffset + other.sectorCount, fileSectors);
+          if (chunk.sectorOffset < otherEnd && other.sectorOffset < chunkEnd) {
+            chunk.valid = false;
+            other.valid = false;
+          }
+        }
+      }
+      const invalidChunkCount = chunks.filter((chunk) => !chunk.valid).length;
+
+      return {
+        region: {
+          path: toRelative(base, target),
+          name: fileName,
+          regionX,
+          regionZ,
+          size: info.size,
+          modifiedAt: info.mtime.toISOString(),
+          occupiedChunkCount: chunks.length,
+          invalidChunkCount
+        },
+        chunks
+      };
+    } finally {
+      await handle?.close();
+      await directoryHandle.close();
+    }
   }
 
   async readText(serverId: string, userPath: string, options: ReadTextOptions = {}) {

@@ -3,6 +3,7 @@ import type { ConsoleLogService } from "../services/consoleLogService.js";
 import type { FileService } from "../services/fileService.js";
 import type { JavaService } from "../services/javaService.js";
 import type { ModelService } from "../services/modelService.js";
+import type { MapService } from "../services/mapService.js";
 import type { ProcessManager } from "../services/processManager.js";
 import type { PromptService } from "../services/promptService.js";
 import type { ServerErrorService } from "../services/serverErrorService.js";
@@ -15,6 +16,7 @@ export interface RouteServices {
   serverErrorService: ServerErrorService;
   consoleLogService: ConsoleLogService;
   fileService: FileService;
+  mapService: MapService;
   processManager: ProcessManager;
   modelService: ModelService;
   promptService: PromptService;

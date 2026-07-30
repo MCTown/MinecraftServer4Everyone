@@ -20,6 +20,7 @@ export const appConfig = {
   serversDir: path.join(workspaceRoot, "servers"),
   serverSlotsDir: path.join(workspaceRoot, "server_slots"),
   deletedServersDir: path.join(workspaceRoot, "deleted_servers"),
+  mapSnapshotsDir: path.join(workspaceRoot, "map_snapshots"),
   tempUploadsDir: path.join(workspaceRoot, "temp_uploads"),
   jdksDir: path.join(workspaceRoot, "jdks"),
   pythonDir: path.join(workspaceRoot, "python"),
