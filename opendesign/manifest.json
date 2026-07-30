@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-29T00:00:00Z",
+  "generated": "2026-07-30T07:07:56Z",
   "sections": [
     {
       "id": "mockups",
@@ -28,7 +28,25 @@
     {
       "id": "design-systems",
       "label": "Design Systems",
-      "groups": []
+      "groups": [
+        {
+          "slug": "map-workbench",
+          "files": [
+            {
+              "label": "README.md",
+              "path": "design-systems/map-workbench/README.md"
+            },
+            {
+              "label": "SKILL.md",
+              "path": "design-systems/map-workbench/SKILL.md"
+            },
+            {
+              "label": "colors_and_type.css",
+              "path": "design-systems/map-workbench/tokens/colors_and_type.css"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

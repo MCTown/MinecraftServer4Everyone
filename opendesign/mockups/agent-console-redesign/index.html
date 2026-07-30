@@ -296,7 +296,7 @@
        .map-selector-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
        .map-selector-head strong { font-size: 13px; }
        .map-selector-head span { color: var(--faint); font-family: 'IBM Plex Mono', monospace; font-size: 10px; }
-       .region-grid { display: grid; grid-template-columns: repeat(6, minmax(30px, 1fr)); gap: 6px; padding: 13px; border: 1px solid var(--line); background: #101419; }
+        .region-grid { display: grid; grid-template-columns: repeat(6, minmax(30px, 1fr)); gap: 6px; padding: 13px; border: 1px solid var(--line); background: #101419; }
        .region-cell { aspect-ratio: 1; border: 1px solid #354149; background: #1b2529; cursor: pointer; transition: background 150ms ease, border-color 150ms ease; }
        .region-cell:hover { border-color: var(--teal); background: #294047; }
        .region-cell.selected { border-color: var(--amber); background: rgba(230, 170, 100, 0.32); box-shadow: inset 0 0 0 1px rgba(230, 170, 100, 0.45); }
@@ -338,15 +338,18 @@
          .map-editor-body { grid-template-columns: 1fr; }
          .map-worlds { border-right: 0; border-bottom: 1px solid var(--line); display: flex; gap: 6px; overflow-x: auto; }
          .map-worlds .panel-label { display: none; }
-         .map-world { min-width: 145px; }
-         .mobile-only { display: inline-flex; }
+          .map-world { min-width: 145px; min-height: 44px; }
+          .map-editor-dialog .icon-button, .map-editor-foot .btn { min-width: 44px; min-height: 44px; }
+          .region-grid { grid-template-columns: repeat(3, minmax(44px, 1fr)); }
+          .region-cell { min-height: 44px; }
+          .mobile-only { display: inline-flex; }
       }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="text/babel">
-      const { useEffect, useState } = React;
+      const { useEffect, useRef, useState } = React;
 
       const directions = [
         { id: 'docked', label: '01 Docked Console', note: 'classic ops' },
@@ -386,7 +389,7 @@
         ['10:43:46', 'INFO', 'Loading Minecraft 1.21.4'],
       ];
 
-      function App() {
+        function App() {
         const [direction, setDirection] = useState(() => localStorage.getItem('agent-direction') || 'docked');
         const [selectedId, setSelectedId] = useState('survival');
         const [messages, setMessages] = useState(initialMessages);
@@ -398,7 +401,8 @@
         const [isBusy, setIsBusy] = useState(false);
          const [activeNav, setActiveNav] = useState('agent');
          const [taskProgress, setTaskProgress] = useState(72);
-         const [mapEditorOpen, setMapEditorOpen] = useState(false);
+          const [mapEditorOpen, setMapEditorOpen] = useState(false);
+          const mapEditorTriggerRef = useRef(null);
         const selected = servers.find((server) => server.id === selectedId) || servers[0];
 
         useEffect(() => { localStorage.setItem('agent-direction', direction); }, [direction]);
@@ -456,14 +460,14 @@
          const openMapEditor = () => setMapEditorOpen(true);
          const closeMapEditor = () => setMapEditorOpen(false);
 
-         const sharedProps = { selected, selectedId, changeServer, messages: messages[selectedId] || [], draft, setDraft, sendMessage, isBusy, serverState, runAction, openMapEditor, logs, command, setCommand, sendCommand, taskProgress, setTaskProgress, activeNav, setActiveNav };
+          const sharedProps = { selected, selectedId, changeServer, messages: messages[selectedId] || [], draft, setDraft, sendMessage, isBusy, serverState, runAction, openMapEditor, mapEditorTriggerRef, logs, command, setCommand, sendCommand, taskProgress, setTaskProgress, activeNav, setActiveNav };
         return (
           <div className="prototype-shell">
             <PrototypeHeader direction={direction} changeDirection={changeDirection} serverState={serverState} />
             {direction === 'docked' && <DockedConsole {...sharedProps} />}
              {direction === 'stage' && <WorkflowStage {...sharedProps} />}
              {direction === 'bridge' && <CommandBridge {...sharedProps} />}
-             {mapEditorOpen && <MapEditorDialog selected={selected} onClose={closeMapEditor} onLaunch={() => { closeMapEditor(); setNotice('MCA Selector 已准备启动'); }} />}
+              {mapEditorOpen && <MapEditorDialog selected={selected} triggerRef={mapEditorTriggerRef} onClose={closeMapEditor} onPreview={(handoff) => { closeMapEditor(); setNotice(`原型交接预览：${handoff.world} / ${handoff.regions.length} 个区域`); }} />}
              {notice && <div className="toast" role="status">{notice}</div>}
           </div>
         );
@@ -512,12 +516,12 @@
         </aside>;
       }
 
-       function MainTopbar({ selected, selectedId, changeServer, serverState, runAction, openMapEditor, stage = false }) {
+       function MainTopbar({ selected, selectedId, changeServer, serverState, runAction, openMapEditor, mapEditorTriggerRef, stage = false }) {
         return <header className={stage ? 'stage-topbar' : 'main-topbar'}>
           <div><div className="breadcrumb">WORKSPACE / {selected.id.toUpperCase()}</div><h1 className="workspace-title">{selected.name}</h1><div className="title-status"><i className={`server-mini-dot ${serverState === '运行中' ? 'live' : serverState === '启动中' ? 'warn' : ''}`} />{serverState} <span>·</span> Java 21 <span>·</span> 2.4 GB / 4 GB</div></div>
            <label className="mobile-server-picker"><span>实例</span><select value={selectedId} onChange={(event) => changeServer(event.target.value)}>{servers.map((server) => <option key={server.id} value={server.id}>{server.name}</option>)}</select></label>
            <div className="run-actions">
-             <button className="btn map-editor" onClick={openMapEditor}>
+              <button ref={mapEditorTriggerRef} className="btn map-editor" onClick={openMapEditor}>
                <i data-lucide="map" className="btn-icon" />
                地图编辑器
              </button>
@@ -541,19 +545,37 @@
         </header>;
        }
 
-       function MapEditorDialog({ selected, onClose, onLaunch }) {
-         const [world, setWorld] = useState('world');
-         const [selectedRegions, setSelectedRegions] = useState([8, 9, 14, 15]);
-         const worlds = [{ id: 'world', label: '主世界', detail: 'world / 1,284 regions' }, { id: 'nether', label: '下界', detail: 'world_nether / 382 regions' }, { id: 'end', label: '末地', detail: 'world_the_end / 96 regions' }];
-         const toggleRegion = (index) => {
-           if ([0, 5, 30, 35].includes(index)) return;
-           setSelectedRegions((current) => current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
-         };
-         return <div className="map-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-           <section className="map-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="map-editor-title">
-             <header className="map-editor-head"><div><span className="panel-label">MCA SELECTOR</span><h2 id="map-editor-title">地图编辑器</h2><p className="map-editor-copy">为 {selected.name} 选择要在 MCA Selector 中打开的区域。</p></div><button className="icon-button" onClick={onClose} aria-label="关闭地图编辑器"><i data-lucide="x" className="btn-icon" /></button></header>
-             <div className="map-editor-body"><nav className="map-worlds" aria-label="世界维度"><span className="panel-label">世界</span>{worlds.map((item) => <button key={item.id} className={`map-world ${world === item.id ? 'active' : ''}`} onClick={() => setWorld(item.id)}>{item.label}<small>{item.detail}</small></button>)}</nav><div className="map-selector"><div className="map-selector-head"><strong>{worlds.find((item) => item.id === world)?.label}区域</strong><span>r.-2.-1.mca to r.3.4.mca</span></div><div className="region-grid" aria-label="MCA 区域选择网格">{Array.from({ length: 36 }, (_, index) => <button key={index} className={`region-cell ${selectedRegions.includes(index) ? 'selected' : ''} ${[0, 5, 30, 35].includes(index) ? 'unavailable' : ''}`} onClick={() => toggleRegion(index)} aria-label={`区域 ${index + 1}`} aria-pressed={selectedRegions.includes(index)} />)}</div><div className="selection-summary"><span>已选择 <strong>{selectedRegions.length}</strong> 个区域</span><span>点击网格调整选择</span></div></div></div>
-             <footer className="map-editor-foot"><button className="btn ghost" onClick={onClose}>取消</button><button className="btn primary" onClick={onLaunch} disabled={selectedRegions.length === 0}><i data-lucide="external-link" className="btn-icon" />在 MCA Selector 中打开</button></footer>
+        function MapEditorDialog({ selected, triggerRef, onClose, onPreview }) {
+          const [world, setWorld] = useState('world');
+          const [selectedRegionsByWorld, setSelectedRegionsByWorld] = useState({ world: [8, 9, 14, 15], nether: [], end: [] });
+          const dialogRef = useRef(null);
+          const closeButtonRef = useRef(null);
+          const worlds = [{ id: 'world', label: '主世界', detail: 'world / 1,284 regions' }, { id: 'nether', label: '下界', detail: 'world_nether / 382 regions' }, { id: 'end', label: '末地', detail: 'world_the_end / 96 regions' }];
+          const selectedRegions = selectedRegionsByWorld[world];
+          const unavailableRegions = [0, 5, 30, 35];
+          useEffect(() => {
+            closeButtonRef.current?.focus();
+            return () => triggerRef.current?.focus();
+          }, []);
+          const toggleRegion = (index) => {
+            if (unavailableRegions.includes(index)) return;
+            setSelectedRegionsByWorld((current) => ({ ...current, [world]: current[world].includes(index) ? current[world].filter((item) => item !== index) : [...current[world], index] }));
+          };
+          const handleKeyDown = (event) => {
+            if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
+            if (event.key !== 'Tab' || !dialogRef.current) return;
+            const focusable = [...dialogRef.current.querySelectorAll('button:not(:disabled)')];
+            if (!focusable.length) return;
+            const first = focusable[0];
+            const last = focusable.at(-1);
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+          };
+          return <div className="map-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+            <section ref={dialogRef} className="map-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="map-editor-title" onKeyDown={handleKeyDown}>
+              <header className="map-editor-head"><div><span className="panel-label">MCA SELECTOR / PREVIEW</span><h2 id="map-editor-title">地图编辑器</h2><p className="map-editor-copy">为 {selected.name} 选择要交接给 MCA Selector 的区域。此原型不启动桌面工具。</p></div><button ref={closeButtonRef} className="icon-button" onClick={onClose} aria-label="关闭地图编辑器"><i data-lucide="x" className="btn-icon" /></button></header>
+              <div className="map-editor-body"><nav className="map-worlds" aria-label="世界维度"><span className="panel-label">世界</span>{worlds.map((item) => <button key={item.id} className={`map-world ${world === item.id ? 'active' : ''}`} onClick={() => setWorld(item.id)} aria-pressed={world === item.id}>{item.label}<small>{item.detail}</small></button>)}</nav><div className="map-selector"><div className="map-selector-head"><strong>{worlds.find((item) => item.id === world)?.label}区域</strong><span>r.-2.-1.mca to r.3.4.mca</span></div><div className="region-grid" aria-label="MCA 区域选择网格">{Array.from({ length: 36 }, (_, index) => <button key={index} className={`region-cell ${selectedRegions.includes(index) ? 'selected' : ''} ${unavailableRegions.includes(index) ? 'unavailable' : ''}`} onClick={() => toggleRegion(index)} aria-label={`区域 ${index + 1}`} aria-pressed={selectedRegions.includes(index)} disabled={unavailableRegions.includes(index)} />)}</div><div className="selection-summary"><span>已选择 <strong>{selectedRegions.length}</strong> 个区域</span><span>点击网格调整选择</span></div></div></div>
+              <footer className="map-editor-foot"><button className="btn ghost" onClick={onClose}>取消</button><button className="btn primary" onClick={() => onPreview({ world: worlds.find((item) => item.id === world)?.label, regions: selectedRegions })} disabled={selectedRegions.length === 0}><i data-lucide="external-link" className="btn-icon" />预览 MCA Selector 交接</button></footer>
            </section>
          </div>;
        }

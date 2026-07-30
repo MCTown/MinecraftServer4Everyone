@@ -1,0 +1,33 @@
+:root {
+  --fg-1: #e7edf0;
+  --fg-2: #a9b8bf;
+  --fg-3: #71838b;
+  --bg-1: #111719;
+  --bg-2: #171e21;
+  --bg-3: #202a2e;
+  --line-1: rgba(201, 225, 233, 0.14);
+  --line-2: rgba(201, 225, 233, 0.26);
+  --accent-1: #66c2db;
+  --accent-2: #c9f1fb;
+  --warning-1: #e5a900;
+  --danger-1: #c65d57;
+  --success-1: #74b88d;
+  --font-ui: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-data: "IBM Plex Mono", "PingFang SC", "Microsoft YaHei", monospace;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-bold: 700;
+  --size-title: 1.25rem;
+  --size-body: 0.9rem;
+  --size-caption: 0.76rem;
+  --h1: var(--size-title);
+  --h2: 1rem;
+  --body: var(--size-body);
+  --caption: var(--size-caption);
+  --surface-primary: var(--bg-2);
+  --surface-raised: var(--bg-3);
+  --border-subtle: var(--line-1);
+  --border-strong: var(--line-2);
+  --radius-sm: 0.2rem;
+  --radius-md: 0.5rem;
+}
