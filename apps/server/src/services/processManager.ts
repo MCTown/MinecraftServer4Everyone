@@ -148,6 +148,21 @@ export class ProcessManager {
     return this.running?.serverId ?? null;
   }
 
+  /**
+   * Serializes maintenance work (map mutations, rollbacks) against start/stop so a
+   * server cannot boot while region files are being rewritten.
+   */
+  async runExclusive<T>(action: () => Promise<T>): Promise<T> {
+    if (this.busy) throw new Error("另一个进程操作正在进行中，请稍后重试");
+    if (this.running) throw new Error(`服务端 ${this.running.serverId} 正在运行，无法执行需要独占的维护操作`);
+    this.busy = true;
+    try {
+      return await action();
+    } finally {
+      this.busy = false;
+    }
+  }
+
   private async runBufferedProcess(command: string, args: string[], options: SpawnOptionsWithoutStdio = {}) {
     return new Promise<{ stdout: string; stderr: string; code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
       const child = spawn(command, args, { ...options, shell: false, windowsHide: true });
@@ -716,6 +731,7 @@ export class ProcessManager {
   }
 
   async stop(serverId: string) {
+    if (this.busy) throw new Error("另一个进程操作正在进行中，请稍后重试");
     const running = this.running;
     if (!running || running.serverId !== serverId) {
       throw new Error("Server is not running");
@@ -737,6 +753,7 @@ export class ProcessManager {
   }
 
   async kill(serverId: string) {
+    if (this.busy) throw new Error("另一个进程操作正在进行中，请稍后重试");
     const server = await this.serverService.requireServer(serverId);
     const running = this.running;
     if (running && running.serverId !== serverId) {
