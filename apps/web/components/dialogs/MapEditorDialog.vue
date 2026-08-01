@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MapRegionViewport from "~/components/maps/MapRegionViewport.vue";
 import type {
   MapChunkPreview,
   MapMutationPlan,
@@ -103,20 +104,6 @@ const selectionSignature = computed(() => JSON.stringify({
   mode: mutationMode.value,
   chunks: mutationMode.value === "chunks" ? selectedChunkArray.value : [],
   rectangle: mutationMode.value === "rectangle" ? normalizedRectangle.value : null
-}));
-
-const occupiedChunks = computed(() => {
-  const map = new Map<string, McaHeaderChunk>();
-  for (const chunk of header.value?.chunks ?? []) map.set(`${chunk.localX}:${chunk.localZ}`, chunk);
-  return map;
-});
-
-/** All 1024 slots in region order so every chunk renders at its real local coordinate. */
-const chunkGrid = computed(() => Array.from({ length: 1_024 }, (_, index) => {
-  const localX = index % 32;
-  const localZ = Math.floor(index / 32);
-  const key = `${localX}:${localZ}`;
-  return { key, localX, localZ, chunk: occupiedChunks.value.get(key) ?? null };
 }));
 
 const previewHeightRange = computed(() => {
@@ -240,6 +227,32 @@ async function selectRegion(region: McaRegionFile) {
   } finally {
     if (request === headerRequest) loadingHeader.value = false;
   }
+}
+
+function activateViewportRegion(region: McaRegionFile, loadedHeader: McaHeaderScan | null) {
+  if (selectedRegionPath.value === region.path) {
+    if (loadedHeader) header.value = loadedHeader;
+    else if (!loadingHeader.value) void selectRegion(region);
+    return;
+  }
+  if (loadedHeader) {
+    resetRegionSelection();
+    selectedRegionPath.value = region.path;
+    header.value = loadedHeader;
+    loadingHeader.value = false;
+  } else {
+    void selectRegion(region);
+  }
+}
+
+function inspectViewportChunk(region: McaRegionFile, loadedHeader: McaHeaderScan, chunk: McaHeaderChunk) {
+  activateViewportRegion(region, loadedHeader);
+  void selectChunk(chunk);
+}
+
+function toggleViewportChunk(region: McaRegionFile, loadedHeader: McaHeaderScan, chunk: McaHeaderChunk) {
+  activateViewportRegion(region, loadedHeader);
+  toggleChunk(chunk);
 }
 
 async function selectChunk(chunk: { localX: number; localZ: number }) {
@@ -504,18 +517,22 @@ function handleKeydown(event: KeyboardEvent) {
             <div class="map-region-heading"><span>区域文件</span><code>{{ selectedWorld?.regionPath }}</code></div>
             <p v-if="loadingRegions" class="muted">正在读取区域列表...</p>
             <p v-else-if="!regions.length" class="map-editor-note">当前页面没有可读取的区域文件。</p>
-            <div v-else class="map-region-grid" role="group" aria-label="MCA 区域文件">
-              <button
-                v-for="region in regions"
-                :key="region.path"
-                type="button"
-                class="map-region-cell"
-                :class="{ selected: selectedRegionPath === region.path }"
-                :aria-pressed="selectedRegionPath === region.path"
-                :title="`${region.name} · ${region.size.toLocaleString()} B`"
-                @click="void selectRegion(region)"
-              >{{ region.regionX }},{{ region.regionZ }}</button>
-            </div>
+            <MapRegionViewport
+              v-else
+              :server-id="props.server.id"
+              :regions="regions"
+              :region-total="regionTotal"
+              :selected-region-path="selectedRegionPath"
+              :selected-header="header"
+              :loading-selected-header="loadingHeader"
+              :selected-chunk-key="selectedChunkKey"
+              :selected-chunks="selectedChunks"
+              :mutation-mode="mutationMode"
+              :rectangle="rectangle"
+              @select-region="activateViewportRegion"
+              @inspect-chunk="inspectViewportChunk"
+              @toggle-chunk="toggleViewportChunk"
+            />
             <div v-if="regionTotal > 256" class="map-pagination">
               <span>显示 {{ regionOffset + 1 }}–{{ Math.min(regionOffset + regions.length, regionTotal) }} / {{ regionTotal }}</span>
               <button type="button" :disabled="regionOffset === 0" @click="void loadRegions(Math.max(0, regionOffset - 256))">上一页</button>
@@ -529,27 +546,8 @@ function handleKeydown(event: KeyboardEvent) {
               </div>
               <p v-if="loadingHeader" class="muted">正在读取 8KB MCA 头...</p>
               <template v-else-if="header">
-                <p>{{ header.region.invalidChunkCount }} 个分配异常。区块按真实局部坐标排布，左键预览，右键加入删除范围。</p>
-                <div class="map-chunk-grid" role="group" aria-label="区块占用概览（32×32 局部坐标）">
-                  <template v-for="slot in chunkGrid" :key="slot.key">
-                    <button
-                      v-if="slot.chunk"
-                      type="button"
-                      class="map-chunk-cell occupied"
-                      :class="{
-                        invalid: !slot.chunk.valid,
-                        inspected: selectedChunkKey === slot.key,
-                        checked: selectedChunks.has(slot.key)
-                      }"
-                      :title="`区块 ${slot.chunk.chunkX}, ${slot.chunk.chunkZ}（局部 ${slot.localX},${slot.localZ}）`"
-                      :aria-label="`区块 ${slot.chunk.chunkX}, ${slot.chunk.chunkZ}${slot.chunk.valid ? '，分配正常' : '，分配异常'}${selectedChunks.has(slot.key) ? '，已加入删除范围' : ''}`"
-                      @click="void selectChunk(slot.chunk)"
-                      @contextmenu.prevent="toggleChunk(slot.chunk)"
-                    ><span /></button>
-                    <span v-else class="map-chunk-empty" aria-hidden="true" />
-                  </template>
-                </div>
-                <p class="map-editor-note">下方明细列表提供 44px 触控目标，是网格之外的等效操作路径。</p>
+                <p>{{ header.region.invalidChunkCount }} 个分配异常。地图中点击区块预览，Shift + 点击或右键加入删除范围。</p>
+                <p class="map-editor-note">下方明细列表提供 44px 触控目标，是地图画布之外的等效操作路径。</p>
                 <ul class="map-chunk-list" role="list" aria-label="已占用区块明细">
                   <li v-for="chunk in header.chunks" :key="`detail-${chunk.localX}:${chunk.localZ}`">
                     <button
