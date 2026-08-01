@@ -1,5 +1,5 @@
 {
-  "generated": "2026-07-30T07:07:56Z",
+  "generated": "2026-07-31T08:19:07Z",
   "sections": [
     {
       "id": "mockups",
@@ -11,6 +11,15 @@
             {
               "label": "index.html",
               "path": "mockups/agent-console-redesign/index.html"
+            }
+          ]
+        },
+        {
+          "slug": "map-navigation",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/map-navigation/index.html"
             }
           ]
         },
