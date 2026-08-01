@@ -302,11 +302,15 @@ export class MapService {
    */
   private async patchRegionHeader(target: MutationTarget, coordinates: Coordinate[]) {
     const opened = await openMapFileIn(target.directory, target.fileName, regionFilePattern);
-    const attributes = preserveFrom(opened.info);
-    assertCanPreserveOwnership(target.path, opened.info);
-    await assertFreeSpace(target.directory, opened.info.size);
     let tempName = "";
     try {
+      // Minecraft may leave empty POI/entity region files behind. They contain no
+      // chunk header to patch, so a chunk-scoped delete should leave them untouched.
+      if (opened.info.size === 0 && path.posix.basename(path.posix.dirname(target.path)) !== "region") return false;
+
+      const attributes = preserveFrom(opened.info);
+      assertCanPreserveOwnership(target.path, opened.info);
+      await assertFreeSpace(target.directory, opened.info.size);
       if (opened.info.size < headerSize) throw new Error(`${target.path} 的文件头不足 8192 字节`);
       const temp = await createTempIn(target.directory);
       tempName = temp.name;
@@ -339,6 +343,7 @@ export class MapService {
 
       await renameInto(target.directory, tempName, target.fileName);
       tempName = "";
+      return true;
     } finally {
       await opened.handle.close();
       if (tempName) await rm(entryPath(target.directory, tempName), { force: true }).catch(() => undefined);
@@ -437,9 +442,12 @@ export class MapService {
         const applied: string[] = [];
         try {
           for (const target of targets) {
-            if (normalized.mode === "region" || target.kind === "external") await removeFileIn(target.directory, target.fileName);
-            else await this.patchRegionHeader(target, normalized.coordinates);
-            applied.push(target.path);
+            if (normalized.mode === "region" || target.kind === "external") {
+              await removeFileIn(target.directory, target.fileName);
+              applied.push(target.path);
+            } else if (await this.patchRegionHeader(target, normalized.coordinates)) {
+              applied.push(target.path);
+            }
           }
         } catch (error) {
           const recovery = await this.compensate(serverId, snapshot, base);

@@ -14,8 +14,12 @@ function getCookieValue(cookieHeader: string | undefined, name: string): string 
 }
 
 export function registerErrorHandling(app: FastifyInstance) {
-  app.setErrorHandler((error: FastifyError, _request: FastifyRequest, reply: FastifyReply) => {
+  app.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
     const statusCode = error.statusCode && error.statusCode >= 400 ? error.statusCode : 500;
+    if (statusCode >= 500) {
+      const params = request.params as { id?: string };
+      request.log.error({ err: error, statusCode, serverId: params.id }, "request failed");
+    }
     reply.status(statusCode).send({ error: error.message || "Internal server error" });
   });
 
