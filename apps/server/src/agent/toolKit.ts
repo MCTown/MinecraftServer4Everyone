@@ -33,8 +33,12 @@ export interface AgentToolContext {
   javaService: JavaService;
   signal?: AbortSignal;
   downloadProxyUrl?: () => string | undefined;
+  getPythonPackageIndexUrl?: () => string | undefined;
   getCurseForgeApiKey?: () => string;
   getModrinthApiKey?: () => string;
+  getBraveSearchApiKey?: () => string;
+  getTavilyApiKey?: () => string;
+  getSearxngBaseUrl?: () => string;
   toolConfigRequired?: (requirement: AgentToolConfigRequired) => void;
   installedCapabilities?: ReadonlySet<AgentCapabilityId>;
   installCapability?: (capability: AgentCapabilityId) => void;

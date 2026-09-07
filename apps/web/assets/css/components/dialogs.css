@@ -35,7 +35,7 @@
 .map-workbench-content { gap: 0.8rem; }
 .map-workbench .map-world-tabs { grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); }
 .map-workbench-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(15rem, 18rem); gap: 0.8rem; align-items: start; }
-.map-workbench-preview, .map-operation-rail, .map-preview-panel, .map-snapshot-drawer { min-width: 0; border: 1px solid var(--line); border-radius: 0.45rem; background: rgba(0, 0, 0, 0.14); }
+.map-workbench-preview, .map-operation-rail, .map-snapshot-drawer { min-width: 0; border: 1px solid var(--line); border-radius: 0.45rem; background: rgba(0, 0, 0, 0.14); }
 .map-workbench-preview { display: grid; gap: 0.7rem; padding: 0.8rem; }
 .map-operation-rail { display: grid; gap: 0.75rem; padding: 0.8rem; border-color: rgba(229, 169, 0, 0.35); background: rgba(229, 169, 0, 0.045); }
 .map-rail-heading { display: flex; align-items: center; justify-content: space-between; color: var(--muted-strong); font-size: 0.8rem; }
@@ -50,9 +50,7 @@
 .map-impact { margin: 0; padding-top: 0.7rem; border-top: 1px solid rgba(229, 169, 0, 0.2); color: var(--muted-strong); }
 .map-impact strong { color: #f0c97c; font-family: "IBM Plex Mono", monospace; }
 .map-danger-button, .map-operation-rail > button { width: 100%; }
-.map-preview-panel, .map-snapshot-drawer { display: grid; gap: 0.7rem; padding: 0.8rem; }
-.map-terrain-preview { display: grid; grid-template-columns: repeat(16, minmax(0, 1fr)); aspect-ratio: 1; max-width: 34rem; width: min(100%, 34rem); margin: 0 auto; border: 1px solid var(--line-strong); background: #111619; gap: 1px; padding: 2px; }
-.map-terrain-preview span { min-width: 0; min-height: 0; }
+.map-snapshot-drawer { display: grid; gap: 0.7rem; padding: 0.8rem; }
 .map-viewport-shell { display: grid; min-width: 0; border: 1px solid var(--line); background: #101416; }
 .map-viewport-toolbar, .map-viewport-status { display: flex; align-items: center; gap: 0.65rem; min-width: 0; padding: 0.5rem 0.6rem; background: #171c1e; }
 .map-viewport-toolbar { border-bottom: 1px solid var(--line); }
@@ -67,13 +65,19 @@
 .map-viewport { position: relative; min-height: 24rem; height: min(54dvh, 34rem); overflow: hidden; background: #101416; }
 .map-viewport canvas { display: block; width: 100%; height: 100%; outline: none; cursor: grab; touch-action: none; }
 .map-viewport canvas:focus-visible { box-shadow: inset 0 0 0 2px #c9f1fb; }
+.map-viewport .map-viewport-webgl { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; outline: none; touch-action: none; }
+.map-viewport .map-viewport-webgl:focus-visible { box-shadow: inset 0 0 0 2px #c9f1fb; }
 .map-viewport.dragging canvas { cursor: grabbing; }
+.map-zoom-controls button.active { border-color: rgba(102, 194, 219, 0.8); background: rgba(102, 194, 219, 0.14); color: #c9f1fb; }
 .map-viewport-legend { position: absolute; left: 0.55rem; bottom: 0.55rem; display: flex; gap: 0.55rem; padding: 0.4rem 0.5rem; border: 1px solid rgba(255,255,255,0.08); background: rgba(16,20,22,0.84); color: var(--muted); font-size: 0.64rem; pointer-events: none; }
 .map-viewport-legend span { display: inline-flex; align-items: center; gap: 0.25rem; }
 .map-viewport-legend span::before { width: 0.55rem; height: 0.55rem; content: ""; background: rgba(102,194,219,0.72); }
 .map-viewport-legend .selected::before { background: rgba(240,201,124,0.8); }
 .map-viewport-legend .invalid::before { background: var(--red); }
+.map-viewport-legend .terrain::before { background: var(--swatch, rgba(102,194,219,0.72)); }
 .map-viewport-loading { position: absolute; top: 0.55rem; right: 0.55rem; padding: 0.35rem 0.5rem; border: 1px solid rgba(102,194,219,0.28); background: rgba(16,20,22,0.86); color: var(--cyan); font-family: "IBM Plex Mono", monospace; font-size: 0.64rem; pointer-events: none; }
+.map-viewport-error { position: absolute; top: 0.55rem; left: 50%; display: flex; align-items: center; gap: 0.55rem; padding: 0.4rem 0.55rem; border: 1px solid rgba(219,102,86,0.55); background: rgba(31,20,19,0.92); color: #f5c4bc; font-size: 0.7rem; transform: translateX(-50%); }
+.map-viewport-error button { min-height: 2.2rem; padding: 0 0.7rem; border-color: rgba(219,102,86,0.6); background: rgba(219,102,86,0.14); color: #f5c4bc; font-size: 0.7rem; }
 .map-viewport-status { justify-content: space-between; min-height: 2rem; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.66rem; }
 .map-viewport-status code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-gate-note { margin: 0; border-left: 2px solid rgba(229, 169, 0, 0.6); padding: 0.15rem 0 0.15rem 0.6rem; color: #e5c176; font-size: 0.76rem; line-height: 1.55; }

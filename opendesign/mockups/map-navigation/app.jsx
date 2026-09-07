@@ -12,6 +12,48 @@ const regions = Array.from({ length: 35 }, (_, index) => {
   return { id: `${regionX}:${regionZ}`, regionX, regionZ, chunks };
 });
 
+const BLOCK_ZOOM = 16;
+const MAX_SCALE = 96;
+
+function hash(x, z, rx, rz) {
+  let n = Math.imul(x, 374761393) + Math.imul(z, 668265263) + Math.imul(rx, 1442695041) + Math.imul(rz, 2050642441) | 0;
+  n = Math.imul(n ^ (n >>> 13), 1274126177);
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+}
+
+const TERRAIN = {
+  grass: ["#5fae44", "#64b549", "#68ba4e", "#6cbf52"],
+  darkGrass: ["#4c9a38", "#51a23c", "#56a940", "#5baf45"],
+  water: ["#3f77b8", "#4481c4", "#498bce", "#4e94d8"],
+  deepWater: ["#3a6ea8", "#3d76b2", "#417fbc", "#4588c6"],
+  sand: ["#cdbd82", "#d4c489", "#dbcb90", "#e1d197"],
+  dirt: ["#7c5f40", "#836546", "#8a6c4c", "#917252"],
+  stone: ["#7e848a", "#868c92", "#8d939a", "#959ba1"],
+  stoneDark: ["#6f757b", "#767c82", "#7c8288", "#83898f"],
+  leaves: ["#2f6d2c", "#357a31", "#3a8636", "#40933b"],
+  trunk: ["#6b4f33", "#735638", "#7a5d3e", "#826443"]
+};
+
+function biomeOf(t) {
+  if (t < 0.14) return "water";
+  if (t < 0.3) return "desert";
+  if (t < 0.44) return "forest";
+  if (t < 0.58) return "hills";
+  return "plains";
+}
+
+const BIOME_BASE = { water: "water", desert: "sand", forest: "darkGrass", hills: "stone", plains: "grass" };
+
+function blockKind(biome, v) {
+  if (biome === "water") return v < 0.3 ? "deepWater" : "water";
+  if (biome === "desert") return v < 0.06 ? "dirt" : "sand";
+  if (biome === "forest") return v < 0.07 ? "trunk" : v < 0.22 ? "leaves" : v < 0.27 ? "dirt" : "darkGrass";
+  if (biome === "hills") return v < 0.5 ? "stone" : v < 0.62 ? "stoneDark" : v < 0.66 ? "dirt" : "grass";
+  return v < 0.05 ? "dirt" : v < 0.08 ? "trunk" : "grass";
+}
+
+function chunkColor(t) { return TERRAIN[BIOME_BASE[biomeOf(t)]][Math.min(3, Math.floor(t * 4))]; }
+
 function App() {
   const canvasRef = useRef(null);
   const wrapRef = useRef(null);
@@ -53,11 +95,13 @@ function App() {
     const chunkZ = Math.floor((clientY - rect.top - camera.y) / camera.scale);
     const regionX = Math.floor(chunkX / 32);
     const regionZ = Math.floor(chunkZ / 32);
-    return { chunkX, chunkZ, regionX, regionZ, localX: chunkX - regionX * 32, localZ: chunkZ - regionZ * 32 };
+    const blockX = Math.floor(((clientX - rect.left - camera.x) / camera.scale) * 16);
+    const blockZ = Math.floor(((clientY - rect.top - camera.y) / camera.scale) * 16);
+    return { chunkX, chunkZ, regionX, regionZ, localX: chunkX - regionX * 32, localZ: chunkZ - regionZ * 32, blockX, blockZ };
   };
 
   const zoomAt = (scale, screenX, screenY) => setCamera((current) => {
-    const next = Math.min(24, Math.max(.2, scale));
+    const next = Math.min(MAX_SCALE, Math.max(.2, scale));
     const worldX = (screenX - current.x) / current.scale;
     const worldZ = (screenY - current.y) / current.scale;
     return { x: screenX - worldX * next, y: screenY - worldZ * next, scale: next };
@@ -97,8 +141,8 @@ function App() {
     <div className="main">
       <section className="map-panel">
         <div className="toolbar"><div className="toolbar-title"><strong>世界区块地图</strong><small>{regions.length} MCA · OVERWORLD</small></div><select value={selectedRegion} onChange={(event) => centerRegion(event.target.value)} aria-label="定位 MCA 区域">{regions.map((region) => <option key={region.id} value={region.id}>{region.regionX},{region.regionZ} · r.{region.regionX}.{region.regionZ}.mca</option>)}</select><div className="zoom"><button onClick={() => zoomAt(camera.scale / 1.35, wrapRef.current.clientWidth / 2, wrapRef.current.clientHeight / 2)} aria-label="缩小">−</button><output>{Math.round(camera.scale * 25)}%</output><button onClick={() => zoomAt(camera.scale * 1.35, wrapRef.current.clientWidth / 2, wrapRef.current.clientHeight / 2)} aria-label="放大">+</button><button onClick={fit}>适配</button></div></div>
-        <div ref={wrapRef} className="canvas-wrap"><canvas ref={canvasRef} tabIndex="0" className={dragging ? "dragging" : ""} aria-label="可拖拽和缩放的世界区块地图" onPointerDown={(event) => { dragRef.current = { x: event.clientX, y: event.clientY, camera, moved: false }; setDragging(true); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { const point = locate(event.clientX, event.clientY); setHover(point); if (!dragRef.current) return; const dx = event.clientX - dragRef.current.x; const dy = event.clientY - dragRef.current.y; if (Math.hypot(dx, dy) > 4) dragRef.current.moved = true; setCamera({ ...dragRef.current.camera, x: dragRef.current.camera.x + dx, y: dragRef.current.camera.y + dy }); }} onPointerUp={(event) => { clickMap(event); dragRef.current = null; setDragging(false); }} onPointerLeave={() => setHover(null)} onWheel={(event) => { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); zoomAt(camera.scale * Math.exp(-Math.max(-120, Math.min(120, event.deltaY)) * .0025), event.clientX - rect.left, event.clientY - rect.top); }} /><div className="legend"><span>已占用</span><span className="selected">已选择</span><span className="invalid">异常</span></div></div>
-        <div className="coords"><code>{hover ? `区块 X ${hover.chunkX} · Z ${hover.chunkZ} · MCA ${hover.regionX},${hover.regionZ}` : `MCA ${selectedRegion}`}</code><span>拖动平移 · 滚轮缩放 · Shift 点击选择</span></div>
+        <div ref={wrapRef} className="canvas-wrap"><canvas ref={canvasRef} tabIndex="0" className={dragging ? "dragging" : ""} aria-label="可拖拽和缩放的世界区块地图" onPointerDown={(event) => { dragRef.current = { x: event.clientX, y: event.clientY, camera, moved: false }; setDragging(true); event.currentTarget.setPointerCapture(event.pointerId); }} onPointerMove={(event) => { const point = locate(event.clientX, event.clientY); setHover(point); if (!dragRef.current) return; const dx = event.clientX - dragRef.current.x; const dy = event.clientY - dragRef.current.y; if (Math.hypot(dx, dy) > 4) dragRef.current.moved = true; setCamera({ ...dragRef.current.camera, x: dragRef.current.camera.x + dx, y: dragRef.current.camera.y + dy }); }} onPointerUp={(event) => { clickMap(event); dragRef.current = null; setDragging(false); }} onPointerLeave={() => setHover(null)} onWheel={(event) => { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); zoomAt(camera.scale * Math.exp(-Math.max(-120, Math.min(120, event.deltaY)) * .0025), event.clientX - rect.left, event.clientY - rect.top); }} /><div className="legend">{camera.scale >= BLOCK_ZOOM ? <><span className="t-grass">草方块</span><span className="t-water">水</span><span className="t-sand">沙</span><span className="t-stone">石</span><span className="t-tree">树木</span><span className="invalid">异常区块</span></> : <><span>已占用</span><span className="selected">已选择</span><span className="invalid">异常</span></>}</div></div>
+        <div className="coords"><code>{hover ? (camera.scale >= BLOCK_ZOOM ? `方块 X ${hover.blockX} · Z ${hover.blockZ} · 区块 ${hover.chunkX},${hover.chunkZ}` : `区块 X ${hover.chunkX} · Z ${hover.chunkZ} · MCA ${hover.regionX},${hover.regionZ}`) : `MCA ${selectedRegion}`}</code><span>拖动平移 · 滚轮缩放 · 深缩放显示方块 · Shift 点击选择</span></div>
       </section>
       <aside className="rail"><div className="rail-head"><span>操作面板</span><strong>高危</strong></div><p>浏览可跨越多个 MCA 区域。删除范围始终锁定当前区域，切换区域会清空旧选择。</p><div className="modes">{[["chunks","已选择区块"],["rectangle","矩形区域"],["region","整个 MCA 区域"]].map(([value,label]) => <label key={value} className={`mode ${mode === value ? "active" : ""}`}><input type="radio" checked={mode === value} onChange={() => setMode(value)} />{label}</label>)}</div><p className="impact">当前区域：<strong>{selected?.regionX},{selected?.regionZ}</strong><br />当前影响：<strong>{mode === "region" ? "整个区域" : `${selectedChunks.size} 个区块`}</strong></p><button className="danger" disabled={mode === "chunks" && !selectedChunks.size}>生成删除计划</button><button>管理快照 · 6</button></aside>
     </div><footer className="footer"><span>只读预览 · 停服门禁 · 自动快照 · 精确确认</span><span>导航原型</span></footer>
@@ -113,8 +157,33 @@ function drawRegion(context, region, camera, selectedRegion, selectedChunks, mod
   const selected = region.id === selectedRegion;
   context.fillStyle = selected ? "rgba(102,194,219,.13)" : "rgba(102,194,219,.055)";
   context.fillRect(x, y, size, size);
-  if (camera.scale > .8) region.chunks.forEach((chunk) => { context.fillStyle = chunk.invalid ? "#db6656" : "rgba(102,194,219,.68)"; context.fillRect(x + chunk.x * camera.scale + .4, y + chunk.z * camera.scale + .4, Math.max(.8, camera.scale - .8), Math.max(.8, camera.scale - .8)); });
-  if (selected) { context.fillStyle = "rgba(240,201,124,.5)"; selectedChunks.forEach((key) => { const [cx, cz] = key.split(":").map(Number); context.fillRect(x + cx * camera.scale, y + cz * camera.scale, camera.scale, camera.scale); }); if (mode === "region") { context.fillStyle = "rgba(240,201,124,.12)"; context.fillRect(x, y, size, size); } }
+  if (camera.scale >= BLOCK_ZOOM) {
+    const block = camera.scale / 16;
+    const pixel = Math.max(1, Math.ceil(block));
+    region.chunks.forEach((chunk) => {
+      const chunkX = x + chunk.x * camera.scale;
+      const chunkZ = y + chunk.z * camera.scale;
+      const chunkSize = camera.scale;
+      if (chunkX > context.canvas.width || chunkZ > context.canvas.height || chunkX + chunkSize < 0 || chunkZ + chunkSize < 0) return;
+      if (chunk.invalid) { context.fillStyle = "#db6656"; context.fillRect(chunkX, chunkZ, chunkSize, chunkSize); return; }
+      const biome = biomeOf(hash(chunk.x, chunk.z, region.regionX, region.regionZ));
+      for (let bz = 0; bz < 16; bz++) for (let bx = 0; bx < 16; bx++) {
+        const value = hash(chunk.x * 16 + bx, chunk.z * 16 + bz, region.regionX, region.regionZ);
+        const kind = blockKind(biome, value);
+        context.fillStyle = TERRAIN[kind][Math.min(3, Math.floor(value * 4))];
+        context.fillRect(chunkX + bx * block, chunkZ + bz * block, pixel, pixel);
+      }
+      context.strokeStyle = "rgba(16,20,22,.55)"; context.lineWidth = 1;
+      context.strokeRect(chunkX + .5, chunkZ + .5, chunkSize - 1, chunkSize - 1);
+    });
+  } else if (camera.scale > .8) {
+    region.chunks.forEach((chunk) => { context.fillStyle = chunk.invalid ? "#db6656" : chunkColor(hash(chunk.x, chunk.z, region.regionX, region.regionZ)); context.fillRect(x + chunk.x * camera.scale + .4, y + chunk.z * camera.scale + .4, Math.max(.8, camera.scale - .8), Math.max(.8, camera.scale - .8)); });
+  }
+  if (selected) {
+    if (camera.scale >= BLOCK_ZOOM) { context.strokeStyle = "#f0c97c"; context.lineWidth = 2; selectedChunks.forEach((key) => { const [cx, cz] = key.split(":").map(Number); context.strokeRect(x + cx * camera.scale + 1, y + cz * camera.scale + 1, camera.scale - 2, camera.scale - 2); }); }
+    else { context.fillStyle = "rgba(240,201,124,.5)"; selectedChunks.forEach((key) => { const [cx, cz] = key.split(":").map(Number); context.fillRect(x + cx * camera.scale, y + cz * camera.scale, camera.scale, camera.scale); }); }
+    if (mode === "region") { context.fillStyle = "rgba(240,201,124,.12)"; context.fillRect(x, y, size, size); }
+  }
   context.strokeStyle = selected ? "#c9f1fb" : "rgba(102,194,219,.35)"; context.lineWidth = selected ? 2 : 1; context.strokeRect(x + .5, y + .5, size - 1, size - 1);
   if (size > 54) { const label = region.id.replace(":", ","); context.font = "11px IBM Plex Mono, monospace"; context.fillStyle = "rgba(16,20,22,.85)"; context.fillRect(x + 5, y + 5, context.measureText(label).width + 10, 20); context.fillStyle = selected ? "#c9f1fb" : "#aebabe"; context.fillText(label, x + 10, y + 19); }
 }

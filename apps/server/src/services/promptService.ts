@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import os from "node:os";
-import { appConfig, defaultSystemPrompt } from "../config.js";
+import { appConfig, defaultPythonPackageIndexUrl, defaultSystemPrompt } from "../config.js";
 import { getDb } from "../db/client.js";
 import { appSettings } from "../db/schema.js";
 import { decryptSecret, encryptSecret, maskSecret } from "../security/encrypt.js";
@@ -12,9 +12,13 @@ import { SkillService } from "./skillService.js";
 const agentAutoConfirmKey = "agent_auto_confirm";
 const agentDownloadProxyEnabledKey = "agent_download_proxy_enabled";
 const agentDownloadProxyUrlKey = "agent_download_proxy_url";
+const agentPythonPackageIndexUrlKey = "agent_python_package_index_url";
 const agentMemoryMbKey = "agent_memory_mb";
 const curseForgeApiKeySettingKey = "curseforge_api_key";
 const modrinthApiKeySettingKey = "modrinth_api_key";
+const braveSearchApiKeySettingKey = "brave_search_api_key";
+const tavilyApiKeySettingKey = "tavily_api_key";
+const searxngBaseUrlSettingKey = "searxng_base_url";
 const minimumAgentMemoryMb = 512;
 
 function systemMemoryMb() {
@@ -60,6 +64,7 @@ export class PromptService {
       autoConfirm: this.getAgentAutoConfirm(),
       downloadProxyEnabled: this.getSetting(agentDownloadProxyEnabledKey) === "true",
       downloadProxyUrl: this.getSetting(agentDownloadProxyUrlKey) ?? "",
+      pythonPackageIndexUrl: this.getSetting(agentPythonPackageIndexUrlKey)?.trim() || defaultPythonPackageIndexUrl,
       memory: memoryLabel(memoryMb),
       memoryMb,
       systemMemoryMb: systemMemoryMb()
@@ -70,6 +75,7 @@ export class PromptService {
     if (typeof settings.autoConfirm === "boolean") this.setSetting(agentAutoConfirmKey, String(settings.autoConfirm));
     if (typeof settings.downloadProxyEnabled === "boolean") this.setSetting(agentDownloadProxyEnabledKey, String(settings.downloadProxyEnabled));
     if (typeof settings.downloadProxyUrl === "string") this.setSetting(agentDownloadProxyUrlKey, settings.downloadProxyUrl.trim());
+    if (typeof settings.pythonPackageIndexUrl === "string") this.setSetting(agentPythonPackageIndexUrlKey, settings.pythonPackageIndexUrl.trim());
     if (typeof settings.memoryMb === "number") this.setSetting(agentMemoryMbKey, String(clampMemoryMb(settings.memoryMb)));
     return this.getAgentSettings();
   }
@@ -77,6 +83,10 @@ export class PromptService {
   getAgentDownloadProxyUrl() {
     const settings = this.getAgentSettings();
     return settings.downloadProxyEnabled && settings.downloadProxyUrl ? settings.downloadProxyUrl : undefined;
+  }
+
+  getPythonPackageIndexUrl() {
+    return this.getAgentSettings().pythonPackageIndexUrl;
   }
 
   private getDecryptedSetting(key: string) {
@@ -104,20 +114,50 @@ export class PromptService {
     return this.getDecryptedSetting(modrinthApiKeySettingKey) || appConfig.modrinthApiKey.trim();
   }
 
+  getBraveSearchApiKey() {
+    return this.getDecryptedSetting(braveSearchApiKeySettingKey) || appConfig.braveSearchApiKey.trim();
+  }
+
+  getTavilyApiKey() {
+    return this.getDecryptedSetting(tavilyApiKeySettingKey) || appConfig.tavilyApiKey.trim();
+  }
+
+  getSearxngBaseUrl() {
+    return this.getSetting(searxngBaseUrlSettingKey)?.trim() || appConfig.searxngBaseUrl.trim();
+  }
+
+  setSearxngBaseUrl(value: string | undefined) {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    this.setSetting(searxngBaseUrlSettingKey, trimmed);
+  }
+
   getAgentToolSettings(): AgentToolSettings {
     const curseForgeApiKey = this.getCurseForgeApiKey();
     const modrinthApiKey = this.getModrinthApiKey();
+    const braveSearchApiKey = this.getBraveSearchApiKey();
+    const tavilyApiKey = this.getTavilyApiKey();
+    const searxngBaseUrl = this.getSearxngBaseUrl();
     return {
       curseForgeApiKeyConfigured: Boolean(curseForgeApiKey),
       curseForgeApiKeyHint: maskSecret(curseForgeApiKey),
       modrinthApiKeyConfigured: Boolean(modrinthApiKey),
-      modrinthApiKeyHint: maskSecret(modrinthApiKey)
+      modrinthApiKeyHint: maskSecret(modrinthApiKey),
+      braveSearchApiKeyConfigured: Boolean(braveSearchApiKey),
+      braveSearchApiKeyHint: maskSecret(braveSearchApiKey),
+      tavilyApiKeyConfigured: Boolean(tavilyApiKey),
+      tavilyApiKeyHint: maskSecret(tavilyApiKey),
+      searxngBaseUrl
     };
   }
 
-  setAgentToolSettings(settings: Partial<{ curseForgeApiKey: string; modrinthApiKey: string }>) {
+  setAgentToolSettings(settings: Partial<{ curseForgeApiKey: string; modrinthApiKey: string; braveSearchApiKey: string; tavilyApiKey: string; searxngBaseUrl: string }>) {
     this.setSecretSetting(curseForgeApiKeySettingKey, settings.curseForgeApiKey);
     this.setSecretSetting(modrinthApiKeySettingKey, settings.modrinthApiKey);
+    this.setSecretSetting(braveSearchApiKeySettingKey, settings.braveSearchApiKey);
+    this.setSecretSetting(tavilyApiKeySettingKey, settings.tavilyApiKey);
+    this.setSearxngBaseUrl(settings.searxngBaseUrl);
     return this.getAgentToolSettings();
   }
 

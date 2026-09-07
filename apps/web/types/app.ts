@@ -88,6 +88,11 @@ export interface MapChunkPreviewCell {
   height: number;
   block: string;
   color: string;
+  below: string | null;
+  belowBlock: string | null;
+  water: number;
+  light: number;
+  belowLight: number;
 }
 
 export interface MapChunkPreview {
@@ -192,13 +197,18 @@ export interface AgentConfirmationRequest {
   createdAt: string;
 }
 
-export type ToolConfigKey = "curseForgeApiKey" | "modrinthApiKey";
+export type ToolConfigKey = "curseForgeApiKey" | "modrinthApiKey" | "braveSearchApiKey" | "tavilyApiKey" | "searxngBaseUrl";
 
 export interface AgentToolSettings {
   curseForgeApiKeyConfigured: boolean;
   curseForgeApiKeyHint: string;
   modrinthApiKeyConfigured: boolean;
   modrinthApiKeyHint: string;
+  braveSearchApiKeyConfigured: boolean;
+  braveSearchApiKeyHint: string;
+  tavilyApiKeyConfigured: boolean;
+  tavilyApiKeyHint: string;
+  searxngBaseUrl: string;
 }
 
 export interface AgentToolConfigRequirement {
@@ -248,6 +258,8 @@ export interface AgentWorkflowProgress {
   steps: AgentWorkflowStep[];
 }
 
+export type ServerSlotSource = "user_upload" | "agent_upload" | "remote_download";
+
 export interface ServerSlotStatus {
   occupied: boolean;
   directory: string;
@@ -255,12 +267,14 @@ export interface ServerSlotStatus {
   filePath: string | null;
   size: number | null;
   modifiedAt: string | null;
+  source: ServerSlotSource | null;
 }
 
 export interface AgentSettings {
   autoConfirm: boolean;
   downloadProxyEnabled: boolean;
   downloadProxyUrl: string;
+  pythonPackageIndexUrl: string;
   memory: string;
   memoryMb: number;
   systemMemoryMb: number;

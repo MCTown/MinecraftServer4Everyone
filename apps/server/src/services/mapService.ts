@@ -202,31 +202,39 @@ export class MapService {
     for (const directory of directories) await directory.handle.close().catch(() => undefined);
   }
 
-  private async readChunkRecord(base: string, selection: { regionPath: string; regionFileName: string }, localX: number, localZ: number) {
+  private async openRegionFile(base: string, selection: { regionPath: string; regionFileName: string }) {
     const directory = await openMapDirectory(base, selection.regionPath, ["region"]);
-    let handle: FileHandle | undefined;
+    const opened = await openMapFileIn(directory, selection.regionFileName, regionFilePattern);
+    return { directory, handle: opened.handle, info: opened.info };
+  }
+
+  /** Reads one chunk payload through an already-open region file. Returns null for unallocated chunks. */
+  private async readChunkFromHandle(handle: FileHandle, infoSize: number, header: Buffer, localX: number, localZ: number) {
+    const entryOffset = (localZ * 32 + localX) * 4;
+    const sectorOffset = header.readUIntBE(entryOffset, 3);
+    const sectorCount = header[entryOffset + 3]!;
+    if (sectorOffset < 2 || sectorCount === 0) return null;
+    const end = (sectorOffset + sectorCount) * sectorSize;
+    if (end > infoSize) throw new Error("区块分配超出 MCA 文件范围");
+    const chunkBuffer = Buffer.alloc(Math.min(sectorCount * sectorSize, maxChunkBytes));
+    const chunkRead = await handle.read(chunkBuffer, 0, chunkBuffer.length, sectorOffset * sectorSize);
+    if (chunkRead.bytesRead < 5) throw new Error("区块数据不完整");
+    const length = chunkBuffer.readUInt32BE(0);
+    if (length < 1 || length + 4 > chunkRead.bytesRead) throw new Error("区块长度字段无效");
+    return { compressed: chunkBuffer.subarray(5, 4 + length), compression: chunkBuffer[4]! };
+  }
+
+  private async readChunkRecord(base: string, selection: { regionPath: string; regionFileName: string }, localX: number, localZ: number) {
+    const opened = await this.openRegionFile(base, selection);
     try {
-      const opened = await openMapFileIn(directory, selection.regionFileName, regionFilePattern);
-      handle = opened.handle;
       if (opened.info.size < headerSize) throw new Error("MCA 文件头不足 8192 字节");
       const header = Buffer.alloc(headerSize);
-      const headerRead = await handle.read(header, 0, header.length, 0);
+      const headerRead = await opened.handle.read(header, 0, header.length, 0);
       if (headerRead.bytesRead !== header.length) throw new Error("无法读取 MCA 文件头");
-      const entryOffset = (localZ * 32 + localX) * 4;
-      const sectorOffset = header.readUIntBE(entryOffset, 3);
-      const sectorCount = header[entryOffset + 3]!;
-      if (sectorOffset < 2 || sectorCount === 0) return null;
-      const end = (sectorOffset + sectorCount) * sectorSize;
-      if (end > opened.info.size) throw new Error("区块分配超出 MCA 文件范围");
-      const chunkBuffer = Buffer.alloc(Math.min(sectorCount * sectorSize, maxChunkBytes));
-      const chunkRead = await handle.read(chunkBuffer, 0, chunkBuffer.length, sectorOffset * sectorSize);
-      if (chunkRead.bytesRead < 5) throw new Error("区块数据不完整");
-      const length = chunkBuffer.readUInt32BE(0);
-      if (length < 1 || length + 4 > chunkRead.bytesRead) throw new Error("区块长度字段无效");
-      return { compressed: chunkBuffer.subarray(5, 4 + length), compression: chunkBuffer[4]! };
+      return await this.readChunkFromHandle(opened.handle, opened.info.size, header, localX, localZ);
     } finally {
-      await handle?.close();
-      await directory.handle.close();
+      await opened.handle.close();
+      await opened.directory.handle.close();
     }
   }
 
@@ -262,6 +270,65 @@ export class MapService {
       return previewFromNbt(root, regionX, regionZ, localX, localZ, userPath);
     } catch (error) {
       return empty(error instanceof Error ? error.message : "区块 NBT 无法解码");
+    }
+  }
+
+  /**
+   * Batch variant of {@link previewChunk} for the zoomed-in map view. Opens the region file once
+   * and decodes each chunk independently, so one malformed chunk cannot fail the whole request.
+   */
+  async previewChunks(serverId: string, userPath: string, chunks: Coordinate[]): Promise<MapChunkPreview[]> {
+    requireLinux();
+    assertRelativePath(userPath);
+    const regionFileName = assertMapFileName(path.posix.basename(userPath), regionFilePattern);
+    const regionPath = path.posix.dirname(userPath);
+    const match = regionFilePattern.exec(regionFileName)!;
+    const regionX = Number(match[1]);
+    const regionZ = Number(match[2]);
+
+    const coordinates = [...new Map(
+      chunks.map((chunk) => {
+        const localX = assertLocal(chunk.localX);
+        const localZ = assertLocal(chunk.localZ);
+        return [coordinateKey({ localX, localZ }), { localX, localZ }];
+      })
+    ).values()].slice(0, 256);
+
+    const empty = (localX: number, localZ: number, reason: string | null): MapChunkPreview => ({
+      path: userPath,
+      regionX,
+      regionZ,
+      localX,
+      localZ,
+      chunkX: regionX * 32 + localX,
+      chunkZ: regionZ * 32 + localZ,
+      dataVersion: null,
+      cells: [],
+      unsupportedReason: reason
+    });
+
+    const { base } = await this.serverBase(serverId);
+    const opened = await this.openRegionFile(base, { regionPath, regionFileName });
+    try {
+      if (opened.info.size < headerSize) return coordinates.map(({ localX, localZ }) => empty(localX, localZ, "MCA 文件头不足 8192 字节"));
+      const header = Buffer.alloc(headerSize);
+      const headerRead = await opened.handle.read(header, 0, header.length, 0);
+      if (headerRead.bytesRead !== header.length) return coordinates.map(({ localX, localZ }) => empty(localX, localZ, "无法读取 MCA 文件头"));
+
+      const results: MapChunkPreview[] = [];
+      for (const { localX, localZ } of coordinates) {
+        try {
+          const record = await this.readChunkFromHandle(opened.handle, opened.info.size, header, localX, localZ);
+          if (!record) { results.push(empty(localX, localZ, "该区块尚未生成")); continue; }
+          results.push(previewFromNbt(parseNbt(decompressChunk(record.compressed, record.compression)), regionX, regionZ, localX, localZ, userPath));
+        } catch (error) {
+          results.push(empty(localX, localZ, error instanceof Error ? error.message : "区块 NBT 无法解码"));
+        }
+      }
+      return results;
+    } finally {
+      await opened.handle.close();
+      await opened.directory.handle.close();
     }
   }
 

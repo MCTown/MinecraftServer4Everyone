@@ -356,6 +356,51 @@ test("previewChunk rejects an allocation pointing past the end of the file", lin
   await assert.rejects(harness.service.previewChunk(harness.serverId, "world/region/r.0.0.mca", 0, 0), /区块分配超出 MCA 文件范围/);
 });
 
+test("previewChunks decodes multiple chunks in one call and collapses duplicates", linuxOnly, async () => {
+  const harness = await standardWorld();
+  const previews = await harness.service.previewChunks(harness.serverId, "world/region/r.0.0.mca", [
+    { localX: 1, localZ: 2 },
+    { localX: 3, localZ: 4 },
+    { localX: 10, localZ: 10 },
+    { localX: 1, localZ: 2 }
+  ]);
+  assert.equal(previews.length, 3);
+  const byKey = new Map(previews.map((preview) => [`${preview.localX}:${preview.localZ}`, preview]));
+  const decoded = byKey.get("1:2")!;
+  assert.equal(decoded.unsupportedReason, null);
+  assert.equal(decoded.cells.length, 256);
+  assert.equal(decoded.cells[0]!.block, "minecraft:stone");
+  assert.equal(decoded.chunkX, 1);
+  assert.equal(decoded.chunkZ, 2);
+  assert.equal(byKey.get("3:4")!.cells.length, 256);
+  assert.equal(byKey.get("10:10")!.unsupportedReason, "该区块尚未生成");
+  assert.deepEqual(byKey.get("10:10")!.cells, []);
+});
+
+test("previewChunks isolates a malformed chunk without failing the batch", linuxOnly, async () => {
+  const harness = await createHarness();
+  // Compression id 9 does not exist; the sibling chunk must still decode.
+  await writeFile(path.join(harness.regionDir, "r.0.0.mca"), buildRegionFile([
+    { localX: 0, localZ: 0, raw: Buffer.from("garbage"), compression: 9 },
+    { localX: 1, localZ: 1, nbt: chunkNbt }
+  ]));
+  const previews = await harness.service.previewChunks(harness.serverId, "world/region/r.0.0.mca", [
+    { localX: 0, localZ: 0 },
+    { localX: 1, localZ: 1 }
+  ]);
+  const broken = previews.find((preview) => preview.localX === 0 && preview.localZ === 0)!;
+  const intact = previews.find((preview) => preview.localX === 1 && preview.localZ === 1)!;
+  assert.match(broken.unsupportedReason ?? "", /不支持的区块压缩类型：9/);
+  assert.equal(intact.unsupportedReason, null);
+  assert.equal(intact.cells.length, 256);
+});
+
+test("previewChunks refuses paths and coordinates outside the supported range", linuxOnly, async () => {
+  const harness = await standardWorld();
+  await assert.rejects(harness.service.previewChunks(harness.serverId, "world/region/r.0.0.mca", [{ localX: 32, localZ: 0 }]), /区块坐标超出区域范围/);
+  await assert.rejects(harness.service.previewChunks(harness.serverId, "../escape/r.0.0.mca", [{ localX: 0, localZ: 0 }]), /地图路径无效/);
+});
+
 test("createManualSnapshot captures the whole region regardless of the requested mode", linuxOnly, async () => {
   const harness = await standardWorld();
   const snapshot = await harness.service.createManualSnapshot(harness.serverId, selection(), "手动快照", "备份");

@@ -13,6 +13,7 @@ import { parseNbt } from "../src/services/nbt.js";
 import {
   encodeNbt,
   nbtByte,
+  nbtByteArray,
   nbtCompound,
   nbtInt,
   nbtList,
@@ -24,6 +25,23 @@ import {
 } from "./helpers/nbt.js";
 
 const air = "minecraft:air";
+
+/** Packs (index, value) light nibbles into the 2048-byte section light layout. */
+function lightBytes(nibbles: Array<[number, number]>) {
+  const bytes = new Uint8Array(2_048);
+  for (const [index, value] of nibbles) {
+    const half = index >> 1;
+    bytes[half] = (index & 1) === 1
+      ? (bytes[half]! & 0x0f) | (value << 4)
+      : (bytes[half]! & 0xf0) | value;
+  }
+  return bytes;
+}
+
+/** Light nibble index for a block position inside a section. */
+function lightIndex(x: number, y: number, z: number) {
+  return (y & 15) << 8 | (z & 15) << 4 | (x & 15);
+}
 
 /** Round-trips through the real reader so tests exercise the same value shapes production sees. */
 function root(entries: Parameters<typeof nbtCompound>[0]): NbtCompound {
@@ -76,7 +94,7 @@ test("previewFromNbt treats a single-entry palette with no data as a solid secti
   // Section Y=1 is blocks 16..31, and the topmost non-air block is y=31, so height is 32.
   assert.equal(cell.height, 32);
   assert.equal(cell.block, "minecraft:stone");
-  assert.equal(cell.color, "#747b7d");
+  assert.equal(cell.color, "#8a8d90");
 });
 
 test("previewFromNbt reports an all-air chunk as height zero without marking it unsupported", () => {
@@ -105,7 +123,7 @@ test("previewFromNbt decodes non-spanning block states for DataVersion >= 2529",
   const cell = cellAt(preview, 2, 6);
   assert.equal(cell.block, "minecraft:grass_block");
   assert.equal(cell.height, 6);
-  assert.equal(cell.color, "#6f9b59");
+  assert.equal(cell.color, "#6fbf4e");
   // Every other column is air.
   assert.equal(cellAt(preview, 3, 6).height, 0);
 });
@@ -146,7 +164,7 @@ test("previewFromNbt decodes the pre-flattening Level/Palette/BlockStates layout
 
   const cell = cellAt(preview, 1, 1);
   assert.equal(cell.block, "minecraft:water");
-  assert.equal(cell.color, "#4f9fc2");
+  assert.equal(cell.color, "#4a7fc0");
 });
 
 test("previewFromNbt picks the highest non-air block across stacked sections", () => {
@@ -242,4 +260,80 @@ test("previewFromNbt surfaces DataVersion from either the root or Level", () => 
   assert.equal(fromLevel.dataVersion, 1_976);
   const missing = previewFromNbt(root({ sections: nbtList([uniformSection(0, "minecraft:stone")]) }), 0, 0, 0, 0, "r.0.0.mca");
   assert.equal(missing.dataVersion, null);
+});
+
+test("previewFromNbt reads the combined light above the surface from section light arrays", () => {
+  const indices = new Array(4_096).fill(0);
+  indices[sectionIndex(1, 0, 1)] = 1;
+  const sky = lightBytes([[lightIndex(1, 1, 1), 4]]);
+  const block = lightBytes([[lightIndex(1, 1, 1), 2]]);
+  const preview = previewFromNbt(root({
+    DataVersion: nbtInt(3_465),
+    sections: nbtList([nbtCompound({
+      Y: nbtByte(0),
+      block_states: nbtCompound({
+        palette: nbtList([nbtCompound({ Name: nbtString(air) }), nbtCompound({ Name: nbtString("minecraft:stone") })]),
+        data: nbtLongArray(packNonSpanning(indices, 4))
+      }),
+      SkyLight: nbtByteArray(sky),
+      BlockLight: nbtByteArray(block)
+    })])
+  }), 0, 0, 0, 0, "r.0.0.mca");
+  // Light is looked up one block above the surface, where the sky shines in.
+  assert.equal(cellAt(preview, 1, 1).light, 4);
+});
+
+test("previewFromNbt reports a fully dark cave surface as light zero", () => {
+  const indices = new Array(4_096).fill(0);
+  indices[sectionIndex(5, 2, 5)] = 1;
+  const preview = previewFromNbt(root({
+    DataVersion: nbtInt(3_465),
+    sections: nbtList([nbtCompound({
+      Y: nbtByte(0),
+      block_states: nbtCompound({
+        palette: nbtList([nbtCompound({ Name: nbtString(air) }), nbtCompound({ Name: nbtString("minecraft:stone") })]),
+        data: nbtLongArray(packNonSpanning(indices, 4))
+      }),
+      SkyLight: nbtByteArray(new Uint8Array(2_048))
+    })])
+  }), 0, 0, 0, 0, "r.0.0.mca");
+  assert.equal(cellAt(preview, 5, 5).light, 0);
+});
+
+test("previewFromNbt walks through translucent layers down to the first opaque block", () => {
+  const indices = new Array(4_096).fill(0);
+  indices[sectionIndex(2, 0, 3)] = 1;
+  const preview = previewFromNbt(root({
+    DataVersion: nbtInt(3_465),
+    sections: nbtList([
+      nbtCompound({
+        Y: nbtByte(0),
+        block_states: nbtCompound({
+          palette: nbtList([nbtCompound({ Name: nbtString(air) }), nbtCompound({ Name: nbtString("minecraft:water") })]),
+          data: nbtLongArray(packNonSpanning(indices, 4))
+        }),
+        // Sky light is full at the water surface (y=1) and fades one block deeper (y=0).
+        SkyLight: nbtByteArray(lightBytes([[lightIndex(2, 1, 3), 15], [lightIndex(2, 0, 3), 8]]))
+      }),
+      uniformSection(-1, "minecraft:sand")
+    ])
+  }), 0, 0, 0, 0, "r.0.0.mca");
+
+  const cell = cellAt(preview, 2, 3);
+  assert.equal(cell.block, "minecraft:water");
+  assert.equal(cell.height, 1);
+  assert.equal(cell.water, 1);
+  assert.equal(cell.light, 15);
+  // The sand under the water becomes the column's base color and texture.
+  assert.equal(cell.below, "#dcc78d");
+  assert.equal(cell.belowBlock, "minecraft:sand");
+  // Terrain under water is lit inside the water column, so it is dimmer than the surface.
+  assert.equal(cell.belowLight, 8);
+});
+
+test("previewFromNbt defaults to full light when a world stores no light data", () => {
+  const preview = previewFromNbt(root({ sections: nbtList([uniformSection(0, "minecraft:stone")]) }), 0, 0, 0, 0, "r.0.0.mca");
+  assert.equal(cellAt(preview, 0, 0).light, 15);
+  assert.equal(cellAt(preview, 0, 0).below, null);
+  assert.equal(cellAt(preview, 0, 0).water, 0);
 });

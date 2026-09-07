@@ -29,18 +29,24 @@ export interface AgentSettings {
   autoConfirm: boolean;
   downloadProxyEnabled: boolean;
   downloadProxyUrl: string;
+  pythonPackageIndexUrl: string;
   memory: string;
   memoryMb: number;
   systemMemoryMb: number;
 }
 
-export type ToolConfigKey = "curseForgeApiKey" | "modrinthApiKey";
+export type ToolConfigKey = "curseForgeApiKey" | "modrinthApiKey" | "braveSearchApiKey" | "tavilyApiKey" | "searxngBaseUrl";
 
 export interface AgentToolSettings {
   curseForgeApiKeyConfigured: boolean;
   curseForgeApiKeyHint: string;
   modrinthApiKeyConfigured: boolean;
   modrinthApiKeyHint: string;
+  braveSearchApiKeyConfigured: boolean;
+  braveSearchApiKeyHint: string;
+  tavilyApiKeyConfigured: boolean;
+  tavilyApiKeyHint: string;
+  searxngBaseUrl: string;
 }
 
 export interface AgentToolConfigRequirement {
@@ -126,6 +132,16 @@ export interface MapChunkPreviewCell {
   height: number;
   block: string;
   color: string;
+  /** Color of the first opaque block beneath the translucent run; null when the surface is dry. */
+  below: string | null;
+  /** Block id of the first opaque block beneath the translucent run; null when the surface is dry. */
+  belowBlock: string | null;
+  /** Number of translucent blocks between the surface and `below`; 0 means the column is dry. */
+  water: number;
+  /** Combined light (max of sky and block) at the cell above the surface; 15 when light data is absent. */
+  light: number;
+  /** Combined light at the cell above `below`; only meaningful under translucent surfaces. */
+  belowLight: number;
 }
 
 export interface MapChunkPreview {
@@ -242,6 +258,8 @@ export interface AgentWorkflowProgress {
   steps: AgentWorkflowStep[];
 }
 
+export type ServerSlotSource = "user_upload" | "agent_upload" | "remote_download";
+
 export interface ServerSlotStatus {
   occupied: boolean;
   directory: string;
@@ -249,6 +267,7 @@ export interface ServerSlotStatus {
   filePath: string | null;
   size: number | null;
   modifiedAt: string | null;
+  source: ServerSlotSource | null;
 }
 
 export interface AgentRetryEvent {

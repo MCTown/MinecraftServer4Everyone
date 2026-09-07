@@ -63,6 +63,13 @@ export interface ChatCompletionResult {
   content: string;
   toolCalls: ChatToolCall[];
   reasoning: string;
+  usage: ModelUsage | null;
+}
+
+export interface ModelUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
 }
 
 export class ModelRemoteError extends Error {
@@ -212,26 +219,44 @@ export class ModelService {
       const usage = this.extractUsageSummary(data);
       throw new ModelEmptyResponseError(`模型接口返回了空 assistant 消息（缺少 choices[0].message.content 或 tool_calls）${usage ? `，${usage}` : ""}：${text.slice(0, 500)}`);
     }
-    return result;
+    return { ...result, usage: this.extractUsage(data) };
   }
 
   async chatCompletionStream(input: ChatCompletionRequest, onDelta: (delta: string) => void) {
     const request = this.buildChatRequest(input);
-    let response: Response;
-    try {
-      response = await fetch(`${request.baseUrl}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "authorization": `Bearer ${request.apiKey}`,
-          "content-type": "application/json"
-        },
-        signal: input.signal,
-        body: JSON.stringify({ ...request.body, stream: true })
-      });
-    } catch (error) {
-      if (error instanceof Error && (error.name === "AbortError" || error.message === "Agent 操作已中断")) throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      throw new ModelRemoteError(`模型接口请求失败：${message}`);
+    const attempt = async (withUsage: boolean): Promise<Response> => {
+      const body: Record<string, unknown> = { ...request.body, stream: true };
+      if (withUsage) body.stream_options = { include_usage: true };
+      try {
+        return await fetch(`${request.baseUrl}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "authorization": `Bearer ${request.apiKey}`,
+            "content-type": "application/json"
+          },
+          signal: input.signal,
+          body: JSON.stringify(body)
+        });
+      } catch (error) {
+        if (error instanceof Error && (error.name === "AbortError" || error.message === "Agent 操作已中断")) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        throw new ModelRemoteError(`模型接口请求失败：${message}`);
+      }
+    };
+    let response = await attempt(true);
+    if (!response.ok && (response.status === 400 || response.status === 422)) {
+      const text = await response.text();
+      if (/stream_options|include_usage|unknown parameter|extra field|unexpected field/i.test(text)) {
+        response = await attempt(false);
+      } else {
+        let data: unknown;
+        try {
+          data = text ? JSON.parse(text) : null;
+        } catch {
+          data = null;
+        }
+        throw new ModelRemoteError(this.extractProviderError(data) ?? `HTTP ${response.status} ${response.statusText}: ${text.slice(0, 300)}`);
+      }
     }
     if (!response.ok || !response.body) {
       const text = await response.text();
@@ -291,18 +316,19 @@ export class ModelService {
   }
 
   private extractChatResult(data: unknown): ChatCompletionResult {
-    if (!data || typeof data !== "object" || !("choices" in data)) return { content: "", toolCalls: [], reasoning: "" };
+    if (!data || typeof data !== "object" || !("choices" in data)) return { content: "", toolCalls: [], reasoning: "", usage: null };
     const choices = (data as { choices?: unknown }).choices;
-    if (!Array.isArray(choices)) return { content: "", toolCalls: [], reasoning: "" };
+    if (!Array.isArray(choices)) return { content: "", toolCalls: [], reasoning: "", usage: null };
     const first = choices[0];
-    if (!first || typeof first !== "object" || !("message" in first)) return { content: "", toolCalls: [], reasoning: "" };
+    if (!first || typeof first !== "object" || !("message" in first)) return { content: "", toolCalls: [], reasoning: "", usage: null };
     const message = (first as { message?: unknown }).message;
-    if (!message || typeof message !== "object") return { content: "", toolCalls: [], reasoning: "" };
+    if (!message || typeof message !== "object") return { content: "", toolCalls: [], reasoning: "", usage: null };
     const content = (message as { content?: unknown }).content;
     return {
       content: this.extractContent(content),
       toolCalls: this.extractToolCalls(message),
-      reasoning: this.extractReasoning(message)
+      reasoning: this.extractReasoning(message),
+      usage: null
     };
   }
 
@@ -369,6 +395,7 @@ export class ModelService {
     let buffer = "";
     let content = "";
     let reasoning = "";
+    let usage: ModelUsage | null = null;
 
     const applyData = (raw: string) => {
       const data = raw.trim();
@@ -379,6 +406,8 @@ export class ModelService {
       } catch {
         return;
       }
+      const chunkUsage = this.extractUsage(payload);
+      if (chunkUsage) usage = chunkUsage;
       const delta = this.extractStreamDelta(payload);
       if (delta.content) {
         content += delta.content;
@@ -417,7 +446,23 @@ export class ModelService {
     return {
       content: content.trim(),
       toolCalls: [...toolCalls.values()].filter(this.isToolCall),
-      reasoning: reasoning.trim()
+      reasoning: reasoning.trim(),
+      usage
+    };
+  }
+
+  private extractUsage(data: unknown): ModelUsage | null {
+    if (!data || typeof data !== "object" || !("usage" in data)) return null;
+    const usage = (data as { usage?: unknown }).usage;
+    if (!usage || typeof usage !== "object") return null;
+    const promptTokens = (usage as { prompt_tokens?: unknown }).prompt_tokens;
+    const completionTokens = (usage as { completion_tokens?: unknown }).completion_tokens;
+    const totalTokens = (usage as { total_tokens?: unknown }).total_tokens;
+    if (typeof promptTokens !== "number" || typeof completionTokens !== "number") return null;
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: typeof totalTokens === "number" ? totalTokens : promptTokens + completionTokens
     };
   }
 

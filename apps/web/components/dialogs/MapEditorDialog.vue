@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import MapRegionViewport from "~/components/maps/MapRegionViewport.vue";
 import type {
-  MapChunkPreview,
   MapMutationPlan,
   MapMutationSelection,
   MapSnapshot,
@@ -26,7 +25,6 @@ const selectedRegionPath = ref("");
 const selectedChunkKey = ref("");
 const selectedChunks = ref(new Set<string>());
 const header = ref<McaHeaderScan | null>(null);
-const preview = ref<MapChunkPreview | null>(null);
 const plan = ref<MapMutationPlan | null>(null);
 /** The exact selection the displayed plan and confirmation phrase were generated for. */
 const plannedSelection = ref<MapMutationSelection | null>(null);
@@ -35,7 +33,6 @@ const notice = ref("");
 const loadingWorlds = ref(true);
 const loadingRegions = ref(false);
 const loadingHeader = ref(false);
-const loadingPreview = ref(false);
 const loadingSnapshots = ref(false);
 const operating = ref(false);
 const snapshotDrawerOpen = ref(false);
@@ -55,7 +52,6 @@ const closeButton = ref<HTMLButtonElement | null>(null);
 const confirmationInput = ref<HTMLInputElement | null>(null);
 let regionRequest = 0;
 let headerRequest = 0;
-let previewRequest = 0;
 let planRequest = 0;
 let worldRequest = 0;
 let snapshotRequest = 0;
@@ -106,18 +102,11 @@ const selectionSignature = computed(() => JSON.stringify({
   rectangle: mutationMode.value === "rectangle" ? normalizedRectangle.value : null
 }));
 
-const previewHeightRange = computed(() => {
-  if (!preview.value?.cells.length) return { min: 0, max: 1 };
-  const heights = preview.value.cells.map((cell) => cell.height);
-  return { min: Math.min(...heights), max: Math.max(...heights) };
-});
-
 /** Single always-mounted live region; `v-if` regions are unreliable for announcements. */
 const liveStatus = computed(() => {
   if (loadingWorlds.value) return "正在检测世界存档目录";
   if (loadingRegions.value) return "正在读取区域列表";
   if (loadingHeader.value) return "正在读取 MCA 文件头";
-  if (loadingPreview.value) return "正在解析区块 NBT";
   if (loadingSnapshots.value) return "正在读取快照列表";
   if (operating.value) return "正在执行高危地图操作";
   if (header.value) return `已加载 ${header.value.region.occupiedChunkCount} 个已占用区块，其中 ${header.value.region.invalidChunkCount} 个分配异常`;
@@ -198,11 +187,9 @@ async function loadRegions(offset = 0) {
 
 function resetRegionSelection() {
   header.value = null;
-  preview.value = null;
   selectedRegionPath.value = "";
   selectedChunkKey.value = "";
   selectedChunks.value = new Set();
-  previewRequest += 1;
   headerRequest += 1;
 }
 
@@ -247,7 +234,7 @@ function activateViewportRegion(region: McaRegionFile, loadedHeader: McaHeaderSc
 
 function inspectViewportChunk(region: McaRegionFile, loadedHeader: McaHeaderScan, chunk: McaHeaderChunk) {
   activateViewportRegion(region, loadedHeader);
-  void selectChunk(chunk);
+  selectChunk(chunk);
 }
 
 function toggleViewportChunk(region: McaRegionFile, loadedHeader: McaHeaderScan, chunk: McaHeaderChunk) {
@@ -255,26 +242,9 @@ function toggleViewportChunk(region: McaRegionFile, loadedHeader: McaHeaderScan,
   toggleChunk(chunk);
 }
 
-async function selectChunk(chunk: { localX: number; localZ: number }) {
-  const regionPath = selectedRegionPath.value;
-  if (!regionPath) return;
-  const request = ++previewRequest;
-  const key = `${chunk.localX}:${chunk.localZ}`;
-  selectedChunkKey.value = key;
-  preview.value = null;
-  loadingPreview.value = true;
-  error.value = "";
-  try {
-    const result = await api<MapChunkPreview>(`/api/servers/${props.server.id}/map/preview?path=${encodeURIComponent(regionPath)}&localX=${chunk.localX}&localZ=${chunk.localZ}`);
-    if (request !== previewRequest || selectedRegionPath.value !== regionPath || selectedChunkKey.value !== key) return;
-    preview.value = result;
-  } catch (cause) {
-    if (request !== previewRequest) return;
-    error.value = cause instanceof Error ? cause.message : "无法渲染区块预览";
-    preview.value = null;
-  } finally {
-    if (request === previewRequest) loadingPreview.value = false;
-  }
+/** Marks the inspected chunk so the viewport draws a highlight; block terrain is rendered by the canvas itself. */
+function selectChunk(chunk: { localX: number; localZ: number }) {
+  selectedChunkKey.value = `${chunk.localX}:${chunk.localZ}`;
 }
 
 function toggleChunk(chunk: { localX: number; localZ: number }) {
@@ -482,7 +452,7 @@ function handleKeydown(event: KeyboardEvent) {
       <p class="success-note" role="status" :hidden="!notice">{{ notice }}</p>
       <!-- Always mounted so assistive tech observes the region rather than an insertion. -->
       <p class="visually-hidden" role="status">{{ liveStatus }}</p>
-      <p class="map-editor-intro">服务端在 Linux 上读取实际 MCA 文件并在后端解析 NBT，预览只返回 16×16 顶部高度与材质采样。删除与回滚都在停服状态下执行，并先把受影响文件写入服务器目录之外的快照。</p>
+      <p class="map-editor-intro">服务端在 Linux 上读取实际 MCA 文件并在后端解析 NBT。放大地图后，区块内直接渲染 16×16 顶部方块材质。删除与回滚都在停服状态下执行，并先把受影响文件写入服务器目录之外的快照。</p>
 
       <template v-if="loadingWorlds">
         <p class="muted">正在检测世界存档目录...</p>
@@ -546,14 +516,14 @@ function handleKeydown(event: KeyboardEvent) {
               </div>
               <p v-if="loadingHeader" class="muted">正在读取 8KB MCA 头...</p>
               <template v-else-if="header">
-                <p>{{ header.region.invalidChunkCount }} 个分配异常。地图中点击区块预览，Shift + 点击或右键加入删除范围。</p>
+                <p>{{ header.region.invalidChunkCount }} 个分配异常。放大后直接在地图中查看区块内的方块材质；点击区块高亮，Shift + 点击或右键加入删除范围。</p>
                 <p class="map-editor-note">下方明细列表提供 44px 触控目标，是地图画布之外的等效操作路径。</p>
                 <ul class="map-chunk-list" role="list" aria-label="已占用区块明细">
                   <li v-for="chunk in header.chunks" :key="`detail-${chunk.localX}:${chunk.localZ}`">
                     <button
                       type="button"
                       :class="{ active: selectedChunkKey === `${chunk.localX}:${chunk.localZ}` }"
-                      @click="void selectChunk(chunk)"
+                      @click="selectChunk(chunk)"
                     >
                       <code>{{ chunk.chunkX }},{{ chunk.chunkZ }}</code>
                       <span>{{ chunk.valid ? "分配正常" : "分配异常" }}</span>
@@ -593,26 +563,6 @@ function handleKeydown(event: KeyboardEvent) {
             </button>
           </aside>
         </div>
-
-        <section v-if="preview || loadingPreview" class="map-preview-panel">
-          <div class="map-region-heading">
-            <span>区块预览</span>
-            <code>{{ preview ? `${preview.chunkX},${preview.chunkZ}` : "读取中" }}</code>
-          </div>
-          <p v-if="loadingPreview" class="muted">正在解析区块 NBT...</p>
-          <template v-else-if="preview">
-            <p v-if="preview.unsupportedReason" class="danger-note">{{ preview.unsupportedReason }}</p>
-            <div v-else class="map-terrain-preview" role="img" :aria-label="`区块 ${preview.chunkX},${preview.chunkZ} 的 16×16 顶部材质预览`">
-              <span
-                v-for="cell in preview.cells"
-                :key="`${cell.localX}:${cell.localZ}`"
-                :style="{ background: cell.color, opacity: 0.55 + ((cell.height - previewHeightRange.min) / Math.max(1, previewHeightRange.max - previewHeightRange.min)) * 0.45 }"
-                :title="`${cell.block} · Y=${cell.height}`"
-              />
-            </div>
-            <p v-if="preview.dataVersion" class="map-editor-note">DataVersion <code>{{ preview.dataVersion }}</code></p>
-          </template>
-        </section>
 
         <aside v-if="snapshotDrawerOpen" class="map-snapshot-drawer">
           <div class="map-region-heading"><span>快照管理</span><code>{{ snapshots.length }}/20</code></div>

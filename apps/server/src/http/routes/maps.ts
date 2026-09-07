@@ -48,6 +48,15 @@ export function registerMapRoutes(app: FastifyInstance, services: RouteServices)
     return services.mapService.previewChunk(id, query.path, query.localX, query.localZ);
   });
 
+  app.post("/api/servers/:id/map/previews", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const body = parseBody(z.object({
+      path: z.string().min(1),
+      chunks: z.array(z.object({ localX: z.number().int().min(0).max(31), localZ: z.number().int().min(0).max(31) })).min(1).max(256)
+    }), request.body);
+    return services.mapService.previewChunks(id, body.path, body.chunks);
+  });
+
   app.post("/api/servers/:id/map/plan", async (request) => {
     const { id } = idParams.parse(request.params);
     return services.mapService.planMutation(id, parseBody(selectionSchema, request.body));

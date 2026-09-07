@@ -17,6 +17,11 @@ export function registerAgentRoutes(app: FastifyInstance, services: RouteService
     return services.agentService.getContextUsage(id);
   });
 
+  app.post("/api/servers/:id/agent/context/compress", async (request) => {
+    const { id } = idParams.parse(request.params);
+    return services.agentService.compressContext(id);
+  });
+
   app.post("/api/servers/:id/agent/messages", async (request) => {
     const { id } = idParams.parse(request.params);
     const body = parseBody(z.object({ content: z.string().min(1), reasoningEffort: reasoningEffortSchema }), request.body);
@@ -32,6 +37,13 @@ export function registerAgentRoutes(app: FastifyInstance, services: RouteService
   app.get("/api/servers/:id/agent/server-slot", async (request) => {
     const { id } = idParams.parse(request.params);
     return services.fileService.getServerSlotStatus(id);
+  });
+
+  app.post("/api/servers/:id/agent/server-slot/upload", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const file = await request.file() as MultipartFile | undefined;
+    if (!file) throw new Error("No file uploaded");
+    return services.fileService.uploadIntoServerSlot(id, file.filename, file.file);
   });
 
   app.post("/api/servers/:id/agent/confirmation", async (request) => {

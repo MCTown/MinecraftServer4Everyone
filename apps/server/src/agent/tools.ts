@@ -7,6 +7,7 @@ import { createDownloadHttpsFileToServerTool } from "./tools/downloadHttpsFileTo
 import { createInstallJavaVersionTool } from "./tools/javaDownloadTool.js";
 import { createConfigureBuiltinPythonTool, createInstallMcdrPluginDependenciesTool } from "./tools/pythonRuntimeTool.js";
 import { createWebSearchTool } from "./tools/webSearchTool.js";
+import { createFetchWebPageTool } from "./tools/fetchWebPageTool.js";
 import { createDeployMrpackServerTool, createInspectMrpackServerTool } from "./tools/mrpackDeploymentTool.js";
 import { createDisableClientOnlyServerModsTool, createDisableServerModsTool, createInspectClientOnlyServerModsTool } from "./tools/clientOnlyModsTool.js";
 import { booleanInput, installableCapabilities, isAbortError, objectSchema, requireConfirmation, safeDownloadName, stringArrayInput, stringInput, stringProperty, type AgentCapabilityId, type AgentTool, type AgentToolContext } from "./toolKit.js";
@@ -555,15 +556,7 @@ function pickBestCurseForgeProject(projects: JsonRecord[], searchQuery: string) 
   const exactName = projects.find((project) => normalizeCurseForgeSearchText(stringField(project.name)) === normalizedQuery);
   if (exactName) return exactName;
 
-  const ranked = [...projects].sort((first, second) => scoreCurseForgeProject(second, searchQuery) - scoreCurseForgeProject(first, searchQuery));
-  const best = ranked[0];
-  if (!best) return undefined;
-  if (scoreCurseForgeProject(best, searchQuery) < 40 && projects.length > 1) {
-    // Avoid confidently returning an unrelated top hit when nothing is a real match.
-    const strong = ranked.find((project) => scoreCurseForgeProject(project, searchQuery) >= 40);
-    return strong ?? best;
-  }
-  return best;
+  return [...projects].sort((first, second) => scoreCurseForgeProject(second, searchQuery) - scoreCurseForgeProject(first, searchQuery))[0];
 }
 
 function curseForgeSearchVariants(searchQuery: string) {
@@ -1048,12 +1041,23 @@ async function runProcess(executable: string, args: string[], cwd: string, signa
     const effectiveArgs = isJavaExecutable(executable) ? [...javaProxyArgs(proxyUrl), ...args] : args;
     const child = spawn(executable, effectiveArgs, { cwd, env: proxyEnv(proxyUrl), shell: false, windowsHide: true });
     const chunks: string[] = [];
+    let chunkChars = 0;
     let settled = false;
     const append = (stream: "stdout" | "stderr", chunk: Buffer) => {
       const text = chunk.toString("utf8");
       chunks.push(text);
+      chunkChars += text.length;
+      while (chunkChars > 12000 && chunks.length > 0) {
+        const first = chunks.shift();
+        if (first === undefined) break;
+        chunkChars -= first.length;
+        if (chunks.length === 0) {
+          const kept = first.slice(-6000);
+          chunks.push(kept);
+          chunkChars = kept.length;
+        }
+      }
       onOutput?.(stream, text);
-      while (chunks.join("").length > 12000) chunks.shift();
     };
     const finish = (error: Error | null, output = chunks.join("")) => {
       if (settled) return;
@@ -1167,6 +1171,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
   const templateNames = ["default", "reference"];
   const tools: AgentTool[] = [
     createWebSearchTool(ctx),
+    createFetchWebPageTool(ctx),
     {
       definition: {
         type: "function",

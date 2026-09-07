@@ -32,6 +32,64 @@ export function renderConsoleLogs(entries: ConsoleLogEntry[]): RenderedConsoleLo
   });
 }
 
+interface ConsoleRenderCacheEntry {
+  text: string;
+  inboundKey: string;
+  rendered: RenderedConsoleLogEntry;
+  outboundStyle: ConsoleTextStyle;
+  outboundPending: string;
+}
+
+/**
+ * Console rendering is inherently sequential: ANSI/§ state carries from one entry into the next,
+ * so a naive re-render costs O(all entries) on every incoming line. This renderer caches each
+ * entry's HTML against the style state that flowed *into* it, letting an append reuse every
+ * prefix entry and render only the tail. Output is identical to renderConsoleLogs.
+ */
+export function createIncrementalConsoleRenderer() {
+  let cache = new Map<string, ConsoleRenderCacheEntry>();
+
+  return function render(entries: ConsoleLogEntry[]): RenderedConsoleLogEntry[] {
+    const next = new Map<string, ConsoleRenderCacheEntry>();
+    const style = createConsoleTextStyle();
+    let pendingAnsiControl = "";
+    const result: RenderedConsoleLogEntry[] = new Array(entries.length);
+
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index]!;
+      const inboundKey = consoleStyleKey(style, pendingAnsiControl);
+      const cached = cache.get(entry.id);
+      if (cached && cached.text === entry.text && cached.inboundKey === inboundKey) {
+        Object.assign(style, cached.outboundStyle);
+        pendingAnsiControl = cached.outboundPending;
+        result[index] = cached.rendered;
+        next.set(entry.id, cached);
+        continue;
+      }
+      const text = entry.text;
+      const rendered = renderConsoleText(`${pendingAnsiControl}${stripInteractivePromptRedraws(text)}`, style);
+      pendingAnsiControl = rendered.pendingAnsiControl;
+      const renderedEntry: RenderedConsoleLogEntry = { ...entry, html: rendered.html };
+      result[index] = renderedEntry;
+      next.set(entry.id, {
+        text,
+        inboundKey,
+        rendered: renderedEntry,
+        outboundStyle: { ...style },
+        outboundPending: pendingAnsiControl
+      });
+    }
+
+    cache = next;
+    return result;
+  };
+}
+
+function consoleStyleKey(style: ConsoleTextStyle, pendingAnsiControl: string) {
+  // Cheaper than JSON.stringify and called once per entry per render.
+  return `${style.foreground ?? ""}|${style.background ?? ""}|${style.bold ? 1 : 0}${style.dim ? 1 : 0}${style.italic ? 1 : 0}${style.underline ? 1 : 0}${style.strike ? 1 : 0}${style.inverse ? 1 : 0}|${pendingAnsiControl}`;
+}
+
 function stripInteractivePromptRedraws(text: string) {
   // MCDReforged's prompt-toolkit redraws its input prompt when stdout is piped.
   // These empty lines are terminal UI artifacts, not server log output.

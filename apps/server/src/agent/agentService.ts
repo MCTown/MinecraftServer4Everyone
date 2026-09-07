@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { getDb } from "../db/client.js";
 import { agentMessages } from "../db/schema.js";
 import type { AgentConfirmationRequest, AgentEvent, AgentRole, AgentStatus, ConsoleLogEntry } from "../types.js";
@@ -32,10 +32,13 @@ export class AgentService {
   private confirmations = new Map<string, PendingConfirmation>();
   private activeRuns = new Map<string, ActiveRun>();
   private installedCapabilitiesByServer = new Map<string, Set<AgentCapabilityId>>();
+  private lastUsageByServer = new Map<string, { actualTokens: number; estimatedTokens: number }>();
   private readonly modelRetryBaseDelayMs = 5000;
   private readonly modelRetryMaxDelayMs = 120000;
   private readonly modelRetryMaxConsecutiveFailures = 5;
   private readonly modelToolResultMaxChars = 12000;
+  private readonly contextAutoCompressRatio = 0.7;
+  private readonly contextCompressKeepRecentMessages = 6;
 
   constructor(
     private readonly serverService: ServerService,
@@ -73,26 +76,16 @@ export class AgentService {
     // Build messages exactly as runAgent does to get accurate token count
     const systemPrompt = await this.promptService.getEffectivePrompt(serverId);
     const runtimeContext = await this.buildRuntimeContext(serverId);
-    const messages: ChatMessageInput[] = [];
-    messages.push({ 
-      role: "system", 
-      content: `${systemPrompt}\n\n${this.agentToolAvailabilityInstructions()}\n\n${runtimeContext}\n\n${this.agentRecoveryInstructions()}` 
-    });
-    messages.push(...this.listMessages(serverId)
-      .filter((message) => message.role !== "system")
-      .slice(-20)
-      .map<ChatMessageInput>((message) => ({
-        role: message.role === "agent" ? "assistant" as const : message.role === "system" ? "system" as const : "user" as const,
-        content: message.content
-      })));
+    const messages = this.buildContextMessages(serverId, systemPrompt, runtimeContext);
     
     // Include tools definitions in the estimate
     const tools = this.createTools(serverId, new AbortController().signal);
     const toolDefinitions = tools.map((tool) => tool.definition);
-    
-    const usedTokens = this.estimateModelContextTokens(messages, toolDefinitions);
+
+    const estimatedTokens = this.estimateModelContextTokens(messages, toolDefinitions);
     const contextSizeK = this.modelService.getContextSizeK();
     const maxTokens = contextSizeK * 1000;
+    const usedTokens = this.calibratedContextTokens(serverId, estimatedTokens, maxTokens);
     const remainingTokens = Math.max(0, maxTokens - usedTokens);
     const remainingRatio = maxTokens > 0 ? remainingTokens / maxTokens : 0;
     return {
@@ -103,6 +96,15 @@ export class AgentService {
       remainingRatio,
       remainingPercent: Math.round(remainingRatio * 100)
     };
+  }
+
+  private calibratedContextTokens(serverId: string, estimatedTokens: number, maxTokens: number) {
+    const lastUsage = this.lastUsageByServer.get(serverId);
+    if (!lastUsage || lastUsage.estimatedTokens <= 0) {
+      return Math.min(maxTokens, Math.max(0, Math.ceil(estimatedTokens)));
+    }
+    const ratio = lastUsage.actualTokens / lastUsage.estimatedTokens;
+    return Math.min(maxTokens, Math.max(0, Math.round(estimatedTokens * ratio)));
   }
 
   async sendMessage(serverId: string, content: string, reasoningEffort: ReasoningEffort = "high") {
@@ -137,12 +139,22 @@ export class AgentService {
         this.emit(serverId, { type: "done", status: "cancelled" });
         return response;
       }
+      if (this.isConfirmationRejection(error)) {
+        const response = error instanceof Error ? error.message : String(error);
+        this.saveMessage(serverId, "agent", response, "cancelled", responseMessageId);
+        this.emit(serverId, { type: "message", messageId: responseMessageId, content: response, status: "cancelled" });
+        this.setStatus(serverId, "cancelled");
+        this.appendAgentConsoleLog(serverId, "任务已取消：用户拒绝或未确认操作。");
+        this.emit(serverId, { type: "done", status: "cancelled" });
+        return response;
+      }
       const message = error instanceof Error ? error.message : String(error);
       const response = `执行失败：${message}`;
       this.saveMessage(serverId, "agent", response, "failed", responseMessageId);
       this.emit(serverId, { type: "error", messageId: responseMessageId, content: response, status: "failed" });
       this.setStatus(serverId, "failed");
       this.appendAgentConsoleLog(serverId, `任务失败：${message}`);
+      this.emit(serverId, { type: "done", status: "failed" });
       return response;
     } finally {
       this.activeRuns.delete(serverId);
@@ -152,7 +164,7 @@ export class AgentService {
   cancel(serverId: string) {
     const run = this.activeRuns.get(serverId);
     if (!run) {
-      this.setStatus(serverId, "cancelled");
+      if (this.isBusy(serverId)) this.setStatus(serverId, "cancelled");
       return { cancelled: false };
     }
     run.controller.abort();
@@ -190,8 +202,104 @@ export class AgentService {
       this.emit(serverId, { type: "confirmation_resolved", confirmationId, approved: false });
     }
     getDb().delete(agentMessages).where(eq(agentMessages.serverId, serverId)).run();
+    this.lastUsageByServer.delete(serverId);
     this.setStatus(serverId, "idle");
     return { ok: true };
+  }
+
+  releaseServer(serverId: string) {
+    this.statusByServer.delete(serverId);
+    this.installedCapabilitiesByServer.delete(serverId);
+    this.lastUsageByServer.delete(serverId);
+    for (const [confirmationId, pending] of this.confirmations.entries()) {
+      if (pending.request.serverId !== serverId) continue;
+      clearTimeout(pending.timeout);
+      this.confirmations.delete(confirmationId);
+      pending.resolve(false);
+    }
+  }
+
+  private buildContextMessages(serverId: string, systemPrompt: string, runtimeContext: string): ChatMessageInput[] {
+    const messages: ChatMessageInput[] = [];
+    messages.push({ role: "system", content: `${systemPrompt}\n\n${this.agentToolAvailabilityInstructions()}\n\n${runtimeContext}\n\n${this.agentRecoveryInstructions()}` });
+    messages.push(...this.listMessages(serverId)
+      .filter((message) => message.role !== "system")
+      .slice(-20)
+      .map<ChatMessageInput>((message) => ({
+        role: message.role === "agent" ? "assistant" as const : "user" as const,
+        content: message.content
+      })));
+    return messages;
+  }
+
+  private shouldAutoCompressContext(serverId: string, messages: ChatMessageInput[], makeTools: () => AgentTool[]) {
+    if (this.listMessages(serverId).filter((message) => message.role !== "system").length <= this.contextCompressKeepRecentMessages) return false;
+    const tools = makeTools().map((tool) => tool.definition);
+    const estimatedTokens = this.estimateModelContextTokens(messages, tools);
+    return estimatedTokens > this.getModelContextMaxEstimatedTokens() * this.contextAutoCompressRatio;
+  }
+
+  async compressContext(serverId: string) {
+    await this.serverService.requireServer(serverId);
+    if (this.isBusy(serverId)) {
+      throw new Error("Agent 正在处理任务，请先等待完成或中断后再压缩上下文");
+    }
+    return this.compressContextInternal(serverId);
+  }
+
+  private async compressContextInternal(serverId: string) {
+    const rows = this.listMessages(serverId).filter((message) => message.role !== "system");
+    if (rows.length <= this.contextCompressKeepRecentMessages) {
+      return { ok: true, compressed: 0, reason: "历史消息较少，无需压缩" };
+    }
+    const modelConfig = this.modelService.getDecryptedDefault();
+    if (!modelConfig) {
+      throw new Error("未配置模型，无法压缩上下文");
+    }
+    const keepRecent = this.contextCompressKeepRecentMessages;
+    const toCompress = rows.slice(0, -keepRecent);
+    const summary = await this.summarizeConversation(modelConfig, toCompress);
+    const compressedIds = toCompress.map((message) => message.id);
+    const summaryMessage: typeof agentMessages.$inferInsert = {
+      id: createId("msg"),
+      serverId,
+      role: "user",
+      content: summary,
+      status: null,
+      createdAt: toCompress[0]?.createdAt ?? nowIso()
+    };
+    getDb().transaction((tx) => {
+      tx.delete(agentMessages).where(inArray(agentMessages.id, compressedIds)).run();
+      tx.insert(agentMessages).values(summaryMessage).run();
+    });
+    this.lastUsageByServer.delete(serverId);
+    this.trace(serverId, `已压缩 ${toCompress.length} 条历史消息为一条摘要，保留最近 ${keepRecent} 条。`);
+    return { ok: true, compressed: toCompress.length, summary };
+  }
+
+  private async summarizeConversation(modelConfig: NonNullable<ReturnType<ModelService["getDecryptedDefault"]>>, messages: Array<{ role: AgentRole; content: string }>) {
+    const history = messages.map<ChatMessageInput>((message) => ({
+      role: message.role === "agent" ? "assistant" as const : "user" as const,
+      content: message.content
+    }));
+    const result = await this.modelService.chatCompletionResult({
+      baseUrl: modelConfig.baseUrl,
+      modelName: modelConfig.modelName,
+      apiKey: modelConfig.apiKey,
+      temperature: 0.1,
+      messages: [
+        {
+          role: "system",
+          content: "你是对话压缩助手。请把以下 Agent 与用户的对话历史压缩成简洁的中文摘要，保留：当前任务目标、已完成的步骤与结果、关键配置（版本、内存、路径、命令）、遇到的问题与结论、待办事项。不要添加原文没有的信息。直接输出摘要正文。"
+        },
+        ...history
+      ]
+    });
+    const summary = (result.content || "").trim();
+    if (!summary) {
+      throw new Error("模型未返回有效的压缩摘要");
+    }
+    return `[历史摘要] 为节省上下文，以下为 ${messages.length} 条早期对话的压缩摘要：\n${summary}`;
   }
 
   getPendingConfirmation(serverId: string) {
@@ -214,9 +322,6 @@ export class AgentService {
   }
 
   private async runAgent(serverId: string, input: string, reasoningEffort: ReasoningEffort, responseMessageId: string, signal: AbortSignal) {
-    if (this.shouldRunWebSearchDirectly(input)) {
-      return this.runWebSearchDirectly(serverId, input, signal);
-    }
     const modelConfig = this.modelService.getDecryptedDefault();
     if (!modelConfig) {
       this.throwIfAborted(signal);
@@ -227,12 +332,18 @@ export class AgentService {
     const systemPrompt = await this.promptService.getEffectivePrompt(serverId);
     const runtimeContext = await this.buildRuntimeContext(serverId);
     const makeTools = () => this.createTools(serverId, signal);
-    const messages: ChatMessageInput[] = [];
-    messages.push({ role: "system", content: `${systemPrompt}\n\n${this.agentToolAvailabilityInstructions()}\n\n${runtimeContext}\n\n${this.agentRecoveryInstructions()}` });
-    messages.push(...this.listMessages(serverId).filter((message) => message.role !== "system").slice(-20).map<ChatMessageInput>((message) => ({
-        role: message.role === "agent" ? "assistant" as const : message.role === "system" ? "system" as const : "user" as const,
-        content: message.content
-      })));
+    let messages = this.buildContextMessages(serverId, systemPrompt, runtimeContext);
+    if (this.shouldAutoCompressContext(serverId, messages, makeTools)) {
+      this.trace(serverId, "上下文占用接近上限，正在自动压缩历史消息。");
+      try {
+        await this.compressContextInternal(serverId);
+        this.lastUsageByServer.delete(serverId);
+        messages = this.buildContextMessages(serverId, systemPrompt, runtimeContext);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.trace(serverId, `自动压缩上下文失败：${message}。将按当前上下文继续，若超出上限将停止。`);
+      }
+    }
     try {
       for (let step = 0; step < 500; step += 1) {
         this.throwIfAborted(signal);
@@ -259,6 +370,12 @@ export class AgentService {
           this.emit(serverId, { type: "message", messageId: responseMessageId, content: "", status: "running" });
         });
         this.throwIfAborted(signal);
+        if (result.usage?.promptTokens) {
+          this.lastUsageByServer.set(serverId, {
+            actualTokens: result.usage.promptTokens,
+            estimatedTokens: this.estimateModelContextTokens(messages, toolDefinitions)
+          });
+        }
         if (result.reasoning) {
           this.trace(serverId, `思考过程：\n${result.reasoning}`);
         }
@@ -281,7 +398,24 @@ export class AgentService {
         messages.push(assistantMessage);
         for (const toolCall of result.toolCalls) {
           const tool = toolMap.get(toolCall.function.name);
-          const args = this.parseToolArguments(toolCall.function.arguments);
+          let args: Record<string, unknown>;
+          try {
+            args = this.parseToolArguments(toolCall.function.arguments);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            this.trace(serverId, `工具参数解析失败：${toolCall.function.name}\n${message}`);
+            this.appendAgentConsoleLog(serverId, `工具失败：${toolCall.function.name}（参数解析失败）`);
+            const toolMessage: ChatMessageInput = {
+              role: "tool",
+              content: this.formatToolError(toolCall.function.name, message, [
+                "请重新调用该工具，arguments 必须是合法的 JSON 对象。",
+                "注意字符串内的引号、换行和反斜杠必须按 JSON 规则转义；不要把参数拼进工具名或省略字段。"
+              ]),
+              tool_call_id: toolCall.id
+            };
+            messages.push(toolMessage);
+            continue;
+          }
           this.trace(serverId, `调用工具：${toolCall.function.name}\n参数：${this.formatTracePayload(args)}`);
           this.appendAgentConsoleLog(serverId, `执行工具：${toolCall.function.name}\n参数：${this.formatConsolePayload(args)}`);
           this.throwIfAborted(signal);
@@ -319,8 +453,12 @@ export class AgentService {
       javaService: this.javaService,
       signal,
       downloadProxyUrl: () => this.promptService.getAgentDownloadProxyUrl(),
+      getPythonPackageIndexUrl: () => this.promptService.getPythonPackageIndexUrl(),
       getCurseForgeApiKey: () => this.promptService.getCurseForgeApiKey(),
       getModrinthApiKey: () => this.promptService.getModrinthApiKey(),
+      getBraveSearchApiKey: () => this.promptService.getBraveSearchApiKey(),
+      getTavilyApiKey: () => this.promptService.getTavilyApiKey(),
+      getSearxngBaseUrl: () => this.promptService.getSearxngBaseUrl(),
       toolConfigRequired: (toolConfigRequired) => this.emit(serverId, { type: "tool_config_required", toolConfigRequired }),
       installedCapabilities,
       installCapability: (capability) => this.installCapability(serverId, capability),
@@ -390,7 +528,7 @@ export class AgentService {
     if (estimatedTokens <= maxTokens) return;
     throw new Error([
       `模型请求上下文预计约 ${estimatedTokens} tokens，超过安全上限 ${maxTokens}，已停止发送以避免上游返回空 assistant 消息。`,
-      "请清除 Agent 上下文、拆分任务，或让 Agent 只读取更具体的日志/文件片段后重试。"
+      "可点击“压缩上下文”把早期对话压缩为摘要后重试，或清除 Agent 上下文、拆分任务、让 Agent 只读取更具体的日志/文件片段。"
     ].join(""));
   }
 
@@ -460,50 +598,27 @@ export class AgentService {
     return [
       "运行时工具事实（优先级高于保存的旧提示词和对话历史）：",
       "- 当前每次模型请求都注册了通用公开网页搜索工具 web_search。它可以按任意关键词检索公开网页，返回标题、URL 和摘要；不是只限于 Modrinth 或 CurseForge。",
+      "- 搜索结果只是摘要；需要阅读某个页面的具体内容时，必须用返回的 URL 调用 fetch_web_page 抓取正文，不要凭搜索摘要下结论。",
       "- 不得声称 web_search 不存在、不可用，或要求用户先提供具体 URL。只有工具实际执行失败时，才能说明失败原因和可行替代方案。",
       "- 用户询问网页搜索是否存在、是否可用，或要求检查 Tools 中的网页搜索时，必须先调用 web_search（可使用一个简短测试关键词）再根据实际工具结果回答。",
-      "- web_search 的结果仅用于信息检索。下载或部署文件时，仍必须使用 Modrinth、CurseForge 官方 API 或用户提供的可信 HTTPS 直链。"
+      "- web_search 与 fetch_web_page 的结果仅用于信息检索。下载或部署文件时，仍必须使用 Modrinth、CurseForge 官方 API 或用户提供的可信 HTTPS 直链。"
     ].join("\n");
   }
 
-  private shouldRunWebSearchDirectly(input: string) {
-    const normalized = input.toLowerCase();
-    return normalized.includes("web_search")
-      || /(?:网页|网络|web)搜索/i.test(input)
-      || /(?:搜索|查询).*(?:任意|全网|内容)/i.test(input);
-  }
-
-  private async runWebSearchDirectly(serverId: string, input: string, signal: AbortSignal) {
-    const tool = this.createTools(serverId, signal).find((candidate) => candidate.definition.function.name === "web_search");
-    const query = this.extractWebSearchQuery(input);
-    this.trace(serverId, `调用工具：web_search\n参数：${this.formatTracePayload({ query })}`);
-    this.appendAgentConsoleLog(serverId, `执行工具：web_search\n参数：${this.formatConsolePayload({ query })}`);
-    const content = await this.executeToolForModel(serverId, "web_search", tool, { query }, signal);
-    this.trace(serverId, `工具结果：web_search\n${this.formatTracePayload(content)}`);
-    this.appendAgentConsoleLog(serverId, `${content.startsWith("TOOL_ERROR") ? "工具失败" : "工具完成"}：web_search`);
-
-    if (content.startsWith("TOOL_ERROR")) return content;
-    if (!/(?:可用|能用|检查|测试|只报告)/.test(input)) return content;
+  private parseToolArguments(args: string): Record<string, unknown> {
+    const trimmed = args.trim();
+    if (!trimmed) return {};
+    let parsed: unknown;
     try {
-      const result = JSON.parse(content) as { results?: unknown[] };
-      return `web_search 可用；搜索“${query}”返回 ${result.results?.length ?? 0} 条结果。`;
-    } catch {
-      return `web_search 可用；搜索“${query}”未返回匹配结果。`;
+      parsed = JSON.parse(trimmed);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`参数 JSON 解析失败：${reason}（原始参数前 200 字符：${trimmed.slice(0, 200)}）`);
     }
-  }
-
-  private extractWebSearchQuery(input: string) {
-    const quoted = input.match(/["“]([^"”]+)["”]/);
-    return quoted?.[1]?.trim() || "Minecraft server";
-  }
-
-  private parseToolArguments(args: string) {
-    try {
-      const parsed = args ? JSON.parse(args) : {};
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-    } catch {
-      return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("参数必须是 JSON 对象，而不是其他 JSON 类型。");
     }
+    return parsed as Record<string, unknown>;
   }
 
   private formatTracePayload(value: unknown) {
@@ -585,6 +700,7 @@ export class AgentService {
       `- 启动指令：${server.startupCommand ?? "未设置"}`,
       `- 内存：${server.minMemory} / ${server.maxMemory}`,
       `- 推荐内存：${agentSettings.memory}`,
+      `- Python 包镜像：${agentSettings.pythonPackageIndexUrl}`,
       "配置策略：Agent 在部署或调整服务端时必须调用 update_current_server_config 写入服务端名字、Java 版本/路径、内存和必要的统一启动指令；内存只能使用一个值，并同时写入 minMemory 和 maxMemory，优先使用推荐内存；Java 版本优先使用推荐 Java 版本，必要时先安装对应工作区 Java；startupCommand 可使用 {java}/{javaHome}/{python}/{pythonHome}/{workspace}/{serverDir}/{minecraftDir}/{memory}/{minMemory}/{maxMemory}/{jarFile}/{startArgs} 变量。serverType 只是展示/分类标签，不决定启动方式。",
       "模板部署约束：整合包部署必须调用 initialize_server_template(template=reference) 套用内置 MCDReforged 模板；Minecraft 服务端本体必须放在 server/ 子目录；根目录用于 MCDReforged 的 config.yml、permission.yml、plugins/、config/、logs/。若根目录出现 mods/libraries/world/run.sh/eula.txt 等 Minecraft 文件，布局失败，必须先修复。",
       "启动策略：start_current_server 只有一种后端启动路径，按当前配置执行。直启验证前先把 startupCommand 设置为进入 server/ 并调用服务端自带 run/start/server/launch 脚本的非交互命令；直启成功后必须先调用 configure_builtin_python_environment 下载并配置工作区内置 Python 3.10/pip/MCDReforged，不要直接使用或要求系统 Python、venv 或 ensurepip。MCDReforged 最终验证需要编辑根目录 config.yml，使 working_directory=server、start_command 从 server/ 工作目录启动服务端、handler 符合核心/Loader，并把 startupCommand 设置为 {python} -m mcdreforged。启动后必须检查控制台和 logs/ 中每个已启用插件的加载结果；若明确缺少 Python 依赖，调用 install_mcdreforged_plugin_dependencies 仅安装日志或 requirements 文件声明的包，重启后复查。未配置内置 Python、未正确编辑 config.yml、startupCommand 仍不是 {python} -m mcdreforged，或插件仍因依赖无法加载时，部署不算完成。切换启动方式前先用 get_current_server_config 查看现状，必要时用 stop_current_server 或 kill_current_server 停止/清理残留进程。",
@@ -675,12 +791,12 @@ export class AgentService {
       } catch (error) {
         if (!(error instanceof ModelRemoteError)) throw error;
         retryAttempt += 1;
-        const maxFailures = error instanceof ModelEmptyResponseError ? 2 : this.modelRetryMaxConsecutiveFailures;
-        if (retryAttempt >= this.modelRetryMaxConsecutiveFailures) {
-          throw new ModelRemoteError(`模型接口连续异常 ${retryAttempt} 次，已停止自动重试。最后错误：${error.message}`);
-        }
+        const isEmptyResponse = error instanceof ModelEmptyResponseError;
+        const maxFailures = isEmptyResponse ? 2 : this.modelRetryMaxConsecutiveFailures;
         if (retryAttempt >= maxFailures) {
-          throw new ModelRemoteError(`模型接口连续返回空 assistant 消息 ${retryAttempt} 次，已停止自动重试。通常是模型上下文过大、输出被上游网关截断，或该模型/网关不完全兼容 OpenAI Chat Completions。最后错误：${error.message}`);
+          throw isEmptyResponse
+            ? new ModelRemoteError(`模型接口连续返回空 assistant 消息 ${retryAttempt} 次，已停止自动重试。通常是模型上下文过大、输出被上游网关截断，或该模型/网关不完全兼容 OpenAI Chat Completions。最后错误：${error.message}`)
+            : new ModelRemoteError(`模型接口连续异常 ${retryAttempt} 次，已停止自动重试。最后错误：${error.message}`);
         }
         const delayMs = this.modelRetryDelayMs(retryAttempt);
         const nextRetryAt = new Date(Date.now() + delayMs).toISOString();

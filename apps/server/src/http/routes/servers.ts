@@ -58,7 +58,9 @@ export function registerServerRoutes(app: FastifyInstance, services: RouteServic
     if (services.agentService.isBusy(id)) {
       throw new Error("Agent 正在处理该服务端，请等待完成后再删除");
     }
-    return services.serverService.deleteServer(id, body.confirmName);
+    const result = await services.serverService.deleteServer(id, body.confirmName);
+    services.agentService.releaseServer(id);
+    return result;
   });
 
   app.post("/api/servers/:id/start", async (request) => services.processManager.start(idParams.parse(request.params).id));

@@ -1,9 +1,10 @@
 import type { AgentToolSettings } from "../types.js";
 import type { AgentToolInfo } from "./toolKit.js";
+import { webSearchToolInfo } from "./tools/webSearchTool.js";
+import { fetchWebPageToolInfo } from "./tools/fetchWebPageTool.js";
 import { downloadHttpsFileToServerToolInfo } from "./tools/downloadHttpsFileTool.js";
 import { installJavaVersionToolInfo } from "./tools/javaDownloadTool.js";
 import { configureBuiltinPythonToolInfo, installMcdrPluginDependenciesToolInfo } from "./tools/pythonRuntimeTool.js";
-import { webSearchToolInfo } from "./tools/webSearchTool.js";
 import { deployMrpackServerToolInfo, inspectMrpackServerToolInfo } from "./tools/mrpackDeploymentTool.js";
 import { disableClientOnlyServerModsToolInfo, disableServerModsToolInfo, inspectClientOnlyServerModsToolInfo } from "./tools/clientOnlyModsTool.js";
 
@@ -55,7 +56,8 @@ export function materializeCurseForgeManifestPackToolInfo(settings?: AgentToolSe
 
 export function listAgentToolInfos(settings?: AgentToolSettings) {
   return [
-    webSearchToolInfo,
+    webSearchToolInfo({ braveConfigured: settings?.braveSearchApiKeyConfigured ?? false, tavilyConfigured: settings?.tavilyApiKeyConfigured ?? false }),
+    fetchWebPageToolInfo,
     installJavaVersionToolInfo,
     configureBuiltinPythonToolInfo,
     installMcdrPluginDependenciesToolInfo,

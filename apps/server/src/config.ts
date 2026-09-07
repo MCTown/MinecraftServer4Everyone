@@ -15,6 +15,9 @@ export const appConfig = {
   password: process.env.APP_PASSWORD ?? "ilovemct",
   curseForgeApiKey: process.env.CURSEFORGE_API_KEY ?? "",
   modrinthApiKey: process.env.MODRINTH_API_KEY ?? process.env.MODRINTH_TOKEN ?? "",
+  braveSearchApiKey: process.env.BRAVE_SEARCH_API_KEY ?? process.env.BRAVE_API_KEY ?? "",
+  tavilyApiKey: process.env.TAVILY_API_KEY ?? "",
+  searxngBaseUrl: process.env.SEARXNG_BASE_URL ?? "",
   projectRoot,
   workspaceRoot,
   serversDir: path.join(workspaceRoot, "servers"),
@@ -31,6 +34,8 @@ export const appConfig = {
     return path.join(this.dataDir, "app.db");
   }
 };
+
+export const defaultPythonPackageIndexUrl = "https://pypi.tuna.tsinghua.edu.cn/simple";
 
 export const defaultSystemPrompt = `你是 Minecraft 服务端部署 Agent。你必须帮助用户部署、配置和排错 Minecraft 服务端。
 

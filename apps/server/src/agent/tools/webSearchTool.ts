@@ -1,51 +1,47 @@
-import { fetch } from "undici";
-import { fetchDispatcher } from "../../services/proxySupport.js";
+import { runWebSearchChain } from "./searchProviders.js";
 import { objectSchema, stringInput, stringProperty, type AgentTool, type AgentToolContext, type AgentToolInfo } from "../toolKit.js";
 
 const maxQueryLength = 500;
 const maxResultCount = 10;
 
-export const webSearchToolInfo: AgentToolInfo = {
-  name: "web_search",
-  description: "搜索公开网页，返回标题、链接和摘要，用于查询 Minecraft 服务端、模组与官方文档的最新信息。",
-  category: "网络检索",
-  controllable: false
-};
-
-function decodeXml(value: string) {
-  return value
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function xmlField(item: string, name: string) {
-  const match = item.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "i"));
-  return match?.[1] ? decodeXml(match[1]) : "";
-}
-
-function parseBingRss(xml: string, maxResults: number) {
-  const items = xml.match(/<item>[\s\S]*?<\/item>/gi) ?? [];
-  return items.slice(0, maxResults).map((item) => ({
-    title: xmlField(item, "title"),
-    url: xmlField(item, "link"),
-    snippet: xmlField(item, "description")
-  })).filter((item) => item.title && item.url);
+export function webSearchToolInfo(settings?: { braveConfigured: boolean; tavilyConfigured: boolean }): AgentToolInfo {
+  return {
+    name: "web_search",
+    description: "搜索公开网页，返回标题、URL 和摘要。后端按配置自动选择：Brave Search / Tavily / 自建 SearXNG，未配置时使用免 Key 抓取（DuckDuckGo → Bing RSS）。用于查询 Minecraft 服务端、模组、兼容性和官方文档等最新公开信息。需要阅读具体页面时，用返回的 URL 调用 fetch_web_page。",
+    category: "网络检索",
+    controllable: false,
+    configRequirements: [
+      {
+        key: "braveSearchApiKey",
+        label: "Brave Search API Key",
+        required: false,
+        configured: settings?.braveConfigured ?? false,
+        helpUrl: "https://api-dashboard.search.brave.com/app/keys",
+        secret: true
+      },
+      {
+        key: "tavilyApiKey",
+        label: "Tavily API Key",
+        required: false,
+        configured: settings?.tavilyConfigured ?? false,
+        helpUrl: "https://app.tavily.com/home",
+        secret: true
+      }
+    ]
+  };
 }
 
 export function createWebSearchTool(ctx: AgentToolContext): AgentTool {
+  const info = webSearchToolInfo({
+    braveConfigured: Boolean(ctx.getBraveSearchApiKey?.() || ""),
+    tavilyConfigured: Boolean(ctx.getTavilyApiKey?.() || "")
+  });
   return {
     definition: {
       type: "function",
       function: {
-        name: "web_search",
-        description: "搜索公开网页，返回标题、URL 和摘要。用于查询 Minecraft 服务端、模组、兼容性和官方文档等最新公开信息。搜索结果仅供参考，下载前仍需使用 Modrinth、CurseForge 或用户提供的可信链接确认来源。",
+        name: info.name,
+        description: info.description,
         parameters: objectSchema({
           query: stringProperty,
           maxResults: { type: "number", minimum: 1, maximum: maxResultCount }
@@ -59,24 +55,25 @@ export function createWebSearchTool(ctx: AgentToolContext): AgentTool {
 
       const requestedResults = typeof input.maxResults === "number" ? Math.floor(input.maxResults) : 5;
       const maxResults = Math.max(1, Math.min(maxResultCount, requestedResults));
-      const url = new URL("https://www.bing.com/search");
-      url.searchParams.set("format", "rss");
-      url.searchParams.set("q", query);
-
-      const response = await fetch(url, {
-        headers: {
-          accept: "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8",
-          "user-agent": "MinecraftServerAgent/0.1"
-        },
+      const chainResult = await runWebSearchChain({
         signal: ctx.signal,
-        dispatcher: fetchDispatcher(ctx.downloadProxyUrl?.())
-      });
-      const body = await response.text();
-      if (!response.ok) throw new Error(`网页搜索请求失败：HTTP ${response.status} ${response.statusText}`);
+        proxyUrl: ctx.downloadProxyUrl,
+        braveApiKey: ctx.getBraveSearchApiKey?.(),
+        tavilyApiKey: ctx.getTavilyApiKey?.(),
+        searxngBaseUrl: ctx.getSearxngBaseUrl?.()
+      }, query, maxResults);
 
-      const results = parseBingRss(body, maxResults);
-      if (results.length === 0) return `未找到与“${query}”相关的公开网页结果。`;
-      return JSON.stringify({ query, results }, null, 2);
+      if (chainResult.results.length === 0) {
+        const errorDetail = chainResult.errors.map((item) => `${item.provider}: ${item.message}`).join("；");
+        throw new Error(`所有搜索后端均未返回结果${errorDetail ? `（${errorDetail}）` : ""}。可更换关键词重试，或改用 Modrinth/CurseForge 官方 API 工具。`);
+      }
+      return JSON.stringify({
+        query,
+        provider: chainResult.provider,
+        resultCount: chainResult.results.length,
+        hint: "以上为搜索摘要；如需页面完整内容，请用 fetch_web_page 抓取对应 URL。",
+        results: chainResult.results
+      }, null, 2);
     }
   };
 }

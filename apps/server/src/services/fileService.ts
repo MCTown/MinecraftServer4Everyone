@@ -8,7 +8,7 @@ import extractZip from "extract-zip";
 import { extract as extractTar } from "tar";
 import { fetch } from "undici";
 import { appConfig } from "../config.js";
-import type { FileEntry, MapWorldDirectory, MapWorldDiscovery, McaHeaderChunk, McaHeaderScan, McaRegionFile, McaRegionPage, ServerSlotStatus } from "../types.js";
+import type { FileEntry, MapWorldDirectory, MapWorldDiscovery, McaHeaderChunk, McaHeaderScan, McaRegionFile, McaRegionPage, ServerSlotSource, ServerSlotStatus } from "../types.js";
 import { resolveWithin } from "../security/pathSandbox.js";
 import { fetchDispatcher } from "./proxySupport.js";
 import { ServerService } from "./serverService.js";
@@ -105,6 +105,27 @@ const textExtensions = new Set([
 const mcaRegionFilePattern = /^r\.(-?(?:0|[1-9]\d{0,8}))\.(-?(?:0|[1-9]\d{0,8}))\.mca$/i;
 const mapDiscoveryMaxDepth = 8;
 const mapDiscoveryMaxDirectories = 1_000;
+const serverSlotMetadataFileName = ".slot-meta.json";
+
+function safeServerSlotFileName(fileName: string, fallback = "server-package.bin") {
+  const safeName = path.basename(fileName).replace(/[<>:"/\\|?*]/g, "_");
+  return !safeName || safeName === serverSlotMetadataFileName ? fallback : safeName;
+}
+
+async function writeServerSlotMetadata(directory: string, source: ServerSlotSource) {
+  await writeFile(path.join(directory, serverSlotMetadataFileName), `${JSON.stringify({ source })}\n`, "utf8");
+}
+
+async function readServerSlotSource(directory: string): Promise<ServerSlotSource | null> {
+  try {
+    const value = JSON.parse(await readFile(path.join(directory, serverSlotMetadataFileName), "utf8")) as { source?: unknown };
+    return value.source === "user_upload" || value.source === "agent_upload" || value.source === "remote_download"
+      ? value.source
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function mapDimension(regionPath: string) {
   const parts = regionPath.split("/");
@@ -751,6 +772,24 @@ export class FileService {
     return toRelative(base, destination);
   }
 
+  async uploadIntoServerSlot(serverId: string, fileName: string, stream: NodeJS.ReadableStream) {
+    const slotDir = await this.getServerSlotBase(serverId);
+    const safeName = safeServerSlotFileName(fileName);
+    const tempDir = path.join(path.dirname(slotDir), `.${path.basename(slotDir)}-${Date.now()}-${Math.random().toString(36).slice(2)}.upload`);
+    const tempDestination = path.join(tempDir, safeName);
+
+    try {
+      await mkdir(tempDir, { recursive: true });
+      await pipeline(stream, createWriteStream(tempDestination));
+      const destinationDir = await this.clearServerSlot(serverId);
+      await rename(tempDestination, path.join(destinationDir, safeName));
+      await writeServerSlotMetadata(destinationDir, "user_upload");
+      return this.getServerSlotStatus(serverId);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+
   async downloadIntoServer(serverId: string, url: string, destinationPath: string, options: DownloadOptions = {}) {
     const { signal, onProgress, proxyUrl } = options;
     const parsed = new URL(url);
@@ -875,10 +914,15 @@ export class FileService {
 
   async getServerSlotStatus(serverId: string): Promise<ServerSlotStatus> {
     const slotDir = await this.getServerSlotBase(serverId);
-    const entries = await readdir(slotDir, { withFileTypes: true }).catch(() => []);
-    const file = entries.filter((entry) => entry.isFile()).sort((first, second) => first.name.localeCompare(second.name))[0];
+    const [entries, source] = await Promise.all([
+      readdir(slotDir, { withFileTypes: true }).catch(() => []),
+      readServerSlotSource(slotDir)
+    ]);
+    const file = entries
+      .filter((entry) => entry.isFile() && entry.name !== serverSlotMetadataFileName)
+      .sort((first, second) => first.name.localeCompare(second.name))[0];
     if (!file) {
-      return { occupied: false, directory: slotDir, fileName: null, filePath: null, size: null, modifiedAt: null };
+      return { occupied: false, directory: slotDir, fileName: null, filePath: null, size: null, modifiedAt: null, source: null };
     }
     const filePath = path.join(slotDir, file.name);
     const info = await stat(filePath);
@@ -888,7 +932,8 @@ export class FileService {
       fileName: file.name,
       filePath,
       size: info.size,
-      modifiedAt: info.mtime.toISOString()
+      modifiedAt: info.mtime.toISOString(),
+      source
     };
   }
 
@@ -901,9 +946,10 @@ export class FileService {
 
   async copyIntoServerSlot(serverId: string, sourcePath: string, fileName: string) {
     const slotDir = await this.clearServerSlot(serverId);
-    const safeName = path.basename(fileName).replace(/[<>:"/\\|?*]/g, "_") || "server-package.bin";
+    const safeName = safeServerSlotFileName(fileName);
     const destination = path.join(slotDir, safeName);
     await copyFile(sourcePath, destination);
+    await writeServerSlotMetadata(slotDir, "agent_upload");
     return this.getServerSlotStatus(serverId);
   }
 
@@ -911,7 +957,7 @@ export class FileService {
     const parsed = new URL(url);
     if (parsed.protocol !== "https:") throw new Error("Only HTTPS downloads are allowed");
     const slotDir = await this.clearServerSlot(serverId);
-    const fileName = safeDownloadName(url, "server-package.bin");
+    const fileName = safeServerSlotFileName(safeDownloadName(url, "server-package.bin"));
     const destination = path.join(slotDir, fileName);
     const tempDestination = path.join(slotDir, `.${fileName}.${Date.now()}.download`);
     const { signal, onProgress, proxyUrl } = options;
@@ -952,6 +998,7 @@ export class FileService {
       await finishStream(output);
       output = null;
       await rename(tempDestination, destination);
+      await writeServerSlotMetadata(slotDir, "remote_download");
       report(100);
       return this.getServerSlotStatus(serverId);
     } catch (error) {

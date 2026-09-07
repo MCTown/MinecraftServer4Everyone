@@ -33,6 +33,11 @@ canvas.dragging { cursor: grabbing; }
 .legend span::before { display: inline-block; width: 8px; height: 8px; margin-right: 5px; content: ""; background: #66c2db; }
 .legend .selected::before { background: #f0c97c; }
 .legend .invalid::before { background: #db6656; }
+.legend .t-grass::before { background: #64b549; }
+.legend .t-water::before { background: #4e94d8; }
+.legend .t-sand::before { background: #d4c489; }
+.legend .t-stone::before { background: #868c92; }
+.legend .t-tree::before { background: #3a8636; }
 .coords { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-top: 1px solid #293236; color: #89969a; font-size: 10px; }
 .coords code { overflow: hidden; color: #66c2db; text-overflow: ellipsis; white-space: nowrap; }
 .rail { display: grid; align-content: start; gap: 12px; padding: 16px; border-left: 1px solid rgba(229,169,0,.3); background: rgba(229,169,0,.035); }

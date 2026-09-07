@@ -53,7 +53,7 @@ async function bootstrap() {
 
   const app = Fastify({ logger: true, bodyLimit: 1024 * 1024 * 50 });
   await app.register(cors, { origin: true });
-  await app.register(multipart, { limits: { fileSize: 1024 * 1024 * 1024 } });
+  await app.register(multipart, { limits: { fileSize: Infinity } });
   await app.register(websocket);
   registerErrorHandling(app);
   registerRoutes(app, {

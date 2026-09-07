@@ -6,9 +6,9 @@ import { pipeline } from "node:stream/promises";
 import extractZip from "extract-zip";
 import { extract as extractTar } from "tar";
 import { fetch } from "undici";
-import { appConfig } from "../../config.js";
+import { appConfig, defaultPythonPackageIndexUrl } from "../../config.js";
 import { fetchDispatcher, proxyEnv } from "../../services/proxySupport.js";
-import { objectSchema, requireConfirmation, stringArrayInput, type AgentTool, type AgentToolContext, type AgentToolInfo } from "../toolKit.js";
+import { objectSchema, requireConfirmation, stringArrayInput, stringInput, type AgentTool, type AgentToolContext, type AgentToolInfo } from "../toolKit.js";
 import { spawn } from "node:child_process";
 
 const pythonVersion = "3.10.14";
@@ -21,14 +21,14 @@ let builtinPythonInstallPromise: Promise<string> | null = null;
 
 export const configureBuiltinPythonToolInfo: AgentToolInfo = {
   name: "configure_builtin_python_environment",
-  description: "配置 workspace/python 的内置 Python 3.10，并安装 pip 与 MCDReforged。Windows 和 Linux 都会下载独立运行时到工作区；不使用系统 Python、venv 或 ensurepip。",
+  description: "配置 workspace/python 的内置 Python 3.10，并使用国内 PyPI 镜像安装 pip 与 MCDReforged。可通过 indexUrl 指定自定义镜像；Windows 和 Linux 都会下载独立运行时到工作区；不使用系统 Python、venv 或 ensurepip。",
   category: "Python 环境",
   controllable: false
 };
 
 export const installMcdrPluginDependenciesToolInfo: AgentToolInfo = {
   name: "install_mcdreforged_plugin_dependencies",
-  description: "使用 workspace/python 内置 Python 的 pip 安装 MCDReforged 插件启动日志或 requirements 文件明确声明的 PyPI 依赖；不使用系统 Python。",
+  description: "使用 workspace/python 内置 Python 的 pip 从默认国内 PyPI 镜像安装 MCDReforged 插件启动日志或 requirements 文件明确声明的依赖；可通过 indexUrl 指定自定义镜像，不使用系统 Python。",
   category: "Python 环境",
   controllable: false
 };
@@ -119,7 +119,19 @@ async function runPython(args: string[], cwd: string, ctx: AgentToolContext) {
   return runCommand(pythonExecutable(), args, cwd, ctx, "Python 环境配置超过 10 分钟，已终止");
 }
 
-async function ensurePip(ctx: AgentToolContext) {
+export function normalizePackageIndexUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return defaultPythonPackageIndexUrl;
+  const url = new URL(trimmed);
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("Python 包镜像仅支持 HTTP 或 HTTPS");
+  return url.href;
+}
+
+function packageIndexUrl(ctx: AgentToolContext, override?: string) {
+  return normalizePackageIndexUrl(override?.trim() || ctx.getPythonPackageIndexUrl?.() || defaultPythonPackageIndexUrl);
+}
+
+async function ensurePip(ctx: AgentToolContext, indexUrl: string) {
   const getPipPath = path.join(appConfig.pythonDir, "get-pip.py");
   try {
     await runPython(["-m", "pip", "--version"], appConfig.pythonDir, ctx);
@@ -130,7 +142,7 @@ async function ensurePip(ctx: AgentToolContext) {
 
   ctx.consoleLog?.(`下载 get-pip.py：${getPipUrl}`);
   await downloadFile(getPipUrl, getPipPath, ctx);
-  await runPython([getPipPath, "--no-warn-script-location"], appConfig.pythonDir, ctx);
+  await runPython([getPipPath, "--no-warn-script-location", "--index-url", indexUrl], appConfig.pythonDir, ctx);
   await runPython(["-m", "pip", "--version"], appConfig.pythonDir, ctx);
 }
 
@@ -187,7 +199,7 @@ async function installLinuxPython(ctx: AgentToolContext) {
   return { bootstrapPython: `python-build-standalone-${pythonVersion}-${architecture}` };
 }
 
-async function configureBuiltinPython(ctx: AgentToolContext) {
+async function configureBuiltinPython(ctx: AgentToolContext, indexUrl: string) {
   await mkdir(appConfig.pythonDir, { recursive: true });
   const executable = pythonExecutable();
   let bootstrapPython = "existing-workspace-python";
@@ -198,8 +210,8 @@ async function configureBuiltinPython(ctx: AgentToolContext) {
   }
 
   if (process.platform === "win32") await enableImportSite();
-  await ensurePip(ctx);
-  await runPython(["-m", "pip", "install", "--upgrade", "pip", "mcdreforged"], appConfig.pythonDir, ctx);
+  await ensurePip(ctx, indexUrl);
+  await runPython(["-m", "pip", "install", "--index-url", indexUrl, "--upgrade", "pip", "mcdreforged"], appConfig.pythonDir, ctx);
   const runtimePythonVersion = await runPython(["--version"], appConfig.pythonDir, ctx);
   const versionOutput = await runPython(["-c", "import mcdreforged; print(getattr(mcdreforged, '__version__', 'installed'))"], appConfig.pythonDir, ctx);
   return JSON.stringify({
@@ -208,6 +220,7 @@ async function configureBuiltinPython(ctx: AgentToolContext) {
     pythonDirectory: appConfig.pythonDir,
     mcdreforged: versionOutput.trim() || "installed",
     bootstrapPython,
+    pythonPackageIndexUrl: indexUrl,
     systemPythonUsed: false
   }, null, 2);
 }
@@ -227,16 +240,20 @@ export function createConfigureBuiltinPythonTool(ctx: AgentToolContext): AgentTo
       function: {
         name: configureBuiltinPythonToolInfo.name,
         description: configureBuiltinPythonToolInfo.description,
-        parameters: objectSchema({})
+        parameters: objectSchema({
+          indexUrl: {
+            type: "string",
+            description: `可选。自定义 PyPI simple 镜像地址，默认使用国内镜像 ${defaultPythonPackageIndexUrl}。`
+          }
+        })
       }
     },
-    execute: async () => {
+    execute: async (input) => {
+      const indexUrl = packageIndexUrl(ctx, stringInput(input, "indexUrl"));
       if (process.platform !== "win32" && process.platform !== "linux") throw new Error(`内置 Python 自动安装目前支持 Windows 和 Linux，当前平台不支持：${process.platform}`);
       await requireConfirmation(ctx, {
         title: "安装并配置内置 Python",
-        description: process.platform === "win32"
-          ? `Agent 准备下载独立 Python ${pythonVersion} 到应用工作区 ${appConfig.pythonDir}，安装 pip 与 MCDReforged；不会使用或修改系统 Python。`
-          : `Agent 准备下载独立 Python ${pythonVersion} 到应用工作区 ${appConfig.pythonDir}，安装 pip 与 MCDReforged；不会使用或修改系统 Python。`,
+        description: `Agent 准备下载独立 Python ${pythonVersion} 到应用工作区 ${appConfig.pythonDir}，并通过镜像 ${indexUrl} 安装 pip 与 MCDReforged；不会使用或修改系统 Python。`,
         risk: "high"
       });
 
@@ -244,7 +261,7 @@ export function createConfigureBuiltinPythonTool(ctx: AgentToolContext): AgentTo
         ctx.consoleLog?.("内置 Python 正在由另一个 Agent 任务配置，等待完成。");
         return builtinPythonInstallPromise;
       }
-      builtinPythonInstallPromise = configureBuiltinPython(ctx).finally(() => {
+      builtinPythonInstallPromise = configureBuiltinPython(ctx, indexUrl).finally(() => {
         builtinPythonInstallPromise = null;
       });
       return builtinPythonInstallPromise;
@@ -264,12 +281,17 @@ export function createInstallMcdrPluginDependenciesTool(ctx: AgentToolContext): 
             type: "array",
             items: { type: "string" },
             description: "需要安装的 PyPI 包名或带版本约束的包声明，例如 [\"ruamel.yaml\", \"requests>=2.31\"]。仅填写日志或 requirements 明确指出的依赖。"
+          },
+          indexUrl: {
+            type: "string",
+            description: `可选。自定义 PyPI simple 镜像地址，默认使用国内镜像 ${defaultPythonPackageIndexUrl}。`
           }
         }, ["packages"])
       }
     },
     execute: async (input) => {
       const packages = [...new Set(stringArrayInput(input, "packages").map(validatePackageSpec))];
+      const indexUrl = packageIndexUrl(ctx, stringInput(input, "indexUrl"));
       if (packages.length === 0) throw new Error("至少提供一个从插件日志或 requirements 文件确认的 Python 依赖");
       if (!(await exists(pythonExecutable()))) {
         throw new Error("内置 Python 不存在。请先调用 configure_builtin_python_environment，禁止使用系统 Python 安装插件依赖。");
@@ -277,14 +299,15 @@ export function createInstallMcdrPluginDependenciesTool(ctx: AgentToolContext): 
 
       await requireConfirmation(ctx, {
         title: "安装 MCDReforged 插件依赖",
-        description: `Agent 准备通过应用内置 Python 的 pip 从 PyPI 安装：${packages.join(", ")}。仅影响 workspace/python，不使用系统 Python。`,
+        description: `Agent 准备通过应用内置 Python 的 pip 从镜像 ${indexUrl} 安装：${packages.join(", ")}。仅影响 workspace/python，不使用系统 Python。`,
         risk: "medium"
       });
-      await ensurePip(ctx);
-      const output = await runPython(["-m", "pip", "install", ...packages], appConfig.pythonDir, ctx);
+      await ensurePip(ctx, indexUrl);
+      const output = await runPython(["-m", "pip", "install", "--index-url", indexUrl, ...packages], appConfig.pythonDir, ctx);
       return JSON.stringify({
         pythonPath: pythonExecutable(),
         packages,
+        pythonPackageIndexUrl: indexUrl,
         output: output.trim() || "依赖安装完成",
         systemPythonUsed: false
       }, null, 2);

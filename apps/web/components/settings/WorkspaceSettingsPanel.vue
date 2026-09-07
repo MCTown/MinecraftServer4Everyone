@@ -32,6 +32,7 @@ const props = defineProps<{
   providerKeySettings: AgentToolSettings;
   proxyEnabled: boolean;
   proxyUrl: string;
+  pythonPackageIndexUrl: string;
   selectedJavaBusy: boolean;
   selectedJavaInstalled: boolean;
   selectedJavaTask: JavaInstallTask | null;
@@ -71,6 +72,7 @@ const emit = defineEmits<{
   "update:model-name": [value: string];
   "update:proxy-enabled": [value: boolean];
   "update:proxy-url": [value: string];
+  "update:python-package-index-url": [value: string];
   "update:settings-tab": [value: SettingsTab];
 }>();
 
@@ -145,6 +147,7 @@ function updateAgentMemory(event: Event) {
           <div class="settings-agent-section stack"><div class="settings-agent-section-head"><div><h3>自动确认写操作</h3><p>开启后，修改配置、重启实例和删除文件不再逐次请求确认。</p></div><label class="settings-switch"><input :checked="props.autoConfirm" type="checkbox" @change="emit('update:auto-confirm', ($event.target as HTMLInputElement).checked)" /><span aria-hidden="true"></span></label></div><small v-if="props.autoConfirm" class="danger-note">自动确认已开启。Agent 可以在没有二次确认的情况下覆盖配置、重启实例或删除目录内文件。</small></div>
           <div class="settings-agent-section stack"><div class="settings-agent-section-head"><div><h3>Agent 默认内存</h3><p>仅影响 Agent 配置新服务端时使用的推荐内存，不会修改现有实例。</p></div><strong>{{ props.agentMemoryLabel }}</strong></div><input :value="props.agentMemoryMb" type="range" min="512" :max="props.systemMemoryMb" step="512" @change="updateAgentMemory" /><div class="settings-range-meta"><small>512 MB</small><small>设备最大内存 {{ props.systemMemoryLabel }}</small></div><small v-if="props.agentMemoryWarning" class="danger-note">当前设置超过设备内存的 90%，可能导致系统或服务端不稳定。</small><div class="settings-actions"><button type="button" @click="emit('save-agent-settings')">保存默认内存</button></div></div>
           <div class="settings-agent-section stack"><div class="settings-agent-section-head"><div><h3>下载代理</h3><p>影响 Agent 联网工具、Java 安装、Forge installer 和服务端进程，不影响模型请求。</p></div><label class="settings-switch"><input :checked="props.proxyEnabled" type="checkbox" @change="emit('update:proxy-enabled', ($event.target as HTMLInputElement).checked)" /><span aria-hidden="true"></span></label></div><div class="settings-proxy-controls"><input :value="props.proxyUrl" class="mono-input" placeholder="http://127.0.0.1:7890" :disabled="!props.proxyEnabled" @input="emit('update:proxy-url', ($event.target as HTMLInputElement).value)" @keyup.enter="emit('save-agent-settings')" /><button type="button" :disabled="props.proxyEnabled && !props.proxyUrl.trim()" @click="emit('save-agent-settings')">保存</button><button type="button" @click="emit('open-proxy-test')">检测</button></div><small class="muted">仅支持 HTTP/HTTPS 代理地址。</small></div>
+          <div class="settings-agent-section stack"><div class="settings-agent-section-head"><div><h3>Python 包镜像</h3><p>配置内置 Python 与 MCDReforged 插件依赖时使用；默认国内可用镜像，留空恢复默认。</p></div></div><div class="settings-proxy-controls"><input :value="props.pythonPackageIndexUrl" class="mono-input" placeholder="https://pypi.tuna.tsinghua.edu.cn/simple" @input="emit('update:python-package-index-url', ($event.target as HTMLInputElement).value)" @keyup.enter="emit('save-agent-settings')" /><button type="button" @click="emit('save-agent-settings')">保存</button></div><small class="muted">仅支持 HTTP/HTTPS 的 PyPI simple 地址。</small></div>
           <div class="settings-agent-section stack"><div class="settings-agent-section-head"><div><h3>平台 API Key</h3><p>CurseForge 下载必需；Modrinth PAT 一般只在鉴权失败时需要。</p></div><button type="button" @click="emit('open-provider-keys')">配置凭据</button></div><div class="provider-key-summary"><small>CurseForge：{{ props.providerKeySettings.curseForgeApiKeyHint }}</small><small>Modrinth：{{ props.providerKeySettings.modrinthApiKeyHint }}</small></div></div>
           <div class="settings-agent-section settings-prompt-section stack"><div class="settings-agent-section-head"><div><h3>默认 System Prompt</h3><p>新实例默认继承；实例可使用自己的 Prompt 覆盖。</p></div><div class="settings-actions"><button type="button" @click="emit('reset-prompt')">恢复默认</button><button type="button" class="primary" @click="emit('edit-prompt')">修改 Prompt</button></div></div><pre class="settings-prompt-preview">{{ props.globalPrompt || "（空）" }}</pre></div>
         </div>

@@ -4,6 +4,9 @@ dist/
 .output/
 .data/
 workspace/
+!apps/web/components/workspace/
+apps/web/components/workspace/*
+!apps/web/components/workspace/DeploymentProgressPanel.vue
 .idea/
 test-results/
 *.swp

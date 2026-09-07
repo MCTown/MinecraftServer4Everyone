@@ -70,16 +70,28 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
     autoConfirm: z.boolean().optional(),
     downloadProxyEnabled: z.boolean().optional(),
     downloadProxyUrl: z.string().trim().optional(),
+    pythonPackageIndexUrl: z.string().trim().optional(),
     memoryMb: z.number().optional()
   }).superRefine((body, context) => {
-    if (!body.downloadProxyUrl) return;
+    if (body.downloadProxyUrl) {
+      try {
+        const url = new URL(body.downloadProxyUrl);
+        if (!["http:", "https:"].includes(url.protocol)) {
+          context.addIssue({ code: z.ZodIssueCode.custom, path: ["downloadProxyUrl"], message: "代理地址仅支持 HTTP 或 HTTPS" });
+        }
+      } catch {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["downloadProxyUrl"], message: "代理地址格式无效" });
+      }
+    }
+
+    if (!body.pythonPackageIndexUrl) return;
     try {
-      const url = new URL(body.downloadProxyUrl);
+      const url = new URL(body.pythonPackageIndexUrl);
       if (!["http:", "https:"].includes(url.protocol)) {
-        context.addIssue({ code: z.ZodIssueCode.custom, path: ["downloadProxyUrl"], message: "代理地址仅支持 HTTP 或 HTTPS" });
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["pythonPackageIndexUrl"], message: "Python 包镜像仅支持 HTTP 或 HTTPS" });
       }
     } catch {
-      context.addIssue({ code: z.ZodIssueCode.custom, path: ["downloadProxyUrl"], message: "代理地址格式无效" });
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["pythonPackageIndexUrl"], message: "Python 包镜像地址格式无效" });
     }
   });
 
@@ -162,7 +174,10 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
 
   const providerKeySettingsSchema = z.object({
     curseForgeApiKey: z.string().optional(),
-    modrinthApiKey: z.string().optional()
+    modrinthApiKey: z.string().optional(),
+    braveSearchApiKey: z.string().optional(),
+    tavilyApiKey: z.string().optional(),
+    searxngBaseUrl: z.string().trim().url().optional().or(z.literal(""))
   });
 
   app.get("/api/settings/provider-keys", async () => services.promptService.getAgentToolSettings());

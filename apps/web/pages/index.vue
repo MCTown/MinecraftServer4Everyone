@@ -19,7 +19,7 @@ import EmptyWorkspaceLanding from "~/components/workspace/EmptyWorkspaceLanding.
 import InstanceTopbar from "~/components/workspace/InstanceTopbar.vue";
 import ServerSidebar from "~/components/workspace/ServerSidebar.vue";
 import type { AgentConfirmationRequest, AgentContextUsage, AgentDownloadProgress, AgentMessage, AgentRetryState, AgentSettings, AgentStatus, AgentToolConfigRequired, AgentToolConfigRequirement, AgentToolRecord, AgentToolSettings, AgentWorkflowProgress, AgentWorkflowStepStatus, ConsoleLogEntry, FileEntry, JavaDownloadSource, JavaDownloadSourceOption, JavaInstall, JavaInstallTask, JavaInstallTaskStatus, JavaManagementState, JavaVersionRecord, ModelConfig, ProxyTestResult, ServerErrorDigest, ServerErrorState, ServerRecord, ServerSlotStatus, SkillRecord, ToolConfigKey } from "~/types/app";
-import { renderConsoleLogs } from "~/utils/consoleRendering";
+import { createIncrementalConsoleRenderer } from "~/utils/consoleRendering";
 import type { RenderedConsoleLogEntry } from "~/utils/consoleRendering";
 import { formatBytes, formatMemoryConfig, formatMemoryMb, parseMemoryToMb } from "~/utils/formatters";
 import { useStatusBubbles } from "~/composables/useStatusBubbles";
@@ -50,8 +50,8 @@ const javaVersions = ref<JavaVersionRecord[]>([]);
 const javaTasks = ref<JavaInstallTask[]>([]);
 const javaDownloadSources = ref<JavaDownloadSourceOption[]>([]);
 const globalPrompt = ref("");
-const providerKeySettings = ref<AgentToolSettings>({ curseForgeApiKeyConfigured: false, curseForgeApiKeyHint: "未配置", modrinthApiKeyConfigured: false, modrinthApiKeyHint: "未配置" });
-const providerKeyForm = reactive({ curseForgeApiKey: "", modrinthApiKey: "" });
+  const providerKeySettings = ref<AgentToolSettings>({ curseForgeApiKeyConfigured: false, curseForgeApiKeyHint: "未配置", modrinthApiKeyConfigured: false, modrinthApiKeyHint: "未配置", braveSearchApiKeyConfigured: false, braveSearchApiKeyHint: "未配置", tavilyApiKeyConfigured: false, tavilyApiKeyHint: "未配置", searxngBaseUrl: "" });
+  const providerKeyForm = reactive({ curseForgeApiKey: "", modrinthApiKey: "", braveSearchApiKey: "", tavilyApiKey: "", searxngBaseUrl: "" });
 const providerKeySaving = ref(false);
 const providerKeyDialogOpen = ref(false);
 const proxyTestDialogOpen = ref(false);
@@ -62,6 +62,7 @@ const pendingToolConfig = ref<AgentToolConfigRequired | null>(null);
 const agentAutoConfirm = ref(false);
 const agentDownloadProxyEnabled = ref(false);
 const agentDownloadProxyUrl = ref("");
+const agentPythonPackageIndexUrl = ref("");
 const agentMemoryMb = ref(2048);
 const systemMemoryMb = ref(2048);
 const consoleCommand = ref("");
@@ -125,6 +126,7 @@ type DeploymentProgressState = "not_started" | "running" | "progress" | "complet
 
 const pendingAgentAttachments = ref<PendingAgentAttachment[]>([]);
 const serverUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
+const serverSlotUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
 const agentUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
 const agentDownloads = ref<AgentDownloadProgress[]>([]);
 const agentWorkflow = ref<AgentWorkflowProgress | null>(null);
@@ -398,7 +400,7 @@ function closeProviderKeyDialog() {
 }
 
 function providerKeyPlaceholder(key: ToolConfigKey) {
-  const hint = key === "curseForgeApiKey" ? providerKeySettings.value.curseForgeApiKeyHint : providerKeySettings.value.modrinthApiKeyHint;
+  const hint = key === "searxngBaseUrl" ? "" : providerKeySettings.value[key === "curseForgeApiKey" ? "curseForgeApiKeyHint" : key === "modrinthApiKey" ? "modrinthApiKeyHint" : key === "braveSearchApiKey" ? "braveSearchApiKeyHint" : "tavilyApiKeyHint"];
   return hint && hint !== "未配置" ? `${hint}（留空保留）` : "留空保留，输入后覆盖";
 }
 
@@ -1093,6 +1095,28 @@ async function uploadServerFile(event: Event) {
   }
 }
 
+async function uploadServerSlot(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file || !selectedServerId.value) return;
+  const serverId = selectedServerId.value;
+  const form = new FormData();
+  form.append("file", file);
+  beginUpload(serverSlotUpload, file);
+  try {
+    const result = await safe(() => upload<ServerSlotStatus>(`/api/servers/${serverId}/agent/server-slot/upload`, form, {
+      onProgress: (progress) => updateUploadProgress(serverSlotUpload, progress)
+    }), serverId);
+    finishUpload(serverSlotUpload);
+    if (serverId === selectedServerId.value && result) serverSlot.value = result;
+  } catch (error) {
+    failUpload(serverSlotUpload);
+    throw error;
+  } finally {
+    input.value = "";
+  }
+}
+
 async function loadAgentMessages() {
   if (!selectedServerId.value) return;
   agentMessages.value = await api<AgentMessage[]>(`/api/servers/${selectedServerId.value}/agent/messages`);
@@ -1224,6 +1248,18 @@ async function retryAgentNow() {
   }
 }
 
+async function compressAgentContext() {
+  if (!selectedServerId.value || agentBusy.value) return;
+  const serverId = selectedServerId.value;
+  const result = await safe(() => api<{ ok: boolean; compressed: number }>(`/api/servers/${serverId}/agent/context/compress`, { method: "POST" }), serverId);
+  if (serverId !== selectedServerId.value) return;
+  if (result?.compressed) {
+    appendAgentMessage("system", `已压缩 ${result.compressed} 条历史消息为摘要。`, "completed", serverId);
+  }
+  await loadAgentMessages();
+  await loadServerSlotStatus();
+}
+
 async function clearAgentContext() {
   if (!selectedServerId.value || agentBusy.value) return;
   const firstConfirm = confirm("确定清除当前服务端的 Agent 上下文吗？这会删除当前对话记录。文件和服务端配置不会被删除。");
@@ -1317,9 +1353,12 @@ async function loadSettings() {
   providerKeySettings.value = providerKeys;
   providerKeyForm.curseForgeApiKey = "";
   providerKeyForm.modrinthApiKey = "";
+  providerKeyForm.braveSearchApiKey = "";
+  providerKeyForm.tavilyApiKey = "";
   agentAutoConfirm.value = agentSettings.autoConfirm;
   agentDownloadProxyEnabled.value = agentSettings.downloadProxyEnabled;
   agentDownloadProxyUrl.value = agentSettings.downloadProxyUrl;
+  agentPythonPackageIndexUrl.value = agentSettings.pythonPackageIndexUrl;
   agentMemoryMb.value = agentSettings.memoryMb;
   systemMemoryMb.value = agentSettings.systemMemoryMb;
   applyJavaState(javaData);
@@ -1443,6 +1482,7 @@ async function saveAgentSettings() {
       autoConfirm: agentAutoConfirm.value,
       downloadProxyEnabled: agentDownloadProxyEnabled.value,
       downloadProxyUrl: agentDownloadProxyUrl.value,
+      pythonPackageIndexUrl: agentPythonPackageIndexUrl.value,
       memoryMb: agentMemoryMb.value
     }
   }));
@@ -1450,6 +1490,7 @@ async function saveAgentSettings() {
   agentAutoConfirm.value = result.autoConfirm;
   agentDownloadProxyEnabled.value = result.downloadProxyEnabled;
   agentDownloadProxyUrl.value = result.downloadProxyUrl;
+  agentPythonPackageIndexUrl.value = result.pythonPackageIndexUrl;
   agentMemoryMb.value = result.memoryMb;
   systemMemoryMb.value = result.systemMemoryMb;
 }
@@ -1508,12 +1549,17 @@ async function saveProviderKeys() {
       method: "PUT",
       body: {
         curseForgeApiKey: providerKeyForm.curseForgeApiKey || undefined,
-        modrinthApiKey: providerKeyForm.modrinthApiKey || undefined
+        modrinthApiKey: providerKeyForm.modrinthApiKey || undefined,
+        braveSearchApiKey: providerKeyForm.braveSearchApiKey || undefined,
+        tavilyApiKey: providerKeyForm.tavilyApiKey || undefined,
+        searxngBaseUrl: providerKeyForm.searxngBaseUrl || undefined
       }
     }));
     if (result) providerKeySettings.value = result;
     providerKeyForm.curseForgeApiKey = "";
     providerKeyForm.modrinthApiKey = "";
+    providerKeyForm.braveSearchApiKey = "";
+    providerKeyForm.tavilyApiKey = "";
     showProviderKeyStatus("success", "平台 API Key 已保存");
     await loadSettings();
     closeProviderKeyDialog();
@@ -1665,13 +1711,6 @@ function workflowStepClass(status: AgentWorkflowStepStatus) {
     completed: "status-running",
     failed: "risk-high"
   }[status];
-}
-
-function serverSlotDetail(slot: ServerSlotStatus | null) {
-  if (!slot) return "正在读取服务端包状态";
-  if (!slot.occupied) return "等待上传或下载服务端包";
-  const size = slot.size === null ? "未知大小" : formatBytes(slot.size);
-  return `${slot.fileName} · ${size}`;
 }
 
 function mergeAgentDownload(download: AgentDownloadProgress) {
@@ -1948,6 +1987,9 @@ onBeforeUnmount(() => {
       @save="saveProviderKeys"
       @update:curse-forge-api-key="providerKeyForm.curseForgeApiKey = $event"
       @update:modrinth-api-key="providerKeyForm.modrinthApiKey = $event"
+      @update:brave-search-api-key="providerKeyForm.braveSearchApiKey = $event"
+      @update:tavily-api-key="providerKeyForm.tavilyApiKey = $event"
+      @update:searxng-base-url="providerKeyForm.searxngBaseUrl = $event"
     />
 
     <ProxyTestDialog
@@ -2033,6 +2075,7 @@ onBeforeUnmount(() => {
           :provider-key-settings="providerKeySettings"
           :proxy-enabled="agentDownloadProxyEnabled"
           :proxy-url="agentDownloadProxyUrl"
+          :python-package-index-url="agentPythonPackageIndexUrl"
           :selected-java-busy="selectedJavaBusy"
           :selected-java-installed="selectedJavaInstalled"
           :selected-java-task="selectedJavaTask"
@@ -2069,6 +2112,7 @@ onBeforeUnmount(() => {
           @update:model-name="modelForm.modelName = $event"
           @update:proxy-enabled="updateAgentProxyEnabled"
           @update:proxy-url="agentDownloadProxyUrl = $event"
+          @update:python-package-index-url="agentPythonPackageIndexUrl = $event"
           @update:settings-tab="settingsTab = $event"
         />
 
@@ -2107,12 +2151,15 @@ onBeforeUnmount(() => {
                 :label="deploymentProgressLabel"
                 :percent="deploymentProgressPercent"
                 :slot="serverSlot"
-                :slot-detail="serverSlotDetail"
+                :slot-size="formatBytes"
+                :slot-upload="serverSlotUpload"
+                :slot-upload-detail="uploadDetail"
                 :status="deploymentProgressCardStatus"
                 :workflow="deploymentWorkflow"
                 :workflow-status-class="workflowStepClass"
                 :workflow-status-text="workflowStatusText"
                 @refresh="loadServerSlotStatus"
+                @upload-server-slot="uploadServerSlot"
                 @toggle-dismissed="deploymentProgressDismissed = !deploymentProgressDismissed"
               />
 
@@ -2141,6 +2188,7 @@ onBeforeUnmount(() => {
               :upload-detail="uploadDetail"
               @cancel="cancelAgentRun"
               @clear="clearAgentContext"
+              @compress="compressAgentContext"
               @message-scroll="updateAgentScrollState"
               @remove-attachment="removePendingAgentAttachment"
               @retry="retryAgentNow"
