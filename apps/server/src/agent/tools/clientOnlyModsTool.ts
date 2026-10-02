@@ -402,7 +402,7 @@ async function analyzeModJar(absolutePath: string, relativePath: string): Promis
 }
 
 async function resolveModsDirectory(ctx: AgentToolContext, modsPathInput: string) {
-  const server = await ctx.serverService.requireServer(ctx.serverId);
+  const server = await ctx.serverService.requireServer(ctx.getServerId());
   const requested = (modsPathInput.trim() || "server/mods").replaceAll("\\", "/");
   const absolute = path.resolve(server.directory, requested);
   const relative = path.relative(server.directory, absolute).replaceAll("\\", "/");

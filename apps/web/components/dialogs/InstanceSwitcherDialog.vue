@@ -59,7 +59,7 @@ watch(() => props.open, (open) => {
       <section ref="dialog" class="card instance-switcher" role="dialog" aria-modal="true" aria-labelledby="instance-switcher-title" tabindex="-1" @keydown="handleKeydown">
         <div class="card-header">
           <div><p class="eyebrow">Instances</p><h2 id="instance-switcher-title" class="card-title">切换服务端</h2></div>
-          <button type="button" @click="emit('close')">关闭</button>
+          <button type="button" @click="emit('close')"><AppIcon name="close" />关闭</button>
         </div>
         <div class="instance-switcher-list">
           <button v-for="server in props.servers" :key="server.id" type="button" class="instance-switcher-item" :class="{ active: server.id === props.selectedServerId }" @click="emit('select', server.id)">
@@ -68,8 +68,8 @@ watch(() => props.open, (open) => {
           </button>
         </div>
         <div class="row instance-switcher-actions">
-          <button type="button" class="primary" @click="emit('create')">创建实例</button>
-          <button v-if="props.selectedServer" type="button" class="danger" :disabled="props.selectedServer.status !== 'stopped' && props.selectedServer.status !== 'crashed'" @click="emit('delete', props.selectedServer)">删除当前实例</button>
+          <button type="button" class="primary" @click="emit('create')"><AppIcon name="plus" />创建实例</button>
+          <button v-if="props.selectedServer" type="button" class="danger" :disabled="props.selectedServer.status !== 'stopped' && props.selectedServer.status !== 'crashed'" @click="emit('delete', props.selectedServer)"><AppIcon name="trash" />删除当前实例</button>
         </div>
       </section>
     </div>

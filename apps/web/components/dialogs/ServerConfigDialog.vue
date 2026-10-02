@@ -9,6 +9,8 @@ interface JavaVersionOption {
 
 const props = defineProps<{
   form: ServerConfigForm;
+  loading: boolean;
+  loadError: string;
   javaVersions: JavaVersionOption[];
   memoryLabel: string;
   memoryMaxMb: number;
@@ -23,6 +25,7 @@ const emit = defineEmits<{
   close: [];
   "select-java": [];
   save: [];
+  retry: [];
   "update:memory-mb": [value: number];
 }>();
 
@@ -35,8 +38,11 @@ function updateMemory(event: Event) {
   <form class="card stack management-dialog config-dialog" @submit.prevent="emit('save')">
     <div class="card-header">
       <div><p class="eyebrow">Instance Config</p><h2 class="card-title">服务端配置</h2></div>
-      <div class="row"><button class="primary" type="submit">保存</button><button type="button" @click="emit('close')">关闭</button></div>
+      <div class="row"><button class="primary" type="submit" :disabled="props.loading || Boolean(props.loadError)"><AppIcon name="save" />保存</button><button type="button" @click="emit('close')"><AppIcon name="close" />关闭</button></div>
     </div>
+    <AsyncPlaceholder v-if="props.loading" variant="form" label="正在加载实例配置" :rows="4" />
+    <AsyncPlaceholder v-else-if="props.loadError" :error="props.loadError" @retry="emit('retry')" />
+    <template v-else>
     <label class="config-field stack"><span class="muted">服务端名字</span><input v-model.trim="props.form.name" placeholder="服务端名字" /></label>
     <label class="config-field stack">
       <span class="muted">使用内存大小</span>
@@ -56,5 +62,6 @@ function updateMemory(event: Event) {
     <label class="config-field stack"><span class="muted">启动指令</span><textarea v-model.trim="props.form.startupCommand" class="startup-command-input" placeholder="留空则自动使用服务端脚本或 Jar。可用变量：{java} {javaHome} {memory} {minMemory} {maxMemory} {jarFile} {startArgs}" /></label>
     <label class="config-field config-prompt-toggle"><input v-model="props.form.useGlobalPrompt" type="checkbox" /><span>使用全局 Agent Prompt</span></label>
     <label class="config-field stack"><span class="muted">实例 Agent Prompt 覆盖</span><textarea v-model.trim="props.form.promptOverride" :disabled="props.form.useGlobalPrompt" placeholder="关闭全局 Prompt 后可为当前实例单独设置" /></label>
+    </template>
   </form>
 </template>

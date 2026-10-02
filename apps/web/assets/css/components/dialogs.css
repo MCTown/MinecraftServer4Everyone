@@ -165,7 +165,6 @@
   cursor: pointer;
 }
 .new-dropdown-item:hover { background: rgba(255, 255, 255, 0.07); box-shadow: none; }
-.new-dropdown-icon { transform: scale(0.65); transform-origin: left center; flex-shrink: 0; border: none !important; background: transparent !important; box-shadow: none !important; }
 
 /* ── 内联新建弹窗 ── */
 .create-name-overlay {
@@ -340,16 +339,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Scale icons down to fit compact rows */
-.dialog-file-list .file-icon {
-  flex-shrink: 0;
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
-  transform: scale(0.65);
-  transform-origin: left center;
 }
 
 /* checkbox stays vertically centred */

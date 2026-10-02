@@ -444,7 +444,7 @@ function handleKeydown(event: KeyboardEvent) {
       <div class="map-workbench-state" :class="{ blocked: !serverStopped }">
         <span class="status-dot" />{{ serverStopped ? "已停止 · 可执行变更" : `${props.server.status} · 变更已锁定` }}
       </div>
-      <button ref="closeButton" type="button" class="icon-button" aria-label="关闭地图工作台" @click="emit('close')">×</button>
+      <button ref="closeButton" type="button" class="icon-button" title="关闭地图工作台" aria-label="关闭地图工作台" @click="emit('close')"><AppIcon name="close" /></button>
     </header>
 
     <div class="map-editor-content map-workbench-content" :inert="dangerOpen">
@@ -455,7 +455,7 @@ function handleKeydown(event: KeyboardEvent) {
       <p class="map-editor-intro">服务端在 Linux 上读取实际 MCA 文件并在后端解析 NBT。放大地图后，区块内直接渲染 16×16 顶部方块材质。删除与回滚都在停服状态下执行，并先把受影响文件写入服务器目录之外的快照。</p>
 
       <template v-if="loadingWorlds">
-        <p class="muted">正在检测世界存档目录...</p>
+        <AsyncPlaceholder variant="editor" label="正在检测世界存档目录" :rows="5" />
       </template>
       <template v-else-if="!worlds.length">
         <p class="map-editor-note">未找到可读取的 MCA 区域目录。</p>
@@ -485,7 +485,7 @@ function handleKeydown(event: KeyboardEvent) {
         >
           <section class="map-workbench-preview">
             <div class="map-region-heading"><span>区域文件</span><code>{{ selectedWorld?.regionPath }}</code></div>
-            <p v-if="loadingRegions" class="muted">正在读取区域列表...</p>
+            <AsyncPlaceholder v-if="loadingRegions" variant="editor" label="正在读取区域地图" :rows="5" />
             <p v-else-if="!regions.length" class="map-editor-note">当前页面没有可读取的区域文件。</p>
             <MapRegionViewport
               v-else
@@ -514,7 +514,7 @@ function handleKeydown(event: KeyboardEvent) {
                 <span>{{ selectedRegion.name }} · {{ header?.region.occupiedChunkCount ?? 0 }} 个已占用区块</span>
                 <code>{{ selectedRegion.size.toLocaleString() }} B</code>
               </div>
-              <p v-if="loadingHeader" class="muted">正在读取 8KB MCA 头...</p>
+              <AsyncPlaceholder v-if="loadingHeader" variant="compact" label="正在读取 MCA 文件头" />
               <template v-else-if="header">
                 <p>{{ header.region.invalidChunkCount }} 个分配异常。放大后直接在地图中查看区块内的方块材质；点击区块高亮，Shift + 点击或右键加入删除范围。</p>
                 <p class="map-editor-note">下方明细列表提供 44px 触控目标，是地图画布之外的等效操作路径。</p>
@@ -567,9 +567,10 @@ function handleKeydown(event: KeyboardEvent) {
         <aside v-if="snapshotDrawerOpen" class="map-snapshot-drawer">
           <div class="map-region-heading"><span>快照管理</span><code>{{ snapshots.length }}/20</code></div>
           <p class="map-editor-note">快照保存在服务端目录之外，仅包含受影响文件；被删除的文件也会记录为“缺失”，因此整区删除同样可以回滚。</p>
-          <p v-if="loadingSnapshots" class="muted">正在读取快照...</p>
+          <AsyncPlaceholder v-if="loadingSnapshots && !snapshots.length" label="正在读取快照" />
           <p v-else-if="!snapshots.length" class="map-editor-note">暂无快照。删除操作会自动创建快照。</p>
           <template v-else>
+            <AsyncPlaceholder v-if="loadingSnapshots" variant="compact" label="正在刷新快照" />
             <div v-for="snapshot in snapshots" :key="snapshot.id" class="map-snapshot-item">
               <div>
                 <strong>{{ snapshot.name }}</strong>

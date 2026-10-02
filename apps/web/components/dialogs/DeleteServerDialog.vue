@@ -65,6 +65,7 @@ function handleKeydown(event: KeyboardEvent) {
         <p v-if="props.error" class="danger-note">删除失败：{{ props.error }}</p>
         <div class="row">
           <button class="danger" :disabled="props.deleting || props.blocked || !props.confirmationMatches" @click="emit('confirm')">
+            <AppIcon :name="props.deleting ? 'loader' : 'trash'" :spin="props.deleting" />
             {{ props.deleting ? "正在删除" : "永久删除" }}
           </button>
           <button :disabled="props.deleting" @click="emit('close')">取消</button>

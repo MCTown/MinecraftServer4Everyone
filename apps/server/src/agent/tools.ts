@@ -8,8 +8,11 @@ import { createInstallJavaVersionTool } from "./tools/javaDownloadTool.js";
 import { createConfigureBuiltinPythonTool, createInstallMcdrPluginDependenciesTool } from "./tools/pythonRuntimeTool.js";
 import { createWebSearchTool } from "./tools/webSearchTool.js";
 import { createFetchWebPageTool } from "./tools/fetchWebPageTool.js";
+import { createRunShellCommandTool } from "./tools/shellTool.js";
 import { createDeployMrpackServerTool, createInspectMrpackServerTool } from "./tools/mrpackDeploymentTool.js";
+import { resolveForgeFamilyInstaller, type ForgeFamilyLoader } from "./tools/forgeFamilyInstaller.js";
 import { createDisableClientOnlyServerModsTool, createDisableServerModsTool, createInspectClientOnlyServerModsTool } from "./tools/clientOnlyModsTool.js";
+import { createGlobalAgentTools } from "./tools/globalTools.js";
 import { booleanInput, installableCapabilities, isAbortError, objectSchema, requireConfirmation, safeDownloadName, stringArrayInput, stringInput, stringProperty, type AgentCapabilityId, type AgentTool, type AgentToolContext } from "./toolKit.js";
 import { createId } from "../utils/id.js";
 import type { AgentDownloadProgress } from "../types.js";
@@ -240,7 +243,7 @@ async function downloadCandidateToServerSlot(ctx: AgentToolContext, candidate: S
   });
   emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: "starting" });
   try {
-    const status = await ctx.fileService.downloadIntoServerSlot(ctx.serverId, candidate.downloadUrl, {
+    const status = await ctx.fileService.downloadIntoServerSlot(ctx.getServerId(), candidate.downloadUrl, {
       signal: ctx.signal,
       proxyUrl: ctx.downloadProxyUrl?.(),
       onProgress: (progress) => emitProgress({ ...progress, status: progress.percent >= 100 ? "completed" : "downloading" })
@@ -269,7 +272,7 @@ async function downloadModCandidateToMods(ctx: AgentToolContext, candidate: ModJ
   });
   emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: "starting" });
   try {
-    const savedPath = await ctx.fileService.downloadIntoServer(ctx.serverId, candidate.downloadUrl, destinationPath, {
+    const savedPath = await ctx.fileService.downloadIntoServer(ctx.getServerId(), candidate.downloadUrl, destinationPath, {
       signal: ctx.signal,
       proxyUrl: ctx.downloadProxyUrl?.(),
       onProgress: (progress) => emitProgress({ ...progress, status: progress.percent >= 100 ? "completed" : "downloading" })
@@ -391,16 +394,12 @@ function manifestSummary(manifest: CurseForgeManifestSlotInfo) {
   };
 }
 
-function parseForgeLoaderVersion(loaders: string[]) {
-  const loader = loaders.find((item) => /^forge-/i.test(item));
-  if (!loader) return "";
-  const version = loader.slice("forge-".length).trim();
-  return /^\d+(?:\.\d+){1,3}(?:[-+][a-zA-Z0-9.-]+)?$/.test(version) ? version : "";
-}
-
-function forgeInstallerUrl(minecraftVersion: string, forgeVersion: string) {
-  const coordinate = `${minecraftVersion}-${forgeVersion}`;
-  return `https://maven.minecraftforge.net/net/minecraftforge/forge/${encodeURIComponent(coordinate)}/forge-${encodeURIComponent(coordinate)}-installer.jar`;
+function manifestForgeFamilyLoader(manifest: CurseForgeManifestSlotInfo) {
+  // FileService orders the primary loader first. Do not install a secondary loader instead.
+  const match = /^(forge|neoforge|neo-forge)-(.+)$/i.exec(manifest.loaders[0] ?? "");
+  if (!match) return null;
+  const type: ForgeFamilyLoader = match[1]!.toLowerCase() === "forge" ? "forge" : "neoforge";
+  return { type, name: type === "forge" ? "Forge" : "NeoForge", ...resolveForgeFamilyInstaller(type, manifest.minecraftVersion, match[2]!.trim()) };
 }
 
 async function preflightCurseForgeManifestMods(ctx: AgentToolContext, manifest: CurseForgeManifestSlotInfo) {
@@ -439,7 +438,7 @@ async function preflightCurseForgeManifestMods(ctx: AgentToolContext, manifest: 
 }
 
 async function downloadCurseForgeManifestMods(ctx: AgentToolContext, mods: CurseForgeManifestMod[]) {
-  const server = await ctx.serverService.requireServer(ctx.serverId);
+  const server = await ctx.serverService.requireServer(ctx.getServerId());
   const paths = mods.map((mod) => path.join("server", "mods", mod.fileName));
   for (const destinationPath of paths) {
     if (await pathExists(path.join(server.directory, destinationPath))) {
@@ -456,7 +455,7 @@ async function downloadCurseForgeManifestMods(ctx: AgentToolContext, mods: Curse
     };
     emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: "starting" });
     try {
-      downloadedPaths.push(await ctx.fileService.downloadIntoServer(ctx.serverId, mod.downloadUrl, destinationPath, {
+      downloadedPaths.push(await ctx.fileService.downloadIntoServer(ctx.getServerId(), mod.downloadUrl, destinationPath, {
         signal: ctx.signal,
         proxyUrl: ctx.downloadProxyUrl?.(),
         onProgress: (progress) => emitProgress({ ...progress, status: progress.percent >= 100 ? "completed" : "downloading" })
@@ -991,17 +990,6 @@ function modProvider(input: Record<string, unknown>) {
   return value as "curseforge" | "modrinth";
 }
 
-function javaArgsFilePath(minecraftVersion: string, forgeVersion: string) {
-  return path.join(
-    "libraries",
-    "net",
-    "minecraftforge",
-    "forge",
-    `${minecraftVersion}-${forgeVersion}`,
-    process.platform === "win32" ? "win_args.txt" : "unix_args.txt"
-  );
-}
-
 const rootMinecraftLayoutMarkers = [
   "mods",
   "libraries",
@@ -1142,7 +1130,7 @@ async function promoteNestedModpackContent(serverDirectory: string, installerPat
   return { from: installerDirectory, moved, skipped };
 }
 
-async function ensureForgeServerTextFiles(serverDirectory: string, modpackName: string, minecraftVersion: string, minMemory: string, maxMemory: string) {
+async function ensureForgeServerTextFiles(serverDirectory: string, modpackName: string, minecraftVersion: string, minMemory: string, maxMemory: string, loaderName: string) {
   const createdOrUpdated: string[] = [];
   await writeFile(path.join(serverDirectory, "eula.txt"), "eula=true\n", "utf8");
   createdOrUpdated.push("eula.txt");
@@ -1156,7 +1144,7 @@ async function ensureForgeServerTextFiles(serverDirectory: string, modpackName: 
     properties.set(line.slice(0, separatorIndex), line.slice(separatorIndex + 1));
   }
   properties.set("allow-flight", "true");
-  if (!properties.has("motd")) properties.set("motd", modpackName || `Forge ${minecraftVersion}`);
+  if (!properties.has("motd")) properties.set("motd", modpackName || `${loaderName} ${minecraftVersion}`);
   if (!properties.has("level-type")) properties.set("level-type", "default");
   await writeFile(serverPropertiesPath, [...properties.entries()].map(([key, value]) => `${key}=${value}`).join("\n") + "\n", "utf8");
   createdOrUpdated.push("server.properties");
@@ -1166,12 +1154,15 @@ async function ensureForgeServerTextFiles(serverDirectory: string, modpackName: 
   return createdOrUpdated;
 }
 
+export { createGlobalAgentTools } from "./tools/globalTools.js";
+
 export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
   const capabilityNames = Object.keys(installableCapabilities).join(", ");
   const templateNames = ["default", "reference"];
   const tools: AgentTool[] = [
     createWebSearchTool(ctx),
     createFetchWebPageTool(ctx),
+    createRunShellCommandTool(ctx),
     {
       definition: {
         type: "function",
@@ -1223,7 +1214,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         }
       },
       execute: async () => {
-        const status = await ctx.fileService.getServerSlotStatus(ctx.serverId);
+        const status = await ctx.fileService.getServerSlotStatus(ctx.getServerId());
         ctx.serverSlotStatus?.(status);
         return JSON.stringify(status, null, 2);
       }
@@ -1238,13 +1229,13 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         }
       },
       execute: async (input) => {
-        const upload = ctx.uploadService.requireSessionUpload(ctx.serverId, stringInput(input, "uploadId"));
+        const upload = ctx.uploadService.requireSessionUpload(ctx.getUploadSessionId?.() ?? ctx.getServerId(), stringInput(input, "uploadId"));
         await requireConfirmation(ctx, {
           title: "保存上传文件到服务端槽位",
           description: `Agent 准备清空当前服务端旧槽位，并把上传文件 ${upload.originalName} 保存为当前服务端槽位内容。`,
           risk: "medium"
         });
-        const status = await ctx.fileService.copyIntoServerSlot(ctx.serverId, upload.storedPath, upload.originalName);
+        const status = await ctx.fileService.copyIntoServerSlot(ctx.getServerId(), upload.storedPath, upload.originalName);
         ctx.serverSlotStatus?.(status);
         return JSON.stringify(status, null, 2);
       }
@@ -1273,7 +1264,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         });
         emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: "starting" });
         try {
-          const status = await ctx.fileService.downloadIntoServerSlot(ctx.serverId, url, {
+          const status = await ctx.fileService.downloadIntoServerSlot(ctx.getServerId(), url, {
             signal: ctx.signal,
             proxyUrl: ctx.downloadProxyUrl?.(),
             onProgress: (progress) => emitProgress({ ...progress, status: progress.percent >= 100 ? "completed" : "downloading" })
@@ -1387,8 +1378,8 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           description: `Agent 准备将服务端槽位中的压缩包解压到当前服务端的 ${destinationPath} 目录。`,
           risk: "medium"
         });
-        await mkdir(path.join((await ctx.serverService.requireServer(ctx.serverId)).directory, "server"), { recursive: true });
-        const result = await ctx.fileService.extractServerSlotIntoServer(ctx.serverId, destinationPath, {
+        await mkdir(path.join((await ctx.serverService.requireServer(ctx.getServerId())).directory, "server"), { recursive: true });
+        const result = await ctx.fileService.extractServerSlotIntoServer(ctx.getServerId(), destinationPath, {
           onProgress: (progress) => ctx.workflowProgress?.({
             title: "整合包服务端部署流程",
             currentStepId: "extract_to_workspace",
@@ -1410,21 +1401,20 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "materialize_curseforge_manifest_pack_from_server_slot",
-          description: "还原当前服务端槽位内 CurseForge manifest.json 清单包的服务端内容。仅适用于 ZIP 根目录含 manifest.json 与 overrides/ 的清单包，不适用于已可直启的完整服务端包。工具会验证清单、通过 CurseForge 官方 API 精确解析每个 required projectID/fileID、把 JAR 下载到 server/mods/，并把 overrides/ 的内容合并到 server/（不会留下 server/overrides/ 包装目录）。不会安装 Minecraft/Forge/Fabric Loader，也不会启动服务端；Forge 清单会返回官方 Forge installer URL，后续必须下载 installer、启用 forge_server_setup 并调用 setup_forge_server。需要已配置 CurseForge API Key。仅在用户已确认整合包后调用。",
+          description: "还原当前服务端槽位内 CurseForge manifest.json 清单包的服务端内容。仅适用于 ZIP 根目录含 manifest.json 与 overrides/ 的清单包，不适用于已可直启的完整服务端包。工具会验证清单、通过 CurseForge 官方 API 精确解析每个 required projectID/fileID、把 JAR 下载到 server/mods/，并把 overrides/ 的内容合并到 server/（不会留下 server/overrides/ 包装目录）。不会安装 Minecraft 或 Loader，也不会启动服务端；Forge/NeoForge 清单会返回对应的官方 installer URL，后续必须下载 installer、启用 forge_server_setup/neoforge_server_setup 并调用 setup_forge_server/setup_neoforge_server。需要已配置 CurseForge API Key。仅在用户已确认整合包后调用。",
           parameters: objectSchema({})
         }
       },
       execute: async () => {
-        const manifest = await ctx.fileService.inspectCurseForgeManifestServerSlot(ctx.serverId);
+        const manifest = await ctx.fileService.inspectCurseForgeManifestServerSlot(ctx.getServerId());
+        const loader = manifestForgeFamilyLoader(manifest);
         const mods = await preflightCurseForgeManifestMods(ctx, manifest);
-        const forgeVersion = parseForgeLoaderVersion(manifest.loaders);
-        const installerUrl = forgeVersion ? forgeInstallerUrl(manifest.minecraftVersion, forgeVersion) : "";
         await requireConfirmation(ctx, {
           title: "还原 CurseForge 清单整合包",
-          description: `Agent 准备从当前服务端槽位的 ${manifest.slot.fileName} 还原 ${manifest.name || "CurseForge 整合包"}${manifest.version ? ` ${manifest.version}` : ""}：下载 ${mods.length} 个精确版本的 required 模组到 server/mods/，并复制 overrides 内容到 server/。${forgeVersion ? `清单要求 Forge ${forgeVersion}；后续仍需安装 Forge。` : "当前工具不会安装清单要求的 Loader。"}`,
+          description: `Agent 准备从当前服务端槽位的 ${manifest.slot.fileName} 还原 ${manifest.name || "CurseForge 整合包"}${manifest.version ? ` ${manifest.version}` : ""}：下载 ${mods.length} 个精确版本的 required 模组到 server/mods/，并复制 overrides 内容到 server/。${loader ? `清单要求 ${loader.name} ${loader.version}；后续仍需安装 ${loader.name}。` : "当前工具不会安装清单要求的 Loader。"}`,
           risk: "high"
         });
-        const overrides = await ctx.fileService.materializeCurseForgeManifestOverrides(ctx.serverId, "server");
+        const overrides = await ctx.fileService.materializeCurseForgeManifestOverrides(ctx.getServerId(), "server");
         const downloadedMods = await downloadCurseForgeManifestMods(ctx, mods);
         return JSON.stringify({
           ok: true,
@@ -1433,23 +1423,23 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           skippedOptionalModCount: manifest.files.filter((file) => !file.required).length,
           downloadedMods,
           copiedOverrides: overrides.copiedOverrides,
-          loaderSetup: forgeVersion
+          loaderSetup: loader
             ? {
               status: "pending",
-              loader: "forge",
-              forgeVersion,
-              officialInstallerUrl: installerUrl,
+              loader: loader.type,
+              [loader.type === "forge" ? "forgeVersion" : "neoforgeVersion"]: loader.version,
+              officialInstallerUrl: loader.installerUrl,
               nextSteps: [
-                `使用 download_https_file_to_server 将官方 Forge installer 下载到 server/forge-${manifest.minecraftVersion}-${forgeVersion}-installer.jar`,
-                "调用 install_agent_capability(capability=forge_server_setup)",
-                "调用 setup_forge_server，并使用 manifest 的 Minecraft/Forge 版本与已安装 Java",
+                `使用 download_https_file_to_server 将官方 ${loader.name} installer 下载到 server/${loader.installerFileName}`,
+                `调用 install_agent_capability(capability=${loader.type}_server_setup)`,
+                `调用 setup_${loader.type}_server，并使用 manifest 的 Minecraft/${loader.name} 版本与已安装 Java`,
                 "按常规流程直启验证，再配置 MCDReforged"
               ]
             }
             : {
               status: "manual_loader_setup_required",
               loaders: manifest.loaders,
-              message: "清单模组与 overrides 已还原，但当前仅内置 Forge 服务端安装能力；请先为该 Loader 提供受控安装能力后再尝试启动。"
+              message: "清单模组与 overrides 已还原，但当前独立 Loader 安装能力仅支持 Forge/NeoForge；请先为该 Loader 提供受控安装能力后再尝试启动。"
             }
         }, null, 2);
       }
@@ -1459,7 +1449,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "install_agent_capability",
-          description: `当当前工具集缺少完成任务所需的能力时，安装/启用一个内置受控能力包。只能安装已内置能力，不能执行任意系统命令或安装任意软件。当前可安装：${capabilityNames}。`,
+          description: `当当前工具集缺少完成任务所需的能力时，安装/启用一个内置受控能力包。本工具只能启用已内置能力；需要执行 Shell 命令时使用已注册的 run_shell_command。当前可安装：${capabilityNames}。`,
           parameters: objectSchema({ capability: { type: "string", enum: Object.keys(installableCapabilities) } }, ["capability"])
         }
       },
@@ -1518,7 +1508,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           description: `Agent 准备修改当前服务端配置：${JSON.stringify(changes)}`,
           risk: "medium"
         });
-        const server = await ctx.serverService.updateServer(ctx.serverId, changes);
+        const server = await ctx.serverService.updateServer(ctx.getServerId(), changes);
         return JSON.stringify(server, null, 2);
       }
     },
@@ -1531,7 +1521,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           parameters: objectSchema({})
         }
       },
-      execute: async () => JSON.stringify(await ctx.serverService.requireServer(ctx.serverId), null, 2)
+      execute: async () => JSON.stringify(await ctx.serverService.requireServer(ctx.getServerId()), null, 2)
     },
     {
       definition: {
@@ -1542,7 +1532,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           parameters: objectSchema({ path: stringProperty })
         }
       },
-      execute: async (input) => JSON.stringify(await ctx.fileService.list(ctx.serverId, stringInput(input, "path", ".")), null, 2)
+      execute: async (input) => JSON.stringify(await ctx.fileService.list(ctx.getServerId(), stringInput(input, "path", ".")), null, 2)
     },
     {
       definition: {
@@ -1553,7 +1543,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           parameters: objectSchema({ path: stringProperty, offset: { type: "number" }, limit: { type: "number" } }, ["path"])
         }
       },
-      execute: async (input) => ctx.fileService.readText(ctx.serverId, stringInput(input, "path"), {
+      execute: async (input) => ctx.fileService.readText(ctx.getServerId(), stringInput(input, "path"), {
         offset: parsePositiveInteger(input.offset),
         maxChars: parsePositiveInteger(input.limit) || agentReadTextMaxChars
       })
@@ -1569,7 +1559,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
       },
       execute: async (input) => {
         const targetPath = stringInput(input, "path");
-        await ctx.fileService.writeText(ctx.serverId, targetPath, stringInput(input, "content"));
+        await ctx.fileService.writeText(ctx.getServerId(), targetPath, stringInput(input, "content"));
         return `已写入 ${targetPath}`;
       }
     },
@@ -1594,8 +1584,8 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           risk: "medium"
         });
         const templateDir = path.join(appConfig.templatesDir, template);
-        const destinationPath = await ctx.fileService.copyDirectoryIntoServer(ctx.serverId, templateDir, ".", overwrite);
-        if (template === "reference") await mkdir(path.join((await ctx.serverService.requireServer(ctx.serverId)).directory, "server"), { recursive: true });
+        const destinationPath = await ctx.fileService.copyDirectoryIntoServer(ctx.getServerId(), templateDir, ".", overwrite);
+        if (template === "reference") await mkdir(path.join((await ctx.serverService.requireServer(ctx.getServerId())).directory, "server"), { recursive: true });
         return JSON.stringify({ template, destinationPath, overwrite, minecraftServerDirectory: template === "reference" ? "server" : "." }, null, 2);
       }
     },
@@ -1608,7 +1598,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           parameters: objectSchema({})
         }
       },
-      execute: async () => JSON.stringify(ctx.uploadService.list(ctx.serverId), null, 2)
+      execute: async () => JSON.stringify(ctx.uploadService.list(ctx.getUploadSessionId?.() ?? ctx.getServerId()), null, 2)
     },
     {
       definition: {
@@ -1620,7 +1610,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         }
       },
       execute: async (input) => {
-        const upload = ctx.uploadService.requireSessionUpload(ctx.serverId, stringInput(input, "uploadId"));
+        const upload = ctx.uploadService.requireSessionUpload(ctx.getUploadSessionId?.() ?? ctx.getServerId(), stringInput(input, "uploadId"));
         const requestedDestinationPath = stringInput(input, "destinationPath", "server").trim() || "server";
         const destinationPath = requestedDestinationPath === "." ? "server" : requestedDestinationPath;
         await requireConfirmation(ctx, {
@@ -1631,14 +1621,14 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         if (destinationPath.replaceAll("\\", "/").split("/")[0] !== "server") {
           throw new Error("基于 MCDReforged reference 模板部署 Minecraft 服务端本体时，上传文件必须放入 server/ 目录。请将 destinationPath 设置为 server 或 server/<子目录>。");
         }
-        await mkdir(path.join((await ctx.serverService.requireServer(ctx.serverId)).directory, "server"), { recursive: true });
+        await mkdir(path.join((await ctx.serverService.requireServer(ctx.getServerId())).directory, "server"), { recursive: true });
         const uploadName = upload.originalName.toLowerCase();
         const shouldExtract = booleanInput(input, "extract") && (uploadName.endsWith(".zip") || uploadName.endsWith(".tar.gz") || uploadName.endsWith(".tgz"));
         if (shouldExtract) {
-          await ctx.fileService.extractArchiveIntoServer(ctx.serverId, upload.storedPath, upload.originalName, destinationPath);
+          await ctx.fileService.extractArchiveIntoServer(ctx.getServerId(), upload.storedPath, upload.originalName, destinationPath);
           return `已解压 ${upload.originalName} 到 ${destinationPath}`;
         }
-        await ctx.fileService.copyIntoServer(ctx.serverId, upload.storedPath, path.join(destinationPath, upload.originalName));
+        await ctx.fileService.copyIntoServer(ctx.getServerId(), upload.storedPath, path.join(destinationPath, upload.originalName));
         return `已移动 ${upload.originalName} 到 ${destinationPath}`;
       }
     },
@@ -1668,7 +1658,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           parameters: objectSchema({})
         }
       },
-      execute: async () => JSON.stringify(await ctx.processManager.start(ctx.serverId))
+      execute: async () => JSON.stringify(await ctx.processManager.start(ctx.getServerId()))
     },
     {
       definition: {
@@ -1679,7 +1669,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           parameters: objectSchema({})
         }
       },
-      execute: async () => JSON.stringify(await ctx.processManager.stop(ctx.serverId))
+      execute: async () => JSON.stringify(await ctx.processManager.stop(ctx.getServerId()))
     },
     {
       definition: {
@@ -1696,7 +1686,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           description: "Agent 准备强制结束当前服务端正在运行或残留的进程树。该操作会终止相关 Java/MCDR/脚本进程。",
           risk: "high"
         });
-        return JSON.stringify(await ctx.processManager.kill(ctx.serverId));
+        return JSON.stringify(await ctx.processManager.kill(ctx.getServerId()));
       }
     },
     {
@@ -1711,7 +1701,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
       execute: async (input) => {
         const command = stringInput(input, "command").trim();
         if (!command) throw new Error("command 不能为空");
-        ctx.processManager.sendCommand(ctx.serverId, command);
+        ctx.processManager.sendCommand(ctx.getServerId(), command);
         return JSON.stringify({ ok: true, command });
       }
     },
@@ -1810,70 +1800,74 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         const archiveLower = archivePath.toLowerCase();
         if (!archiveLower.endsWith(".zip") && !archiveLower.endsWith(".tar.gz") && !archiveLower.endsWith(".tgz")) throw new Error("Only .zip/.tar.gz/.tgz files can be extracted");
         const destinationPath = stringInput(input, "destinationPath", ".");
-        const archive = await ctx.fileService.resolveDownload(ctx.serverId, archivePath);
+        const archive = await ctx.fileService.resolveDownload(ctx.getServerId(), archivePath);
         await requireConfirmation(ctx, {
           title: "解压服务端内压缩包",
           description: `Agent 准备将当前服务端目录内的 ${archive.fileName} 解压到 ${destinationPath}。`,
           risk: "medium"
         });
-        await ctx.fileService.extractArchiveIntoServer(ctx.serverId, archive.absolutePath, archive.fileName, destinationPath);
+        await ctx.fileService.extractArchiveIntoServer(ctx.getServerId(), archive.absolutePath, archive.fileName, destinationPath);
         return `已解压 ${archivePath} 到 ${destinationPath}`;
       }
     });
   }
 
-  if (ctx.installedCapabilities?.has("forge_server_setup")) {
+  for (const loaderType of ["forge", "neoforge"] as const) {
+    if (!ctx.installedCapabilities?.has(`${loaderType}_server_setup`)) continue;
+    const loaderName = loaderType === "forge" ? "Forge" : "NeoForge";
+    const versionKey = loaderType === "forge" ? "forgeVersion" : "neoforgeVersion";
     tools.push({
       definition: {
         type: "function",
         function: {
-          name: "setup_forge_server",
-          description: "在当前服务端沙箱内运行 Forge installer -installServer，验证生成的 Forge args 文件，并写入当前服务端可启动配置。适用于 Forge 1.17+ 的 libraries/.../win_args.txt 或 unix_args.txt 启动方式。若根目录已有 MCDReforged 布局（config.yml + server/），本工具必须把 Forge 安装到 server/，把 mods/config 等提升到 server/，并在 server/ 写入 eula.txt、server.properties、user_jvm_args.txt；绝不把 Minecraft 服务端文件安装或提升到 MCDReforged 根目录。若 installer 位于 server/ 下的嵌套整合包子目录，会提升到 server/ 而不是根目录。minMemory/maxMemory 必须使用同一个值，优先使用上下文里的推荐内存；整合包有明确要求时可以调整但不能超过推荐内存，并向用户说明。本工具只完成 Forge 安装与 server/ 基础文件，不替代 configure_builtin_python_environment、config.yml 编辑、以及 startupCommand={python} -m mcdreforged 的最终 MCDR 配置。",
+          name: `setup_${loaderType}_server`,
+          description: `在当前服务端沙箱内运行 ${loaderName} installer，验证生成的 libraries/.../win_args.txt 或 unix_args.txt，并写入当前服务端可启动配置。${loaderType === "forge" ? "适用于 Forge 1.17+，使用 -installServer。" : "使用 --installServer；neoforgeVersion 使用整合包指定的版本（如 21.1.200、20.4.237）；Minecraft 1.20.1 支持旧版 47.1.x 或 1.20.1-47.1.x。"}若根目录已有 MCDReforged 布局（config.yml + server/），本工具必须把 ${loaderName} 安装到 server/，把 mods/config 等提升到 server/，并在 server/ 写入 eula.txt、server.properties、user_jvm_args.txt；绝不把 Minecraft 服务端文件安装或提升到 MCDReforged 根目录。若 installer 位于 server/ 下的嵌套整合包子目录，会提升到 server/ 而不是根目录。minMemory/maxMemory 必须使用同一个值，优先使用上下文里的推荐内存；整合包有明确要求时可以调整但不能超过推荐内存，并向用户说明。本工具只完成 ${loaderName} 安装与 server/ 基础文件，不替代 configure_builtin_python_environment、config.yml 编辑、以及 startupCommand={python} -m mcdreforged 的最终 MCDR 配置。`,
           parameters: objectSchema({
             minecraftVersion: stringProperty,
-            forgeVersion: stringProperty,
+            [versionKey]: stringProperty,
             installerPath: stringProperty,
             javaPath: stringProperty,
             minMemory: stringProperty,
             maxMemory: stringProperty,
             modpackName: stringProperty,
             removeClientSideModPatterns: { type: "array", items: stringProperty }
-          }, ["minecraftVersion", "forgeVersion", "installerPath", "javaPath"])
+          }, ["minecraftVersion", versionKey, "installerPath", "javaPath"])
         }
       },
       execute: async (input) => {
         const minecraftVersion = stringInput(input, "minecraftVersion");
-        const forgeVersion = stringInput(input, "forgeVersion");
+        const loaderVersion = stringInput(input, versionKey);
         const installerPath = stringInput(input, "installerPath");
         const javaPath = stringInput(input, "javaPath");
         const requestedMemory = stringInput(input, "minMemory") || stringInput(input, "maxMemory", "4G");
         const minMemory = requestedMemory;
         const maxMemory = requestedMemory;
         const modpackName = stringInput(input, "modpackName");
-        if (!installerPath.toLowerCase().endsWith(".jar")) throw new Error("Forge installer must be a .jar file");
-        if (!minecraftVersion || !forgeVersion || !javaPath) {
-          throw new Error("minecraftVersion、forgeVersion、javaPath 都必须提供");
+        if (!installerPath.toLowerCase().endsWith(".jar")) throw new Error(`${loaderName} installer must be a .jar file`);
+        if (!minecraftVersion || !loaderVersion || !javaPath) {
+          throw new Error(`minecraftVersion、${versionKey}、javaPath 都必须提供`);
         }
+        const installerInfo = resolveForgeFamilyInstaller(loaderType, minecraftVersion, loaderVersion);
 
-        const server = await ctx.serverService.requireServer(ctx.serverId);
-        const installer = await ctx.fileService.resolveDownload(ctx.serverId, installerPath);
+        const server = await ctx.serverService.requireServer(ctx.getServerId());
+        const installer = await ctx.fileService.resolveDownload(ctx.getServerId(), installerPath);
         await access(javaPath).catch(() => {
           throw new Error(`Java executable not found: ${javaPath}`);
         });
         const { layout, installRoot } = await detectMcdrInstallRoot(server.directory);
         await mkdir(installRoot, { recursive: true });
-        const argsPath = javaArgsFilePath(minecraftVersion, forgeVersion);
+        const argsPath = installerInfo.argsPath;
         const installRootLabel = layout === "mcdr" ? "server/" : "服务端根目录";
         await requireConfirmation(ctx, {
-          title: "运行 Forge 服务端安装器",
-          description: `Agent 准备在 ${installRootLabel} 内运行 ${installer.fileName} -installServer，并将启动配置设置为 @${argsPath} nogui。MCDReforged 布局下 Minecraft 文件只会写入 server/，不会写到根目录。`,
+          title: `运行 ${loaderName} 服务端安装器`,
+          description: `Agent 准备在 ${installRootLabel} 内运行 ${installer.fileName} ${installerInfo.installFlag}，并将启动配置设置为 @${argsPath} nogui。MCDReforged 布局下 Minecraft 文件只会写入 server/，不会写到根目录。`,
           risk: "high"
         });
 
-        ctx.consoleLog?.(`运行 Forge installer（cwd=${installRootLabel}）：${javaPath} -jar ${installer.absolutePath} -installServer`);
+        ctx.consoleLog?.(`运行 ${loaderName} installer（cwd=${installRootLabel}）：${javaPath} -jar ${installer.absolutePath} ${installerInfo.installFlag}`);
         const output = await runProcess(
           javaPath,
-          ["-jar", installer.absolutePath, "-installServer"],
+          ["-jar", installer.absolutePath, installerInfo.installFlag],
           installRoot,
           ctx.signal,
           (stream, text) => ctx.consoleLog?.(text, stream),
@@ -1881,14 +1875,14 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         );
         const absoluteArgsPath = path.join(installRoot, argsPath);
         if (!(await pathExists(absoluteArgsPath))) {
-          throw new Error(`Forge installer did not create expected args file under ${installRootLabel}: ${argsPath}\n最近输出：\n${output.slice(-3000)}`);
+          throw new Error(`${loaderName} installer did not create expected args file under ${installRootLabel}: ${argsPath}\n最近输出：\n${output.slice(-3000)}`);
         }
         const installerPathForPromote = path.relative(installRoot, installer.absolutePath).replaceAll("\\", "/");
         const promoteInstallerPath = installerPathForPromote && !installerPathForPromote.startsWith("..")
           ? installerPathForPromote
           : installerPath;
         const promotedContent = await promoteNestedModpackContent(installRoot, promoteInstallerPath);
-        const configuredTextFiles = await ensureForgeServerTextFiles(installRoot, modpackName, minecraftVersion, minMemory, maxMemory);
+        const configuredTextFiles = await ensureForgeServerTextFiles(installRoot, modpackName, minecraftVersion, minMemory, maxMemory, loaderName);
         const removedMods = await removeMatchingMods(installRoot, stringArrayInput(input, "removeClientSideModPatterns"));
         const rootMinecraftMarkers = await listRootMinecraftLayoutMarkers(server.directory);
         const layoutWarnings: string[] = [];
@@ -1899,11 +1893,11 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         }
         if (layout === "mcdr") {
           layoutWarnings.push(
-            "Forge 已安装到 server/。本工具不完成 MCDR 最终配置：直启验证后必须调用 configure_builtin_python_environment，编辑根目录 config.yml（working_directory=server，start_command 从 server/ 启动，handler 符合 Forge），再 update_current_server_config 设置 startupCommand={python} -m mcdreforged。"
+            `${loaderName} 已安装到 server/。本工具不完成 MCDR 最终配置：直启验证后必须调用 configure_builtin_python_environment，编辑根目录 config.yml（working_directory=server，start_command 从 server/ 启动，handler 符合 ${loaderName}），再 update_current_server_config 设置 startupCommand={python} -m mcdreforged。`
           );
         }
         const normalizedArgsPath = argsPath.replace(/\\/g, "/");
-        const updated = await ctx.serverService.updateServer(ctx.serverId, {
+        const updated = await ctx.serverService.updateServer(ctx.getServerId(), {
           javaPath,
           javaVersion: ctx.javaService.recommendVersion(minecraftVersion),
           minMemory,
@@ -1911,8 +1905,8 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           jarFile: "",
           startArgs: `@${normalizedArgsPath} nogui`,
           minecraftVersion,
-          modpackName: modpackName || `Forge ${minecraftVersion}-${forgeVersion}`,
-          serverType: "forge"
+          modpackName: modpackName || `${loaderName} ${minecraftVersion}-${installerInfo.version}`,
+          serverType: loaderType
         });
         return JSON.stringify({
           ok: true,
@@ -1933,7 +1927,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
               "编辑 config.yml 后 startupCommand={python} -m mcdreforged 做最终验证"
             ]
             : [
-              "确认 Forge args 与 eula 已就绪后按当前 startArgs 直启验证"
+              `确认 ${loaderName} args 与 eula 已就绪后按当前 startArgs 直启验证`
             ],
           outputTail: output.slice(-3000),
           server: updated

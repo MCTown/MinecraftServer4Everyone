@@ -684,9 +684,12 @@ export class ProcessManager {
           scriptName: name,
           startedAt: new Date().toISOString()
         });
-        child.stdout.on("data", (chunk: Buffer) => this.consoleLogService.append(serverId, "stdout", chunk.toString("utf8")));
-        child.stderr.on("data", (chunk: Buffer) => this.consoleLogService.append(serverId, "stderr", chunk.toString("utf8")));
-        child.on("error", async (error) => {
+         child.stdout.on("data", (chunk: Buffer) => this.consoleLogService.append(serverId, "stdout", chunk.toString("utf8")));
+         child.stderr.on("data", (chunk: Buffer) => this.consoleLogService.append(serverId, "stderr", chunk.toString("utf8")));
+         child.stdin.on("error", (error) => {
+           this.consoleLogService.append(serverId, "system", `服务端输入通道错误：${error.message}\n`);
+         });
+         child.on("error", async (error) => {
           this.consoleLogService.append(serverId, "system", `${spawnErrorDetails(error, command, args, cwd, this.processEnv(proxyUrl, javaPath))}\n`);
           await this.markStopped(serverId, "crashed");
         });
@@ -810,6 +813,9 @@ export class ProcessManager {
     const running = this.running;
     if (!running || running.serverId !== serverId) {
       throw new Error("Server is not running");
+    }
+    if (running.child.stdin.destroyed || running.child.stdin.writableEnded) {
+      throw new Error("Server input channel is closed");
     }
     running.child.stdin.write(`${command}\n`);
     this.consoleLogService.append(serverId, "system", `> ${command}\n`);

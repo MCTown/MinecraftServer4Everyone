@@ -46,7 +46,7 @@ onMounted(() => {
   const targetVelocityY = new Float32Array(particleCount);
   const nextTurn = new Float64Array(particleCount);
   const colors = new Float32Array(particleCount * 3);
-  const palette = [new Color("#91b6c9"), new Color("#8cbca9"), new Color("#e6aa64")];
+  const palette = [new Color("#58a6ff"), new Color("#79c0ff"), new Color("#56d4dd")];
 
   for (let index = 0; index < particleCount; index += 1) {
     const offset = index * 3;

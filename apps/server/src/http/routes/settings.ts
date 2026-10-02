@@ -23,6 +23,8 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
       baseUrl: z.string().min(1),
       modelName: z.string().min(1),
       apiKey: z.string().optional(),
+      apiType: z.enum(["chat_completions", "responses"]).optional(),
+      availableModels: z.array(z.string()).optional(),
       isDefault: z.boolean().default(false),
       contextSizeK: z.number().int().min(8).max(2000).optional()
     }), request.body);
@@ -36,6 +38,8 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
       baseUrl: z.string().optional(),
       modelName: z.string().optional(),
       apiKey: z.string().optional(),
+      apiType: z.enum(["chat_completions", "responses"]).optional(),
+      availableModels: z.array(z.string()).optional(),
       isDefault: z.boolean().optional(),
       contextSizeK: z.number().int().min(8).max(2000).optional()
     }), request.body);
@@ -52,9 +56,36 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
     const body = parseBody(z.object({
       id: z.string().optional(),
       baseUrl: z.string().optional(),
-      modelName: z.string().optional()
+      modelName: z.string().optional(),
+      apiType: z.enum(["chat_completions", "responses"]).optional(),
+      apiKey: z.string().optional()
     }), request.body);
     return services.modelService.test(body);
+  });
+
+  /** Pull the upstream model catalog and persist it on the saved config. */
+  app.post("/api/models/available", async (request) => {
+    const body = parseBody(z.object({
+      id: z.string().optional(),
+      baseUrl: z.string().optional(),
+      apiKey: z.string().optional(),
+      apiType: z.enum(["chat_completions", "responses"]).optional(),
+      persist: z.boolean().default(false)
+    }), request.body);
+    const result = await services.modelService.listAvailableModels(body);
+    if (!body.persist) return result;
+    const target = body.id ?? services.modelService.list()[0]?.id;
+    if (!target) return result;
+    const saved = services.modelService.update(target, { availableModels: result.models });
+    return { ...result, config: saved };
+  });
+
+  /** Switch the active model name, keeping it in the persisted config. */
+  app.post("/api/models/select", async (request) => {
+    const body = parseBody(z.object({ modelName: z.string().min(1), id: z.string().optional() }), request.body);
+    const target = body.id ?? services.modelService.list()[0]?.id;
+    if (!target) throw new Error("尚未配置模型");
+    return services.modelService.update(target, { modelName: body.modelName });
   });
 
   app.get("/api/prompts/global", async () => ({ prompt: services.promptService.getGlobalPrompt() }));

@@ -36,13 +36,11 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="login-page">
+    <ThemeToggle class="login-theme-toggle" />
     <LoginParticleBackground />
     <div class="login-card">
       <div class="login-logo">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="40" height="40">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-        </svg>
+        <AppLogo />
       </div>
       <h1 class="login-title">Minecraft Server Agent</h1>
       <p class="login-subtitle">请输入密码以访问面板</p>
@@ -57,6 +55,7 @@ function onKeydown(e: KeyboardEvent) {
         />
         <p v-if="error" class="login-error">{{ error }}</p>
         <button type="submit" :disabled="loading">
+          <AppIcon :name="loading ? 'loader' : 'arrowRight'" :spin="loading" />
           {{ loading ? "验证中..." : "进入面板" }}
         </button>
       </form>
@@ -80,10 +79,7 @@ function onKeydown(e: KeyboardEvent) {
   position: fixed;
   inset: 0;
   z-index: 0;
-  background:
-    radial-gradient(circle at 10% 6%, rgba(229, 169, 0, 0.14), transparent 26rem),
-    radial-gradient(circle at 92% 12%, rgba(102, 172, 105, 0.08), transparent 24rem),
-    linear-gradient(180deg, rgba(20, 16, 14, 0.88) 0%, rgba(14, 10, 9, 0.9) 48%, rgba(12, 9, 8, 0.94) 100%);
+  background: var(--login-backdrop);
 }
 
 .login-card {
@@ -105,10 +101,13 @@ function onKeydown(e: KeyboardEvent) {
   width: 4.5rem;
   height: 4.5rem;
   margin: 0 auto 1.2rem;
-  border-radius: 50%;
+  border: 1px solid rgba(145, 182, 201, 0.3);
+  border-radius: 1rem;
   background: var(--blue-soft);
   color: var(--blue);
 }
+
+.login-logo :deep(.app-logo) { width: 44px; height: 44px; }
 
 .login-title {
   font-size: 1.35rem;
@@ -136,18 +135,19 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .login-form button {
+  justify-content: center;
   margin-top: 0.3rem;
   padding: 0.72rem;
   font-size: 0.95rem;
   font-weight: 600;
   background: var(--blue);
   border-color: var(--blue);
-  color: #110c0b;
+  color: var(--accent-contrast);
 }
 
 .login-form button:hover:not(:disabled) {
-  background: #c48f00;
-  border-color: #c48f00;
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .login-error {

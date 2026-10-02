@@ -24,7 +24,7 @@ const emit = defineEmits<{
           <input :value="props.name" placeholder="例如：Survival-01" autocomplete="off" autofocus @input="emit('update:name', ($event.target as HTMLInputElement).value)" />
         </label>
         <div class="row">
-          <button class="primary" type="submit" :disabled="!props.name.trim()">创建并进入控制台</button>
+          <button class="primary" type="submit" :disabled="!props.name.trim()"><AppIcon name="plus" />创建并进入控制台</button>
           <button type="button" @click="emit('close')">取消</button>
         </div>
       </form>

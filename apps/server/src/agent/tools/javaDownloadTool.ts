@@ -26,7 +26,7 @@ export function createInstallJavaVersionTool(ctx: AgentToolContext): AgentTool {
         risk: "high"
       });
       const result = await ctx.javaService.installVersion(version);
-      await ctx.serverService.updateServer(ctx.serverId, { javaPath: result.path, javaVersion: version });
+      await ctx.serverService.updateServer(ctx.getServerId(), { javaPath: result.path, javaVersion: version });
       return JSON.stringify(result, null, 2);
     }
   };

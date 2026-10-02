@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import type { FileEntry, ServerRecord } from "~/types/app";
 import type { UploadState } from "~/types/ui";
+import { fileIconName } from "~/utils/icons";
 
 const props = defineProps<{
   currentPath: string;
   downloadUrl: (path: string) => string;
   files: FileEntry[];
   loading: boolean;
+  loadError: string;
   parentDirectoryPath: string;
   selectedFile: FileEntry | null;
   selectedFilePaths: string[];
@@ -163,7 +165,7 @@ defineExpose({ requestUpload, focusInitialAction });
         />
         <div class="row">
           <button type="button" @click="cancelCreate">取消</button>
-          <button type="button" class="primary" :disabled="!createInputName.trim()" @click="confirmCreate">确认</button>
+          <button type="button" class="primary" :disabled="!createInputName.trim()" @click="confirmCreate"><AppIcon name="check" />确认</button>
         </div>
       </div>
     </div>
@@ -171,42 +173,42 @@ defineExpose({ requestUpload, focusInitialAction });
     <div class="card-header">
       <div>
         <p class="eyebrow">File Manager</p>
-        <h2 class="card-title">{{ props.server.name }} 文件</h2>
+        <h2 class="card-title icon-heading"><AppIcon name="folder" />{{ props.server.name }} 文件</h2>
         <p class="muted">当前路径：{{ props.currentPath }}</p>
       </div>
       <div class="row">
-        <button v-if="props.selectedFiles.filter(f => f.type === 'file').length > 0" type="button" @click="downloadSelected">下载</button>
-        <button type="button" @click="emit('go-up')">上级</button>
-        <button type="button" @click="emit('refresh')">刷新</button>
-        <button ref="closeButton" type="button" @click="emit('close')">关闭</button>
+        <button v-if="props.selectedFiles.filter(f => f.type === 'file').length > 0" type="button" @click="downloadSelected"><AppIcon name="download" />下载</button>
+        <button type="button" @click="emit('go-up')"><AppIcon name="arrowUp" />上级</button>
+        <button type="button" :disabled="props.loading" @click="emit('refresh')"><AppIcon name="refresh" :spin="props.loading" />{{ props.loading ? '刷新中…' : '刷新' }}</button>
+        <button ref="closeButton" type="button" @click="emit('close')"><AppIcon name="close" />关闭</button>
       </div>
     </div>
 
     <div class="row file-toolbar">
       <!-- Dropdown: 新建 -->
       <div class="new-dropdown">
-        <button ref="createTrigger" type="button" @click="dropdownOpen = !dropdownOpen">新建 ▾</button>
+        <button ref="createTrigger" type="button" :aria-expanded="dropdownOpen" @click="dropdownOpen = !dropdownOpen"><AppIcon name="plus" />新建<AppIcon :name="dropdownOpen ? 'chevronUp' : 'chevronDown'" :size="14" /></button>
         <div v-if="dropdownOpen" class="new-dropdown-backdrop" @click="dropdownOpen = false" />
         <div v-if="dropdownOpen" class="new-dropdown-menu">
           <button type="button" class="new-dropdown-item" @click="openCreate('folder')">
-            <span class="new-dropdown-icon file-icon file-icon-directory" aria-hidden="true" />
+            <AppIcon name="folder" />
             新建文件夹
           </button>
           <button type="button" class="new-dropdown-item" @click="openCreate('file')">
-            <span class="new-dropdown-icon file-icon file-icon-file" aria-hidden="true" />
+            <AppIcon name="file" />
             新建文件
           </button>
         </div>
       </div>
 
       <input ref="uploadInput" class="visually-hidden" type="file" tabindex="-1" @change="emit('upload', $event)" />
-      <button type="button" :disabled="props.upload.active" @click="requestUpload">{{ props.upload.active ? "上传中" : "上传文件" }}</button>
+      <button type="button" :disabled="props.upload.active" @click="requestUpload"><AppIcon :name="props.upload.active ? 'loader' : 'upload'" :spin="props.upload.active" />{{ props.upload.active ? "上传中" : "上传文件" }}</button>
 
       <template v-if="props.selectedFiles.length > 0">
         <span class="file-selection-count">已选 {{ props.selectedFiles.length }} 项</span>
-        <button v-if="props.selectedFile" type="button" @click="emit('show-properties', props.selectedFile)">属性</button>
-        <button v-if="props.selectedFile" type="button" @click="emit('rename-file', props.selectedFile.path)">重命名</button>
-        <button class="danger" type="button" @click="emit('remove-selected')">删除</button>
+        <button v-if="props.selectedFile" type="button" @click="emit('show-properties', props.selectedFile)"><AppIcon name="info" />属性</button>
+        <button v-if="props.selectedFile" type="button" @click="emit('rename-file', props.selectedFile.path)"><AppIcon name="edit" />重命名</button>
+        <button class="danger" type="button" @click="emit('remove-selected')"><AppIcon name="trash" />删除</button>
       </template>
     </div>
 
@@ -216,7 +218,7 @@ defineExpose({ requestUpload, focusInitialAction });
       <small class="muted">{{ props.uploadDetail(props.upload) }}</small>
     </div>
 
-    <div class="file-list-pane">
+    <div class="file-list-pane" :aria-busy="props.loading">
       <div class="file-list-header" aria-hidden="true">
         <div></div>
         <div>名称</div>
@@ -224,25 +226,26 @@ defineExpose({ requestUpload, focusInitialAction });
         <div>大小</div>
       </div>
       <div class="file-list dialog-file-list">
-        <div v-if="props.loading" key="loading" class="file-row file-loading-row"><span class="file-loading-spinner" aria-hidden="true" /><span class="muted">正在获取文件...</span></div>
+        <AsyncPlaceholder v-if="props.loading && !props.files.length" label="正在读取目录" :rows="5" />
+        <AsyncPlaceholder v-else-if="props.loadError" variant="compact" :error="props.loadError" @retry="emit('refresh')" />
         <div v-else-if="props.files.length === 0" key="empty" class="file-row empty-row"><span class="muted">当前目录为空</span></div>
         <div v-if="!props.loading && props.parentDirectoryPath" class="file-row file-row-parent" role="button" tabindex="0" @click="emit('open-folder', props.parentDirectoryPath)" @keydown.enter="emit('open-folder', props.parentDirectoryPath)" @keydown.space.prevent="emit('open-folder', props.parentDirectoryPath)">
           <div class="file-col-check-placeholder"></div>
           <div class="file-col-name">
-            <span class="file-icon file-icon-parent" aria-hidden="true" />
+            <span class="file-icon file-icon-parent"><AppIcon name="arrowUp" /></span>
             <span class="visually-hidden">上一级</span>
             <span>../</span>
           </div>
           <div class="file-col-type muted">文件夹</div>
           <div class="file-col-size"></div>
         </div>
-        <div v-for="file in props.loading ? [] : props.files" :key="file.path" :class="['file-row', 'dialog-file-row', props.selectedFilePaths.includes(file.path) ? 'selected' : '']" role="group" :aria-label="file.name" @mousedown="emit('begin-selection', file.path, $event)" @mouseenter="emit('drag-select', file.path)">
+        <div v-for="file in props.files" :key="file.path" :class="['file-row', 'dialog-file-row', props.selectedFilePaths.includes(file.path) ? 'selected' : '']" role="group" :aria-label="file.name" @mousedown="emit('begin-selection', file.path, $event)" @mouseenter="emit('drag-select', file.path)">
           <label class="file-check" :aria-label="`选择 ${file.name}`" @mousedown.stop @click.stop>
             <input type="checkbox" :checked="props.selectedFilePaths.includes(file.path)" @change="emit('toggle-selected', file.path)" />
             <span aria-hidden="true" />
           </label>
           <button type="button" class="file-col-name file-open" @dblclick.stop="emit('open-entry', file)" @keydown.enter.prevent="emit('open-entry', file)" @keydown.space.prevent="emit('open-entry', file)">
-            <span :class="['file-icon', file.type === 'directory' ? 'file-icon-directory' : 'file-icon-file']" aria-hidden="true" />
+            <span :class="['file-icon', file.type === 'directory' ? 'file-icon-directory' : `file-icon-${fileIconName(file.name, file.type)}`]"><AppIcon :name="fileIconName(file.name, file.type)" /></span>
             <span class="visually-hidden">{{ file.type === "directory" ? "文件夹" : "文件" }}</span>
             <span>{{ file.name }}</span>
           </button>

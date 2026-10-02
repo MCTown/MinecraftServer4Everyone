@@ -34,6 +34,10 @@ export const modelConfigs = sqliteTable("model_configs", {
   displayName: text("display_name").notNull(),
   baseUrl: text("base_url").notNull(),
   modelName: text("model_name").notNull(),
+  /** Wire protocol: OpenAI Chat Completions or the newer Responses API. */
+  apiType: text("api_type").notNull().default("chat_completions"),
+  /** JSON array of model ids pulled from the upstream /models endpoint. */
+  availableModels: text("available_models").notNull().default("[]"),
   encryptedApiKey: text("encrypted_api_key").notNull(),
   apiKeyHint: text("api_key_hint").notNull(),
   isDefault: integer("is_default").notNull(),
@@ -54,6 +58,23 @@ export const agentMessages = sqliteTable("agent_messages", {
   role: text("role").notNull(),
   content: text("content").notNull(),
   status: text("status"),
+  activity: text("activity", { mode: "json" }).$type<import("../types.js").AgentActivity>(),
+  createdAt: text("created_at").notNull()
+});
+
+/**
+ * Conversation for the dashboard-level Agent. `focusServerId` records which
+ * instance an action targeted so the UI can route to that instance's console.
+ * The global scope uses the sentinel id "global".
+ */
+export const globalAgentMessages = sqliteTable("global_agent_messages", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull(),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  status: text("status"),
+  activity: text("activity", { mode: "json" }).$type<import("../types.js").AgentActivity>(),
+  focusServerId: text("focus_server_id"),
   createdAt: text("created_at").notNull()
 });
 

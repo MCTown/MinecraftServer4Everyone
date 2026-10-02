@@ -6,6 +6,19 @@
       "label": "Mockups",
       "groups": [
         {
+          "slug": "dashboard",
+          "files": [
+            {
+              "label": "index.html",
+              "path": "mockups/dashboard/index.html"
+            },
+            {
+              "label": "README.md",
+              "path": "mockups/dashboard/README.md"
+            }
+          ]
+        },
+        {
           "slug": "agent-console-redesign",
           "files": [
             {

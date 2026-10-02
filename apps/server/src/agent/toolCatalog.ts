@@ -2,6 +2,7 @@ import type { AgentToolSettings } from "../types.js";
 import type { AgentToolInfo } from "./toolKit.js";
 import { webSearchToolInfo } from "./tools/webSearchTool.js";
 import { fetchWebPageToolInfo } from "./tools/fetchWebPageTool.js";
+import { shellToolInfo } from "./tools/shellTool.js";
 import { downloadHttpsFileToServerToolInfo } from "./tools/downloadHttpsFileTool.js";
 import { installJavaVersionToolInfo } from "./tools/javaDownloadTool.js";
 import { configureBuiltinPythonToolInfo, installMcdrPluginDependenciesToolInfo } from "./tools/pythonRuntimeTool.js";
@@ -58,6 +59,7 @@ export function listAgentToolInfos(settings?: AgentToolSettings) {
   return [
     webSearchToolInfo({ braveConfigured: settings?.braveSearchApiKeyConfigured ?? false, tavilyConfigured: settings?.tavilyApiKeyConfigured ?? false }),
     fetchWebPageToolInfo,
+    shellToolInfo,
     installJavaVersionToolInfo,
     configureBuiltinPythonToolInfo,
     installMcdrPluginDependenciesToolInfo,

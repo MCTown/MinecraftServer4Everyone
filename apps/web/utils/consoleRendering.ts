@@ -22,6 +22,24 @@ const minecraftLegacyColors: Record<string, string> = {
   "0": "#000000", "1": "#0000aa", "2": "#00aa00", "3": "#00aaaa", "4": "#aa0000", "5": "#aa00aa", "6": "#ffaa00", "7": "#aaaaaa", "8": "#555555", "9": "#5555ff", a: "#55ff55", b: "#55ffff", c: "#ff5555", d: "#ff55ff", e: "#ffff55", f: "#ffffff"
 };
 
+// Keep ANSI colours faithful in dark mode, but provide readable light-mode ink.
+// CSS variables update cached log HTML instantly, without re-rendering the stream.
+const consoleColorVariables: Record<string, string> = {
+  "#0f172a": "black", "#000000": "black", "#05080d": "black",
+  "#ef4444": "red", "#f87171": "red", "#aa0000": "red", "#ff5555": "red",
+  "#22c55e": "green", "#4ade80": "green", "#00aa00": "green", "#55ff55": "green",
+  "#eab308": "yellow", "#fde047": "yellow", "#ffaa00": "yellow", "#ffff55": "yellow",
+  "#3b82f6": "blue", "#60a5fa": "blue", "#0000aa": "blue", "#5555ff": "blue",
+  "#d946ef": "violet", "#e879f9": "violet", "#aa00aa": "violet", "#ff55ff": "violet",
+  "#06b6d4": "cyan", "#22d3ee": "cyan", "#00aaaa": "cyan", "#55ffff": "cyan",
+  "#e5e7eb": "neutral", "#ffffff": "neutral", "#aaaaaa": "neutral", "#64748b": "muted", "#555555": "muted"
+};
+
+function consoleForeground(color: string) {
+  const variable = consoleColorVariables[color];
+  return variable ? `var(--console-${variable}, ${color})` : color;
+}
+
 export function renderConsoleLogs(entries: ConsoleLogEntry[]): RenderedConsoleLogEntry[] {
   const style = createConsoleTextStyle();
   let pendingAnsiControl = "";
@@ -153,7 +171,7 @@ function consoleTextStyleAttribute(style: ConsoleTextStyle) {
   const foreground = style.inverse ? style.background ?? "#05080d" : style.foreground;
   const background = style.inverse ? style.foreground ?? "#e5e7eb" : style.background;
   const decorations: string[] = [];
-  if (foreground) declarations.push(`color: ${foreground}`);
+  if (foreground) declarations.push(`color: ${background ? foreground : consoleForeground(foreground)}`);
   if (background) declarations.push(`background-color: ${background}`);
   if (style.bold) declarations.push("font-weight: 700");
   if (style.dim) declarations.push("opacity: 0.72");

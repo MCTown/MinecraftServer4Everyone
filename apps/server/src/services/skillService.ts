@@ -8,7 +8,7 @@ import { nowIso } from "../utils/time.js";
 
 const builtInSkillId = "minecraft_deploy";
 const builtInSkillName = "服务端部署 Skill";
-const builtInSkillVersion = "1.12.0";
+const builtInSkillVersion = "1.13.0";
 const builtInSkillDescription = "服务端初始化、新整合包安装、Java 检查、内置 MCDReforged 模板部署、配置修改、启动脚本生成和常见问题检查。";
 const builtInSkillContent = `# 服务端部署 Skill
 
@@ -25,7 +25,7 @@ const builtInSkillContent = `# 服务端部署 Skill
 **硬门禁：用户确认前不得进入下载/部署。** 检索完成后必须向用户列出候选（名称、平台、slug/projectId、版本、Minecraft 版本、Loader、页面链接），可推荐一项并说明理由，然后明确请求用户确认「选哪一个包/哪一个版本」。在用户明确回复确认之前：
 - 禁止将 \`identify_modpack\` 标为 \`completed\`；
 - 禁止调用 \`download_modrinth_server_pack_to_server_slot\`、\`download_curseforge_server_pack_to_server_slot\`、\`download_https_file_to_server_slot\` 下载服务端包；
-- 禁止解压、安装 Forge、修改启动配置或启动服务端。
+- 禁止解压、安装 Forge/NeoForge、修改启动配置或启动服务端。
 即使用户只给了中文名/简称，或搜索结果看似唯一、下载量最高，也不得自行认定并直接下载。用户确认后才可将 \`identify_modpack\` 标为 \`completed\` 并进入下一步。
 
 接下来，查看附件，判断用户是否附上了可用的服务端文件。
@@ -47,7 +47,11 @@ const builtInSkillContent = `# 服务端部署 Skill
 
 若槽位 ZIP 根目录只有 \`manifest.json\`、\`overrides/\`、\`modlist.html\` 等内容，这是 CurseForge 清单包而非可直启服务端。禁止将它直接用 \`extract_server_slot_to_workspace\` 解压后启动；必须调用 \`materialize_curseforge_manifest_pack_from_server_slot\`。该工具会验证清单，通过 CurseForge 官方 API 按每个 \`projectID/fileID\` 下载 required 模组至 \`server/mods/\`，并把 \`overrides/\` 的内容复制至 \`server/\`，不会留下 \`server/overrides/\` 包装目录。
 
-该工具不安装 Minecraft 或 Loader。若结果返回 Forge 的官方 installer URL，用 \`download_https_file_to_server\` 下载 installer 至 \`server/\`，再安装 \`forge_server_setup\` 能力并调用 \`setup_forge_server\`；随后继续标准直启与 MCDReforged 验证。若清单要求 Fabric、Quilt、NeoForge 等当前未提供受控安装能力的 Loader，停止在 Loader 安装阶段并明确说明，禁止尝试直启。
+该工具不安装 Minecraft 或 Loader。若结果返回 Forge/NeoForge 的官方 installer URL，用 \`download_https_file_to_server\` 下载 installer 至 \`server/\`。Forge 启用 \`forge_server_setup\` 并调用 \`setup_forge_server\`；NeoForge 启用 \`neoforge_server_setup\` 并调用 \`setup_neoforge_server\`，传入清单的 \`minecraftVersion\`、\`neoforgeVersion\`、\`installerPath\` 和已安装的 \`javaPath\`。随后继续标准直启与 MCDReforged 验证。若清单要求 Fabric、Quilt 等当前未提供独立受控安装能力的 Loader，停止在 Loader 安装阶段并明确说明，禁止尝试直启。
+
+### NeoForge 安装
+
+完整服务端包需要运行 NeoForge installer，或用户要求独立安装 NeoForge 时，使用 \`install_agent_capability(capability=neoforge_server_setup)\` 后调用 \`setup_neoforge_server\`，不要把它当作 Forge 调用。优先使用包内 installer；没有时按整合包指定的精确版本从 NeoForged 官方 Maven 下载，不要擅自切换到最新版。现代版本使用 \`https://maven.neoforged.net/releases/net/neoforged/neoforge/<版本>/neoforge-<版本>-installer.jar\`；Minecraft 1.20.1 的旧版使用 \`https://maven.neoforged.net/releases/net/neoforged/forge/1.20.1-<47.x版本>/forge-1.20.1-<47.x版本>-installer.jar\`。安装器使用 \`--installServer\`，不能当作服务端 JAR 直启。该工具会校验对应的 \`libraries/net/neoforged/.../win_args.txt\` 或 \`unix_args.txt\`，并写入 EULA、内存与服务端配置；MCDR 布局下安装目录为 \`server/\`。
 
 ### 安装单个模组
 
@@ -76,8 +80,8 @@ const builtInSkillContent = `# 服务端部署 Skill
 1. 确认服务端应该使用的 Java 版本；如果缺少相应 Java 版本，进行安装。
 2. 必须调用 \`initialize_server_template\` 并使用 \`template=reference\` 套用项目内置 MCDReforged 模板。该模板来自项目内置 \`templates/reference\`，会在当前服务端根目录放置 MCDReforged 的 \`config.yml\`、\`permission.yml\`、\`plugins/\`、\`config/\`、\`logs/\` 和 \`server/\`。
 3. Minecraft 服务端本体必须放在 \`server/\` 目录下。服务端槽位中的 zip/tar.gz/tgz 必须用 \`extract_server_slot_to_workspace\` 解压到 \`server\`；槽位中的 \`.mrpack\` 必须用 \`inspect_mrpack_server_slot\` + \`deploy_mrpack_server_from_server_slot\`，禁止当 ZIP 解压。不要解压到根目录，不要把 \`mods\`、\`libraries\`、\`world\`、\`server.jar\` 等 Minecraft 服务端文件放在 MCDReforged 根目录。
-4. Forge 1.17+ 需要 installer 时，先安装 \`forge_server_setup\` 再调用 \`setup_forge_server\`。在已套用 reference 模板时，该工具会把 Forge 安装到 \`server/\`，把整合包内容提升到 \`server/\`，并在 \`server/\` 写入 eula/properties/jvm；禁止安装或提升到 MCDR 根目录。\`setup_forge_server\` 成功只表示 Forge 已安装，不表示部署完成。
-5. 布局硬门禁：解压与 Forge 安装后必须用 \`list_server_files\` 检查。若根目录出现 \`mods\`、\`libraries\`、\`world\`、\`run.sh\`/\`run.bat\`、\`eula.txt\`、\`server.properties\`、\`user_jvm_args.txt\`、\`server.jar\` 中任一项，视为布局失败，禁止把后续部署阶段标为 completed，必须先修复。
+4. Forge 1.17+ 需要 installer 时，先安装 \`forge_server_setup\` 再调用 \`setup_forge_server\`；NeoForge 使用 \`neoforge_server_setup\` 和 \`setup_neoforge_server\`。在已套用 reference 模板时，安装工具会把 Loader 安装到 \`server/\`，把整合包内容提升到 \`server/\`，并在 \`server/\` 写入 eula/properties/jvm；禁止安装或提升到 MCDR 根目录。安装工具成功只表示 Loader 已安装，不表示部署完成。
+5. 布局硬门禁：解压与 Forge/NeoForge 安装后必须用 \`list_server_files\` 检查。若根目录出现 \`mods\`、\`libraries\`、\`world\`、\`run.sh\`/\`run.bat\`、\`eula.txt\`、\`server.properties\`、\`user_jvm_args.txt\`、\`server.jar\` 中任一项，视为布局失败，禁止把后续部署阶段标为 completed，必须先修复。
 6. 直启验证成功后，必须调用 \`configure_builtin_python_environment\` 下载并配置工作区内置 Python 3.10、pip 与 MCDReforged；不要直接使用或要求系统 Python、venv 或 ensurepip。
 7. 启动后端不再区分“普通服务端启动”和“MCDReforged 启动”。\`serverType\` 只是展示/分类标签，不决定启动方式；Agent 必须通过 \`update_current_server_config\` 自行切换 \`startupCommand\`。直启验证时把 \`startupCommand\` 设置为调用 \`server/\` 内脚本的非交互命令，例如 Windows 下 \`cd /d server && call startserver.bat\`，Linux 下 \`cd server && sh run.sh\`；MCDReforged 验证时设置为 \`{python} -m mcdreforged\`。
 8. 编辑 MCDReforged 根目录 \`config.yml\`：\`working_directory\` 必须保持 \`server\`；\`start_command\` 必须是从 \`server/\` 工作目录可执行的非交互启动命令；\`handler\` 必须符合服务端核心/Loader（如 Forge 用 \`forge_handler\`，Fabric/Vanilla 通常用 \`vanilla_handler\`，Paper/Spigot/Bukkit 用对应 bukkit handler）。配置完成后调用 \`update_current_server_config\` 设置 \`startupCommand={python} -m mcdreforged\`，并可把 \`serverType=mcdreforged\` 作为标签。未完成内置 Python、config.yml 与 MCDR startupCommand 时，部署不算完成。

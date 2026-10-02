@@ -179,6 +179,20 @@ export interface ServerErrorDigest {
   prompt: string;
 }
 
+export interface AgentActivity {
+  kind: "reasoning" | "tool" | "retry";
+  status: "running" | "waiting_confirmation" | "completed" | "failed" | "cancelled";
+  title: string;
+  startedAt: string;
+  finishedAt?: string;
+  toolName?: string;
+  toolCallId?: string;
+  input?: string;
+  error?: string;
+  attempt?: number;
+  nextRetryAt?: string;
+}
+
 export interface AgentMessage {
   id: string;
   serverId: string;
@@ -186,6 +200,17 @@ export interface AgentMessage {
   content: string;
   status: AgentStatus | null;
   createdAt: string;
+  activity?: AgentActivity | null;
+  /** Global conversation only: instance whose console this turn handed off to. */
+  focusServerId?: string | null;
+}
+
+/** Handoff emitted when the dashboard agent routes a task to one instance. */
+export interface AgentFocusInstance {
+  serverId: string;
+  serverName: string;
+  task: string;
+  reason: string;
 }
 
 export interface AgentConfirmationRequest {
@@ -299,12 +324,16 @@ export interface AgentRetryState {
   message: string;
 }
 
+export type ModelApiType = "chat_completions" | "responses";
+
 export interface ModelConfig {
   id: string;
   displayName: string;
   baseUrl: string;
   modelName: string;
   apiKeyHint: string;
+  apiType: ModelApiType;
+  availableModels: string[];
   isDefault: boolean;
   contextSizeK: number;
 }

@@ -304,9 +304,10 @@ function parseCurseForgeManifest(value: unknown, slot: ServerSlotStatus): CurseF
   const loaders = Array.isArray(minecraftConfig.modLoaders)
     ? minecraftConfig.modLoaders.flatMap((loader) => {
       if (!loader || typeof loader !== "object" || Array.isArray(loader)) return [];
-      const id = (loader as Record<string, unknown>).id;
-      return typeof id === "string" && id.trim() ? [id.trim()] : [];
-    })
+      const record = loader as Record<string, unknown>;
+      const id = record.id;
+      return typeof id === "string" && id.trim() ? [{ id: id.trim(), primary: record.primary === true }] : [];
+    }).sort((left, right) => Number(right.primary) - Number(left.primary)).map((loader) => loader.id)
     : [];
   if (loaders.length === 0) throw new Error("CurseForge manifest.json 缺少 Loader 配置");
 

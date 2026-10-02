@@ -7,6 +7,7 @@ import type { MrpackFile, MrpackSlotInfo } from "../../services/fileService.js";
 import { fetch } from "undici";
 import { booleanInput, isAbortError, objectSchema, requireConfirmation, stringInput, stringProperty, type AgentTool, type AgentToolContext, type AgentToolInfo } from "../toolKit.js";
 import type { AgentDownloadProgress } from "../../types.js";
+import { resolveForgeFamilyInstaller } from "./forgeFamilyInstaller.js";
 
 export const deployMrpackServerToolInfo: AgentToolInfo = {
   name: "deploy_mrpack_server_from_server_slot",
@@ -22,7 +23,7 @@ export const inspectMrpackServerToolInfo: AgentToolInfo = {
   controllable: false
 };
 
-function loaderInfo(info: MrpackSlotInfo) {
+function loaderInfo(info: MrpackSlotInfo): { type: "vanilla" | "fabric" | "quilt" | "neoforge" | "forge"; version: string } {
   const dependencies = info.dependencies;
   const loader = Object.keys(dependencies).find((key) => ["fabric-loader", "quilt-loader", "neoforge", "forge"].includes(key.toLowerCase()));
   if (!loader) return { type: "vanilla" as const, version: "" };
@@ -69,22 +70,8 @@ async function resolveLoaderInstallerUrl(ctx: AgentToolContext, info: MrpackSlot
     const installerVersion = typeof first?.version === "string" ? first.version : "0.9.1";
     return `https://meta.quiltmc.org/v3/versions/loader/${minecraft}/${loaderVersion}/${encodeURIComponent(installerVersion)}/server/jar`;
   }
-  if (loader.type === "neoforge") {
-    return `https://maven.neoforged.net/releases/net/neoforged/neoforge/${loaderVersion}/neoforge-${loaderVersion}-installer.jar`;
-  }
-  if (loader.type === "forge") {
-    const coordinate = `${info.minecraftVersion}-${loader.version}`;
-    return `https://maven.minecraftforge.net/net/minecraftforge/forge/${encodeURIComponent(coordinate)}/forge-${encodeURIComponent(coordinate)}-installer.jar`;
-  }
-  return "";
-}
-
-function forgeArgsPath(info: MrpackSlotInfo, loader: ReturnType<typeof loaderInfo>) {
-  if (loader.type === "forge") {
-    return path.join("libraries", "net", "minecraftforge", "forge", `${info.minecraftVersion}-${loader.version}`, process.platform === "win32" ? "win_args.txt" : "unix_args.txt");
-  }
-  if (loader.type === "neoforge") {
-    return path.join("libraries", "net", "neoforged", "neoforge", loader.version, process.platform === "win32" ? "win_args.txt" : "unix_args.txt");
+  if (loader.type === "neoforge" || loader.type === "forge") {
+    return resolveForgeFamilyInstaller(loader.type, info.minecraftVersion, loader.version).installerUrl;
   }
   return "";
 }
@@ -96,7 +83,7 @@ async function downloadFile(ctx: AgentToolContext, url: string, destinationPath:
   };
   emit({ loadedBytes: 0, totalBytes: fileSize, percent: 0, status: "starting" });
   try {
-    const saved = await ctx.fileService.downloadVerifiedIntoServer(ctx.serverId, url, destinationPath, {
+    const saved = await ctx.fileService.downloadVerifiedIntoServer(ctx.getServerId(), url, destinationPath, {
       expectedHashes: hashes,
       expectedSize: fileSize,
       signal: ctx.signal,
@@ -147,7 +134,7 @@ async function downloadVanillaServer(ctx: AgentToolContext, info: MrpackSlotInfo
 }
 
 async function writeLoader(ctx: AgentToolContext, info: MrpackSlotInfo, loader: ReturnType<typeof loaderInfo>, javaPath: string, overwrite: boolean) {
-  const server = await ctx.serverService.requireServer(ctx.serverId);
+  const server = await ctx.serverService.requireServer(ctx.getServerId());
   if (loader.type === "vanilla") {
     const serverJar = path.join(server.directory, "server", "server.jar");
     const installedFiles = !overwrite && await pathExists(serverJar) ? [] : [await downloadVanillaServer(ctx, info)];
@@ -170,11 +157,12 @@ async function writeLoader(ctx: AgentToolContext, info: MrpackSlotInfo, loader: 
     return { type: loader.type, version: loader.version, startArgs: "nogui", installedFiles: [jarPath], installerUrl: loaderUrl };
   }
 
-  const installerPath = path.join("server", `${loader.type}-${info.minecraftVersion}-${loader.version}-installer.jar`);
+  const installerInfo = resolveForgeFamilyInstaller(loader.type, info.minecraftVersion, loader.version);
+  const installerPath = path.join("server", installerInfo.installerFileName);
   if (!overwrite && await pathExists(path.join(server.directory, installerPath))) {
     throw new Error(`Loader 安装器已存在，默认拒绝覆盖：${installerPath}`);
   }
-  const installer = await ctx.fileService.downloadIntoServer(ctx.serverId, loaderUrl, installerPath, {
+  const installer = await ctx.fileService.downloadIntoServer(ctx.getServerId(), loaderUrl, installerPath, {
     signal: ctx.signal,
     proxyUrl: ctx.downloadProxyUrl?.()
   });
@@ -182,7 +170,7 @@ async function writeLoader(ctx: AgentToolContext, info: MrpackSlotInfo, loader: 
   await mkdir(installRoot, { recursive: true });
   const installerAbsolute = path.join(server.directory, installerPath);
   const java = javaPath || "java";
-  const installFlag = loader.type === "forge" ? "-installServer" : "--installServer";
+  const installFlag = installerInfo.installFlag;
   const { spawn } = await import("node:child_process");
   await new Promise<void>((resolve, reject) => {
     const child = spawn(java, [
@@ -210,7 +198,7 @@ async function writeLoader(ctx: AgentToolContext, info: MrpackSlotInfo, loader: 
       code === 0 ? resolve() : reject(new Error(`${loader.type} installer 失败（${code ?? "unknown"}）：${output.slice(-2000)}`));
     });
   });
-  const argsPath = forgeArgsPath(info, loader).replaceAll("\\", "/");
+  const argsPath = installerInfo.argsPath;
   if (!(await pathExists(path.join(installRoot, argsPath)))) throw new Error(`${loader.type} installer 未生成预期启动参数文件：${argsPath}`);
   await writeFile(path.join(installRoot, "eula.txt"), "eula=true\n", "utf8");
   return { type: loader.type, version: loader.version, startArgs: `@${argsPath} nogui`, installedFiles: [installer, `server/${argsPath}`], installerUrl: loaderUrl };
@@ -242,12 +230,15 @@ export function createDeployMrpackServerTool(ctx: AgentToolContext): AgentTool {
       }
     },
     execute: async (input) => {
-      const info = await ctx.fileService.inspectMrpackServerSlot(ctx.serverId);
+      const info = await ctx.fileService.inspectMrpackServerSlot(ctx.getServerId());
       const includedFiles = info.files.filter(fileIsServerIncluded);
       const loader = loaderInfo(info);
+      if (loader.type === "forge" || loader.type === "neoforge") {
+        resolveForgeFamilyInstaller(loader.type, info.minecraftVersion, loader.version);
+      }
       const javaPath = stringInput(input, "javaPath");
       const overwrite = booleanInput(input, "overwrite");
-      const server = await ctx.serverService.requireServer(ctx.serverId);
+      const server = await ctx.serverService.requireServer(ctx.getServerId());
       const destinationPaths = includedFiles.map((file) => path.join("server", serverPath(safeFilePath(file))));
       const conflicts = (await Promise.all(destinationPaths.map(async (target) => await pathExists(path.join(server.directory, target)) ? target : null))).filter((target): target is string => Boolean(target));
       if (conflicts.length > 0 && !overwrite) throw new Error(`目标文件已存在，默认拒绝覆盖：${conflicts.slice(0, 10).join(", ")}`);
@@ -274,10 +265,10 @@ export function createDeployMrpackServerTool(ctx: AgentToolContext): AgentTool {
         }
         if (lastError) throw lastError;
       }
-      const overrides = await ctx.fileService.materializeMrpackOverrides(ctx.serverId, "server", overwrite);
+      const overrides = await ctx.fileService.materializeMrpackOverrides(ctx.getServerId(), "server", overwrite);
       const configuredLoader = await writeLoader(ctx, info, loader, javaPath || (await ctx.javaService.executableForInstalledVersion(ctx.javaService.recommendVersion(info.minecraftVersion))) || "java", overwrite);
       await writeFile(path.join(server.directory, "server", "eula.txt"), "eula=true\n", "utf8");
-      const updated = await ctx.serverService.updateServer(ctx.serverId, {
+      const updated = await ctx.serverService.updateServer(ctx.getServerId(), {
         javaPath: javaPath || null,
         javaVersion: ctx.javaService.recommendVersion(info.minecraftVersion),
         minMemory: "4G",
@@ -304,7 +295,7 @@ export function createInspectMrpackServerTool(ctx: AgentToolContext): AgentTool 
       }
     },
     execute: async () => {
-      const info = await ctx.fileService.inspectMrpackServerSlot(ctx.serverId);
+      const info = await ctx.fileService.inspectMrpackServerSlot(ctx.getServerId());
       return JSON.stringify({ ok: true, format: "mrpack", pack: summary(info), files: info.files.map((file) => ({ path: file.path, downloads: file.downloads.length, hashes: Object.keys(file.hashes), fileSize: file.fileSize, environment: file.env })) }, null, 2);
     }
   };

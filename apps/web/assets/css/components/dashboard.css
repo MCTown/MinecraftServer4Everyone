@@ -1,0 +1,186 @@
+/* Dashboard-only palette and typography; instance workspaces stay unchanged. */
+.dashboard-main {
+  --blue: #b5a8ca;
+  --blue-soft: rgba(169, 153, 194, 0.08);
+  --panel: #17191c;
+  --panel-soft: #25272b;
+  --line: #33363b;
+  --line-strong: #484a52;
+  --text: #e3e4e8;
+  --muted: #979ba5;
+  --muted-strong: #b3b3c0;
+  --green: #a0c4ad;
+  --green-soft: rgba(160, 196, 173, 0.08);
+  --red: #ed9696;
+  --red-soft: rgba(237, 150, 150, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-height: 0;
+  height: 100%;
+  padding: 36px clamp(24px, 3.5vw, 64px) 32px;
+  overflow-y: auto;
+  background: #141619;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+#__nuxt .dashboard-main, #__nuxt .dashboard-main * { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif !important; }
+#__nuxt .dashboard-main .instance-facts dd, #__nuxt .dashboard-main .dashboard-eyebrow { font-family: "IBM Plex Mono", Consolas, monospace !important; }
+.dashboard-main button:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+
+/* A restrained header, then instances and the conversation. */
+.dashboard-welcome { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.dashboard-eyebrow { display: flex; align-items: center; gap: 9px; margin: 0 0 12px; color: var(--muted); font-size: 10px; letter-spacing: .13em; }
+.dashboard-eyebrow-mark { width: 7px; height: 7px; background: var(--blue); box-shadow: 4px -4px 0 #a999c230; }
+.welcome-copy h1 { margin: 0; font-size: clamp(27px, 2.5vw, 36px); line-height: 1.25; font-weight: 600; letter-spacing: -.05em; }
+.dashboard-title-dot { color: var(--blue); margin-left: 3px; }
+.welcome-sub { margin: 10px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.dashboard-main .dashboard-create { flex: 0 0 auto; min-height: 40px; padding: 10px 15px; border-radius: 8px; border-color: #a999c255; background: var(--blue-soft); color: #d9d4e4; font-size: 12px; }
+.dashboard-main .dashboard-create:hover:not(:disabled) { background: #a999c220; border-color: var(--blue); color: #eee9f8; }
+
+/* Instances and the conversation share the first screen on desktop. */
+.dashboard-layout { display: grid; grid-template-columns: minmax(300px, .85fr) minmax(0, 1.25fr); gap: 24px; align-items: start; min-height: 0; }
+.dashboard-section { display: flex; flex-direction: column; min-width: 0; }
+.dashboard-section-head { display: flex; align-items: center; justify-content: space-between; min-height: 28px; margin: 0 0 14px; color: var(--muted); }
+.dashboard-section-head h2 { display: flex; align-items: center; gap: 9px; margin: 0; color: var(--text); font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
+.dashboard-count { display: inline-grid; min-width: 22px; height: 20px; padding: 0 5px; place-items: center; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); font-size: 10px; font-weight: 400; }
+.dashboard-filters { display: flex; gap: 5px; padding: 4px; margin-bottom: 16px; border: 1px solid var(--line); border-radius: 9px; background: #ffffff02; }
+.dashboard-main .dashboard-filters button { flex: 1; justify-content: center; min-height: 30px; padding: 6px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font-size: 11px; }
+.dashboard-main .dashboard-filters button:hover { color: var(--text); background: #ffffff04; }
+.dashboard-main .dashboard-filters button[aria-pressed="true"] { border-color: #a999c222; background: var(--blue-soft); color: #d9d4e4; }
+.dashboard-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 290px; padding: 30px 20px; border: 1px dashed var(--line-strong); border-radius: 12px; color: var(--muted); text-align: center; }
+.dashboard-empty-icon { display: grid; place-items: center; width: 60px; height: 60px; border-radius: 16px; background: var(--blue-soft); color: var(--blue); }
+.dashboard-empty h3 { margin: 4px 0 0; color: var(--muted-strong); font-size: 14px; font-weight: 500; }
+.dashboard-empty p { margin: 0; font-size: 12px; line-height: 1.6; }
+.dashboard-empty button { margin-top: 6px; font-size: 12px; }
+.dashboard-filter-empty { min-height: 240px; }
+.dashboard-loading { display: grid; gap: 12px; }
+.instance-skeleton { display: grid; gap: 15px; padding: 24px 20px; border: 1px solid var(--line); border-radius: 12px; }
+.instance-skeleton span { width: 70%; height: 12px; border-radius: 4px; background: #ffffff06; }
+.instance-skeleton span:nth-child(2) { width: 90%; }
+.instance-skeleton span:nth-child(3) { width: 40%; }
+
+.instance-grid { display: grid; gap: 12px; }
+.instance-card { display: flex; flex-direction: column; min-width: 0; padding: 18px 18px 10px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); transition: border-color 150ms ease, background 150ms ease; }
+.instance-card:hover { border-color: #484a52; background: #1c1e21; }
+.instance-card.tone-danger { border-color: color-mix(in srgb, var(--red) 35%, var(--line)); }
+.instance-card-head { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.instance-avatar { display: grid; flex: 0 0 auto; width: 40px; height: 40px; place-items: center; border: 1px solid #a999c222; border-radius: 10px; background: var(--blue-soft); color: var(--blue); }
+.instance-card.tone-ok .instance-avatar { border-color: #a0c4ad25; background: var(--green-soft); color: var(--green); }
+.instance-card.tone-danger .instance-avatar { border-color: #ed969625; background: var(--red-soft); color: var(--red); }
+.instance-card-title { display: grid; flex: 1; gap: 5px; min-width: 0; }
+.instance-card-title h3 { margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.instance-card-title p { margin: 0; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.instance-status { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+.instance-status .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.instance-status.tone-ok { color: var(--green); }
+.instance-status.tone-danger { color: var(--red); }
+.instance-status.tone-busy { color: var(--blue); }
+.instance-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0 14px; }
+.instance-facts > div { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.instance-facts dt { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+.instance-facts dd { overflow: hidden; margin: 0; color: var(--muted-strong); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.instance-card-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-top: 9px; border-top: 1px solid #ffffff06; }
+.dashboard-main .instance-card-actions button { min-height: 30px; font-size: 11px; border-radius: 6px; }
+.dashboard-main .instance-open { gap: 8px; padding: 5px 0; border-color: transparent; background: transparent; color: var(--muted-strong); }
+.dashboard-main .instance-open:hover { border-color: transparent; background: transparent; color: var(--blue); }
+.dashboard-main .instance-start { padding: 5px 9px; border-color: var(--line); background: #ffffff03; color: var(--muted-strong); }
+.dashboard-main .instance-start:hover:not(:disabled) { border-color: #a999c255; background: var(--blue-soft); color: var(--blue); }
+
+/* Keep the shared Agent fully functional, but visually part of the dashboard. */
+.dashboard-chat-section { position: sticky; top: 0; }
+.dashboard-chat-section .agent-card.single-agent-panel {
+  --agent-border: #33363b;
+  --agent-muted: #979ba5;
+  --agent-raised: #25272b;
+  display: flex;
+  flex-direction: column;
+  min-height: 490px;
+  height: clamp(490px, calc(100dvh - 270px), 900px);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #17191c;
+  box-shadow: 0 8px 32px #00000010;
+}
+.dashboard-chat-section .agent-panel-header { min-height: 64px; padding: 12px 16px; }
+.dashboard-chat-section .agent-panel-title > .agent-icon { color: var(--blue); }
+.dashboard-chat-section .agent-message-shell { display: flex; flex: 1; min-height: 0; }
+.dashboard-chat-section .agent-card .message-list { flex: 1; min-height: 0; }
+.dashboard-chat-section .agent-card .context-ring-core { background: #17191c; }
+.dashboard-chat-section .agent-card .agent-composer { background: #17191c; padding: 12px 16px 14px; }
+.dashboard-chat-section .agent-card .agent-composer-shell { border-color: #3b3d46; background: #202226; border-radius: 10px; }
+.dashboard-chat-section .agent-card .agent-composer-shell:focus-within { border-color: #777084; box-shadow: 0 0 0 3px #aca0c508; }
+.dashboard-chat-section .agent-card .agent-send-button { background: #d9d4e4; color: #282430; }
+.dashboard-chat-section .agent-card .agent-send-button:hover:not(:disabled) { background: #eee9f8; }
+.dashboard-chat-section .agent-card .agent-empty-state { justify-content: center; min-height: 100%; padding: 28px 20px; }
+.dashboard-chat-section .agent-empty-mark { width: 48px; height: 48px; border-radius: 14px; border-color: #a999c222; background: var(--blue-soft); color: var(--blue); }
+.dashboard-chat-section .agent-empty-state h3 { margin-top: 20px; font-size: 18px; }
+.dashboard-chat-section .agent-empty-state p { margin: 0; font-size: 12px; }
+.dashboard-chat-section .agent-turn-stream { padding: 22px 20px; }
+.dashboard-chat-section .agent-turn-stream:empty { display: none; }
+.dashboard-chat-section .agent-card .agent-auto-confirm input { accent-color: var(--blue); }
+
+/* AgentPanel 内的全局专用小部件 */
+.agent-panel-heading { display: grid; gap: 0.1rem; min-width: 0; }
+.agent-panel-subtitle { margin: 0; color: var(--muted); font-size: 0.68rem; }
+.agent-quick-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.agent-quick-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+.agent-quick-chip:hover:not(:disabled) { border-color: color-mix(in srgb, var(--blue) 45%, transparent); color: var(--blue); background: var(--blue-soft); }
+.agent-quick-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.agent-focus-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+  padding: 0.4rem 0.65rem;
+  border: 1px solid color-mix(in srgb, var(--cyan) 36%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+  color: var(--cyan);
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.agent-focus-chip:hover { background: color-mix(in srgb, var(--cyan) 22%, transparent); }
+
+@media (min-width: 1600px) {
+  .dashboard-layout { grid-template-columns: minmax(480px, 1fr) minmax(0, 1fr); }
+  .instance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 1050px) {
+  .dashboard-main { padding: 28px 24px; gap: 20px; }
+  .dashboard-layout { grid-template-columns: minmax(280px, .85fr) minmax(0, 1.2fr); gap: 18px; }
+  .dashboard-chat-section .agent-panel-title { gap: 7px; }
+  .dashboard-chat-section .agent-header-actions { gap: 0; }
+  .dashboard-chat-section .agent-panel-header { padding: 12px; }
+}
+@media (max-width: 900px) {
+  .dashboard-layout { grid-template-columns: 1fr; gap: 24px; }
+  .instance-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dashboard-chat-section { position: static; }
+  .dashboard-chat-section .agent-card.single-agent-panel { min-height: 490px; height: min(680px, 80dvh); }
+}
+@media (max-width: 600px) {
+  .dashboard-main { height: auto; min-height: 100%; padding: 24px 16px; }
+  .dashboard-welcome { gap: 12px; }
+  .dashboard-eyebrow { font-size: 9px; }
+  .welcome-sub { max-width: 20ch; font-size: 12px; }
+  .dashboard-main .dashboard-create { min-height: 36px; padding: 8px 10px; font-size: 11px; }
+  .instance-grid { grid-template-columns: 1fr; }
+  .dashboard-chat-section .agent-card .agent-composer { padding: 10px 12px 12px; }
+  .dashboard-chat-section .agent-turn-stream { padding: 20px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-main *, .dashboard-main *::before { transition: none !important; animation: none !important; }
+}

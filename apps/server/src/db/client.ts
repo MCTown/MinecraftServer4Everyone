@@ -47,6 +47,8 @@ export function initDatabase() {
       display_name TEXT NOT NULL,
       base_url TEXT NOT NULL,
       model_name TEXT NOT NULL,
+      api_type TEXT NOT NULL DEFAULT 'chat_completions',
+      available_models TEXT NOT NULL DEFAULT '[]',
       encrypted_api_key TEXT NOT NULL,
       api_key_hint TEXT NOT NULL,
       is_default INTEGER NOT NULL,
@@ -70,6 +72,18 @@ export function initDatabase() {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_agent_messages_server_created ON agent_messages(server_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS global_agent_messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      status TEXT,
+      activity TEXT,
+      focus_server_id TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_global_agent_messages_conversation ON global_agent_messages(conversation_id, created_at);
 
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
@@ -102,6 +116,17 @@ export function initDatabase() {
   const modelColumns = sqlite.prepare("PRAGMA table_info(model_configs)").all() as Array<{ name: string }>;
   if (!modelColumns.some((column) => column.name === "context_size_k")) {
     sqlite.exec("ALTER TABLE model_configs ADD COLUMN context_size_k INTEGER NOT NULL DEFAULT 120");
+  }
+  if (!modelColumns.some((column) => column.name === "api_type")) {
+    sqlite.exec("ALTER TABLE model_configs ADD COLUMN api_type TEXT NOT NULL DEFAULT 'chat_completions'");
+  }
+  if (!modelColumns.some((column) => column.name === "available_models")) {
+    sqlite.exec("ALTER TABLE model_configs ADD COLUMN available_models TEXT NOT NULL DEFAULT '[]'");
+  }
+
+  const messageColumns = sqlite.prepare("PRAGMA table_info(agent_messages)").all() as Array<{ name: string }>;
+  if (!messageColumns.some((column) => column.name === "activity")) {
+    sqlite.exec("ALTER TABLE agent_messages ADD COLUMN activity TEXT");
   }
 
   database = drizzle(sqlite, { schema });

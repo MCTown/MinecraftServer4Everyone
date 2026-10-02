@@ -26,12 +26,23 @@ export function registerAgentRoutes(app: FastifyInstance, services: RouteService
     const { id } = idParams.parse(request.params);
     const body = parseBody(z.object({ content: z.string().min(1), reasoningEffort: reasoningEffortSchema }), request.body);
     const response = await services.agentService.sendMessage(id, body.content, body.reasoningEffort);
-    return { response };
+    return { response, status: services.agentService.getStatus(id) };
   });
 
   app.get("/api/servers/:id/agent/confirmation", async (request) => {
     const { id } = idParams.parse(request.params);
     return { confirmation: services.agentService.getPendingConfirmation(id) };
+  });
+
+  app.get("/api/servers/:id/agent/model", async (request) => {
+    const { id } = idParams.parse(request.params);
+    return { modelName: services.agentService.getActiveModelName(id) };
+  });
+
+  app.post("/api/servers/:id/agent/model", async (request) => {
+    const { id } = idParams.parse(request.params);
+    const body = parseBody(z.object({ modelName: z.string().optional() }), request.body);
+    return services.agentService.setModelOverride(id, body.modelName);
   });
 
   app.get("/api/servers/:id/agent/server-slot", async (request) => {

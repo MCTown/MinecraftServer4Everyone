@@ -42,6 +42,8 @@ const emit = defineEmits<{
 }>();
 
 const { api } = useApi();
+const { isDark } = useTheme();
+watch(isDark, () => queueDraw());
 const viewport = ref<HTMLElement | null>(null);
 const canvas = ref<HTMLCanvasElement | null>(null);
 const camera = reactive({ x: 0, y: 0, scale: 4 });
@@ -619,7 +621,7 @@ function drawMap() {
   const { width, height, dpr } = canvasSize;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   context.clearRect(0, 0, width, height);
-  context.fillStyle = "#101416";
+  context.fillStyle = isDark.value ? "#101416" : "#f5f8f5";
   context.fillRect(0, 0, width, height);
 
   drawWorldGrid(context, width, height);
@@ -643,7 +645,7 @@ function drawWorldGrid(context: CanvasRenderingContext2D, width: number, height:
   context.beginPath();
   for (let x = startX; x < width; x += regionSize) { context.moveTo(x, 0); context.lineTo(x, height); }
   for (let y = startY; y < height; y += regionSize) { context.moveTo(0, y); context.lineTo(width, y); }
-  context.strokeStyle = "rgba(255,255,255,0.045)";
+  context.strokeStyle = isDark.value ? "rgba(255,255,255,0.045)" : "rgba(46,82,61,0.10)";
   context.lineWidth = 1;
   context.stroke();
 }
@@ -676,7 +678,7 @@ function drawRegion(context: CanvasRenderingContext2D, region: McaRegionFile) {
   if (selected) drawSelection(context, x, y);
   if (camera.scale >= 5) drawChunkGrid(context, x, y, size);
 
-  context.strokeStyle = selected ? "#c9f1fb" : failedHeaders.has(region.path) ? "rgba(219,102,86,0.85)" : "rgba(102,194,219,0.34)";
+  context.strokeStyle = selected ? (isDark.value ? "#c9f1fb" : "#347c94") : failedHeaders.has(region.path) ? "rgba(219,102,86,0.85)" : "rgba(102,194,219,0.34)";
   context.lineWidth = selected ? 2 : 1;
   context.strokeRect(x + 0.5, y + 0.5, Math.max(0, size - 1), Math.max(0, size - 1));
 
@@ -684,9 +686,9 @@ function drawRegion(context: CanvasRenderingContext2D, region: McaRegionFile) {
     const label = `${region.regionX},${region.regionZ}`;
     context.font = "11px 'IBM Plex Mono', monospace";
     const labelWidth = context.measureText(label).width + 10;
-    context.fillStyle = "rgba(16,20,22,0.82)";
+    context.fillStyle = isDark.value ? "rgba(16,20,22,0.82)" : "rgba(255,255,255,0.88)";
     context.fillRect(x + 5, y + 5, labelWidth, 20);
-    context.fillStyle = selected ? "#c9f1fb" : "#aebabe";
+    context.fillStyle = isDark.value ? (selected ? "#c9f1fb" : "#aebabe") : (selected ? "#347c94" : "#526759");
     context.fillText(label, x + 10, y + 19);
   }
 }
@@ -712,7 +714,7 @@ function drawSelection(context: CanvasRenderingContext2D, x: number, y: number) 
     const maxX = Math.max(props.rectangle.minX, props.rectangle.maxX);
     const maxZ = Math.max(props.rectangle.minZ, props.rectangle.maxZ);
     context.fillStyle = "rgba(240,201,124,0.22)";
-    context.strokeStyle = "#f0c97c";
+    context.strokeStyle = isDark.value ? "#f0c97c" : "#9d712c";
     context.lineWidth = 2;
     context.fillRect(x + minX * camera.scale, y + minZ * camera.scale, (maxX - minX + 1) * camera.scale, (maxZ - minZ + 1) * camera.scale);
     context.strokeRect(x + minX * camera.scale, y + minZ * camera.scale, (maxX - minX + 1) * camera.scale, (maxZ - minZ + 1) * camera.scale);
@@ -729,7 +731,7 @@ function drawSelection(context: CanvasRenderingContext2D, x: number, y: number) 
 
   if (props.selectedChunkKey) {
     const [localX = 0, localZ = 0] = props.selectedChunkKey.split(":").map(Number);
-    context.strokeStyle = "#f5fbfd";
+    context.strokeStyle = isDark.value ? "#f5fbfd" : "#245b74";
     context.lineWidth = 2;
     context.strokeRect(x + localX * camera.scale + 1, y + localZ * camera.scale + 1, Math.max(1, camera.scale - 2), Math.max(1, camera.scale - 2));
   }
@@ -1468,10 +1470,10 @@ function threeHover(event: PointerEvent) {
       </label>
       <div class="map-zoom-controls" aria-label="地图缩放">
         <button type="button" :class="{ active: is3d }" title="切换 3D 高度场视图" :aria-pressed="is3d" @click="toggle3d">3D</button>
-        <button type="button" title="缩小" aria-label="缩小地图" @click="is3d ? threeDolly(1 / 1.35) : zoomBy(1 / 1.35)">-</button>
+        <button type="button" title="缩小" aria-label="缩小地图" @click="is3d ? threeDolly(1 / 1.35) : zoomBy(1 / 1.35)"><AppIcon name="minus" /></button>
         <output aria-label="当前缩放比例">{{ is3d ? "3D" : zoomPercent }}</output>
-        <button type="button" title="放大" aria-label="放大地图" @click="is3d ? threeDolly(1.35) : zoomBy(1.35)">+</button>
-        <button type="button" title="显示全部区域" @click="is3d ? threeFit() : fitRegions()">适配</button>
+        <button type="button" title="放大" aria-label="放大地图" @click="is3d ? threeDolly(1.35) : zoomBy(1.35)"><AppIcon name="plus" /></button>
+        <button type="button" title="显示全部区域" aria-label="显示全部区域" @click="is3d ? threeFit() : fitRegions()"><AppIcon name="expand" /></button>
       </div>
     </div>
 

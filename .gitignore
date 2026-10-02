@@ -5,8 +5,7 @@ dist/
 .data/
 workspace/
 !apps/web/components/workspace/
-apps/web/components/workspace/*
-!apps/web/components/workspace/DeploymentProgressPanel.vue
+!apps/web/components/workspace/*.vue
 .idea/
 test-results/
 *.swp
@@ -17,3 +16,7 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.runtime/
+.openchamber/
+.serena/
+.tmp/

@@ -48,6 +48,10 @@
 .settings-field-wide { grid-column: 1 / -1; }
 .mono-input, .settings-prompt-preview { font-family: "IBM Plex Mono", "PingFang SC", "Microsoft YaHei", monospace; }
 .settings-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.5rem; flex-wrap: wrap; margin-top: auto; padding-top: 0.2rem; }
+.model-chip-row { display: flex; flex-wrap: wrap; gap: 0.4rem; max-width: 50rem; max-height: 9rem; overflow-y: auto; margin-top: 0.7rem; padding: 0.1rem; }
+.model-chip { padding: 0.28rem 0.6rem; border: 1px solid rgba(138, 130, 120, 0.28); border-radius: 999px; background: rgba(255, 255, 255, 0.03); color: var(--muted-strong); font-size: 0.7rem; cursor: pointer; transition: border-color 150ms ease, background 150ms ease, color 150ms ease; }
+.model-chip:hover { border-color: rgba(229, 169, 0, 0.5); color: var(--text, #e8e6e1); }
+.model-chip.active { border-color: rgba(229, 169, 0, 0.7); background: rgba(229, 169, 0, 0.12); color: #f0d79a; }
 
 .settings-capability-card { overflow: hidden; }
 .settings-empty { display: grid; place-items: center; flex: 1; min-height: 11rem; border: 1px dashed rgba(138, 130, 120, 0.28); border-radius: 0.6rem; background: rgba(255, 255, 255, 0.02); }

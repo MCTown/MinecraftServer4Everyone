@@ -1,8 +1,10 @@
 import type { AgentDownloadProgress } from "~/types/app";
 
-export type SettingsTab = "model" | "skills" | "tools" | "agent" | "java";
+export type SettingsTab = "overview" | "model" | "skills" | "tools" | "agent" | "java";
 
 export type StatusBubbleType = "idle" | "loading" | "success" | "error";
+
+export type DeploymentProgressState = "not_started" | "ready" | "running" | "waiting_confirmation" | "retrying" | "progress" | "completed" | "failed" | "cancelled";
 
 export interface StatusBubbleItem {
   id: number;
@@ -25,7 +27,7 @@ export interface UploadState {
 }
 
 export interface PendingAgentAttachment {
-  path: string;
+  uploadId: string;
   originalName: string;
 }
 

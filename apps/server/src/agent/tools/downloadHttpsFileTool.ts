@@ -41,7 +41,7 @@ export function createDownloadHttpsFileToServerTool(ctx: AgentToolContext): Agen
       emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: "starting" });
       const proxyUrl = ctx.downloadProxyUrl?.();
       try {
-        const savedPath = await ctx.fileService.downloadIntoServer(ctx.serverId, url, destinationPath, {
+        const savedPath = await ctx.fileService.downloadIntoServer(ctx.getServerId(), url, destinationPath, {
           signal: ctx.signal,
           proxyUrl,
           onProgress: (progress) => emitProgress({ ...progress, status: progress.percent >= 100 ? "completed" : "downloading" })
@@ -49,9 +49,9 @@ export function createDownloadHttpsFileToServerTool(ctx: AgentToolContext): Agen
         if (!extract) return `已下载到 ${savedPath}`;
         const lowerSavedPath = savedPath.toLowerCase();
         if (!lowerSavedPath.endsWith(".zip") && !lowerSavedPath.endsWith(".tar.gz") && !lowerSavedPath.endsWith(".tgz")) return `已下载到 ${savedPath}，但文件不是 zip/tar.gz/tgz，未解压。`;
-        const download = await ctx.fileService.resolveDownload(ctx.serverId, savedPath);
+        const download = await ctx.fileService.resolveDownload(ctx.getServerId(), savedPath);
         const extractPath = path.dirname(savedPath) === "." ? "." : path.dirname(savedPath);
-        await ctx.fileService.extractArchiveIntoServer(ctx.serverId, download.absolutePath, download.fileName, extractPath);
+        await ctx.fileService.extractArchiveIntoServer(ctx.getServerId(), download.absolutePath, download.fileName, extractPath);
         return `已下载 ${savedPath} 并解压到 ${extractPath}`;
       } catch (error) {
         emitProgress({

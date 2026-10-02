@@ -19,13 +19,21 @@ export const installableCapabilities = {
     name: "Forge 服务端安装能力",
     description: "运行当前服务端目录内的 Forge installer，生成 libraries 参数文件，并写入可启动配置。",
     tools: ["setup_forge_server"]
+  },
+  neoforge_server_setup: {
+    name: "NeoForge 服务端安装能力",
+    description: "运行当前服务端目录内的 NeoForge installer，生成 libraries 参数文件，并写入可启动配置；支持 Minecraft 1.20.1 的旧版 NeoForge 坐标。",
+    tools: ["setup_neoforge_server"]
   }
 } as const;
 
 export type AgentCapabilityId = keyof typeof installableCapabilities;
 
 export interface AgentToolContext {
-  serverId: string;
+  /** Resolved per tool call so the same bundle serves instance and global conversations. */
+  getServerId: () => string;
+  /** Session id for temporary uploads. Defaults to getServerId(); the global scope uses its own id. */
+  getUploadSessionId?: () => string;
   serverService: ServerService;
   fileService: FileService;
   processManager: ProcessManager;
@@ -47,6 +55,8 @@ export interface AgentToolContext {
   workflowProgress?: (progress: AgentWorkflowProgress) => void;
   serverSlotStatus?: (status: ServerSlotStatus) => void;
   consoleLog?: (text: string, stream?: ConsoleLogEntry["stream"]) => void;
+  /** Called when the global agent decides the task belongs to one instance. */
+  focusInstance?: (focus: { serverId: string; serverName: string; task: string; reason: string }) => void;
 }
 
 export interface AgentTool {

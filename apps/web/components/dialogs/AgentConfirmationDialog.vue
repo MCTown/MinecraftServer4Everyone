@@ -21,8 +21,8 @@ const emit = defineEmits<{
         <p class="message-content">{{ props.confirmation.description }}</p>
         <p class="muted">该操作会影响当前服务端目录以外的应用工作区、全局配置或数据库。确认后 Agent 才会继续执行。</p>
         <div class="row">
-          <button class="primary" @click="emit('resolve', true)">确认执行</button>
-          <button class="danger" @click="emit('resolve', false)">拒绝</button>
+          <button class="primary" @click="emit('resolve', true)"><AppIcon name="check" />确认执行</button>
+          <button class="danger" @click="emit('resolve', false)"><AppIcon name="close" />拒绝</button>
         </div>
       </section>
     </div>

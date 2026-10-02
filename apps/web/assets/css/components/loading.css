@@ -1,0 +1,30 @@
+/* Graphite placeholders reserve the content area without flashing empty states. */
+.async-placeholder { width: 100%; min-width: 0; padding: 18px; color: var(--muted); }
+.async-placeholder-label { display: flex; align-items: center; gap: 8px; min-height: 24px; font-size: 12px; }
+.async-placeholder-label > span { flex: 1; }
+.async-placeholder-label button { padding: 4px 10px; font-size: 12px; }
+.async-skeleton-row { display: flex; align-items: center; gap: 14px; min-height: 68px; margin-top: 12px; }
+.async-skeleton-row > div { display: grid; gap: 10px; flex: 1; min-width: 0; }
+.async-skeleton { display: block; background: rgba(190, 183, 211, 0.09); border-radius: 5px; animation: async-skeleton-pulse 1.7s ease-in-out infinite; }
+.async-skeleton-icon { width: 34px; height: 34px; flex: 0 0 auto; }
+.async-skeleton-title { width: 48%; height: 14px; }
+.async-skeleton-line { width: 85%; height: 10px; }
+.async-skeleton-line.short { width: 60%; }
+.async-conversation { min-height: 270px; }
+.async-conversation .async-skeleton-row { align-items: flex-start; min-height: 95px; }
+.async-conversation .async-skeleton-row:nth-child(2) { width: 65%; margin-left: auto; }
+.async-conversation .async-skeleton-row:nth-child(2) .async-skeleton-icon { display: none; }
+.async-form { min-height: 380px; }
+.async-form .async-skeleton-icon, .async-editor .async-skeleton-icon { display: none; }
+.async-form .async-skeleton-line { width: 100%; height: 38px; }
+.async-editor { min-height: 360px; }
+.async-editor .async-skeleton-row { min-height: 50px; margin-top: 16px; }
+.async-compact { padding: 8px 0; }
+.async-failed { min-height: 80px; }
+.rail-loading { display: grid; gap: 0.45rem; }
+.command-rail .rail-skeleton { width: var(--rail-control-size); height: var(--rail-control-size); }
+@keyframes async-skeleton-pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+@media (max-width: 820px) { .rail-loading { display: flex; flex: 0 0 auto; } }
+@media (prefers-reduced-motion: reduce) {
+  .async-skeleton, .async-placeholder .app-icon-spinning { animation: none; }
+}

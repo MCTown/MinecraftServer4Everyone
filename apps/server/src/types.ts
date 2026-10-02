@@ -277,11 +277,27 @@ export interface AgentRetryEvent {
   message: string;
 }
 
+export interface AgentActivity {
+  kind: "reasoning" | "tool" | "retry";
+  status: "running" | "waiting_confirmation" | "completed" | "failed" | "cancelled";
+  title: string;
+  startedAt: string;
+  finishedAt?: string;
+  toolName?: string;
+  toolCallId?: string;
+  input?: string;
+  error?: string;
+  attempt?: number;
+  nextRetryAt?: string;
+}
+
 export interface AgentEvent {
-  type: "status" | "message" | "message_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared" | "tool_config_required";
+  type: "status" | "message" | "message_delta" | "activity" | "activity_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared" | "tool_config_required" | "focus_instance" | "model";
   status?: AgentStatus;
   content?: string;
   messageId?: string;
+  activity?: AgentActivity;
+  createdAt?: string;
   retry?: AgentRetryEvent;
   download?: AgentDownloadProgress;
   workflow?: AgentWorkflowProgress;
@@ -290,8 +306,35 @@ export interface AgentEvent {
   toolConfigRequired?: AgentToolConfigRequired;
   confirmationId?: string;
   approved?: boolean;
+  focus?: AgentFocusInstance;
+  /** Active model name for this conversation (per-scope override or default). */
+  modelName?: string | null;
 }
 
+/**
+ * Global-agent handoff: the dashboard agent points the UI at one instance and
+ * carries a task summary over, so the instance agent can continue the work.
+ */
+export interface AgentFocusInstance {
+  serverId: string;
+  serverName: string;
+  task: string;
+  reason: string;
+}
+
+export interface AgentMessageRecord {
+  id: string;
+  serverId: string;
+  role: AgentRole;
+  content: string;
+  status: AgentStatus | null;
+  createdAt: string;
+  activity?: AgentActivity | null;
+}
+
+export interface GlobalAgentMessage extends AgentMessageRecord {
+  focusServerId: string | null;
+}
 export interface AgentConfirmationRequest {
   id: string;
   serverId: string;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { UploadProgress } from "~/composables/useApi";
+import type { AgentActivity } from "~/types/app";
 import AgentConfirmationDialog from "~/components/dialogs/AgentConfirmationDialog.vue";
 import CreateServerDialog from "~/components/dialogs/CreateServerDialog.vue";
 import DeleteServerDialog from "~/components/dialogs/DeleteServerDialog.vue";
@@ -14,16 +15,17 @@ import TextFileEditorDialog from "~/components/dialogs/TextFileEditorDialog.vue"
 import WorkspaceSettingsPanel from "~/components/settings/WorkspaceSettingsPanel.vue";
 import AgentPanel from "~/components/workspace/AgentPanel.vue";
 import ConsolePanel from "~/components/workspace/ConsolePanel.vue";
+import DashboardView from "~/components/dashboard/DashboardView.vue";
 import DeploymentProgressPanel from "~/components/workspace/DeploymentProgressPanel.vue";
 import EmptyWorkspaceLanding from "~/components/workspace/EmptyWorkspaceLanding.vue";
 import InstanceTopbar from "~/components/workspace/InstanceTopbar.vue";
 import ServerSidebar from "~/components/workspace/ServerSidebar.vue";
-import type { AgentConfirmationRequest, AgentContextUsage, AgentDownloadProgress, AgentMessage, AgentRetryState, AgentSettings, AgentStatus, AgentToolConfigRequired, AgentToolConfigRequirement, AgentToolRecord, AgentToolSettings, AgentWorkflowProgress, AgentWorkflowStepStatus, ConsoleLogEntry, FileEntry, JavaDownloadSource, JavaDownloadSourceOption, JavaInstall, JavaInstallTask, JavaInstallTaskStatus, JavaManagementState, JavaVersionRecord, ModelConfig, ProxyTestResult, ServerErrorDigest, ServerErrorState, ServerRecord, ServerSlotStatus, SkillRecord, ToolConfigKey } from "~/types/app";
+import type { AgentConfirmationRequest, AgentContextUsage, AgentDownloadProgress, AgentMessage, AgentRetryState, AgentSettings, AgentStatus, AgentToolConfigRequired, AgentToolConfigRequirement, AgentToolRecord, AgentToolSettings, AgentWorkflowProgress, ConsoleLogEntry, FileEntry, JavaDownloadSource, JavaDownloadSourceOption, JavaInstall, JavaInstallTask, JavaInstallTaskStatus, JavaManagementState, JavaVersionRecord, ModelApiType, ModelConfig, ProxyTestResult, ServerErrorDigest, ServerErrorState, ServerRecord, ServerSlotStatus, SkillRecord, ToolConfigKey } from "~/types/app";
 import { createIncrementalConsoleRenderer } from "~/utils/consoleRendering";
 import type { RenderedConsoleLogEntry } from "~/utils/consoleRendering";
 import { formatBytes, formatMemoryConfig, formatMemoryMb, parseMemoryToMb } from "~/utils/formatters";
 import { useStatusBubbles } from "~/composables/useStatusBubbles";
-import type { PendingAgentAttachment, ServerConfigForm, SettingsNavItem, SettingsTab, StatusBubbleItem, StatusBubbleType, UploadState } from "~/types/ui";
+import type { DeploymentProgressState, PendingAgentAttachment, ServerConfigForm, SettingsNavItem, SettingsTab, StatusBubbleItem, StatusBubbleType, UploadState } from "~/types/ui";
 
 definePageMeta({ middleware: "auth" });
 
@@ -32,10 +34,29 @@ const runtime = useRuntimeConfig();
 const clock = useClock();
 const router = useRouter();
 
+const globalAgent = useGlobalAgent();
+watch(globalAgent.activeModel, (value) => { dashboardActiveModel.value = value; });
+const dashboardOpen = ref(true);
+const dashboardInput = ref("");
+const dashboardAgentUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
+const dashboardAttachments = ref<PendingAgentAttachment[]>([]);
+const dashboardReasoningEffort = ref<"minimal" | "low" | "medium" | "high">("high");
+const dashboardScrollToBottom = ref(false);
+
 const servers = ref<ServerRecord[]>([]);
-const serversLoaded = ref(false);
+const serverListLoad = useResourceLoadState();
+const serversLoaded = serverListLoad.loaded;
+const consoleLoad = useResourceLoadState();
+const historyLoad = useResourceLoadState();
+const contextLoad = useResourceLoadState();
+const settingsLoad = useResourceLoadState();
+const javaLoad = useResourceLoadState();
+const fileLoad = useResourceLoadState();
+const textLoad = useResourceLoadState(false);
+const fileDataPath = ref("");
 const selectedServerId = ref("");
 const logs = ref<ConsoleLogEntry[]>([]);
+const consoleRefreshing = ref(false);
 const serverErrorStates = ref<Record<string, ServerErrorState>>({});
 const errorAnalysisSending = ref(false);
 const files = ref<FileEntry[]>([]);
@@ -73,24 +94,26 @@ const agentReasoningEffort = ref<"minimal" | "low" | "medium" | "high">("high");
 const agentStatus = ref<AgentStatus>("idle");
 const showAgentScrollToBottom = ref(false);
 const settingsOpen = ref(false);
-const settingsTab = ref<SettingsTab>("model");
+const settingsTab = ref<SettingsTab>("overview");
 const settingsNavItems: SettingsNavItem[] = [
-  { id: "model", label: "模型配置", desc: "Base URL / 模型 / 上下文" },
-  { id: "skills", label: "Skills", desc: "Agent 技能与开关" },
-  { id: "tools", label: "Tools", desc: "Agent 工具与 API Key" },
-  { id: "agent", label: "Agent 设置", desc: "内存 / 代理 / Prompt" },
-  { id: "java", label: "JAVA 管理", desc: "安装与版本管理" }
+  { id: "overview", label: "设置总览", desc: "工作空间配置概况" },
+  { id: "model", label: "模型接入", desc: "连接你的 AI 模型" },
+  { id: "skills", label: "技能管理", desc: "Agent 工作流与能力" },
+  { id: "tools", label: "工具与凭据", desc: "工具目录与平台密钥" },
+  { id: "agent", label: "Agent 行为", desc: "执行偏好与网络设置" },
+  { id: "java", label: "Java 运行时", desc: "受管版本与安装任务" }
 ];
 const loggingOut = ref(false);
 const instanceMenuOpen = ref(false);
 const restoreInstanceMenuFocus = ref(false);
 const pendingInstanceMenuAction = ref<(() => void) | null>(null);
 const serverSidebar = ref<InstanceType<typeof ServerSidebar> | null>(null);
+const dashboardView = ref<InstanceType<typeof DashboardView> | null>(null);
 const instanceTopbar = ref<InstanceType<typeof InstanceTopbar> | null>(null);
 const fileManagerDialog = ref<InstanceType<typeof FileManagerDialog> | null>(null);
 const agentPanel = ref<InstanceType<typeof AgentPanel> | null>(null);
 const consolePanel = ref<InstanceType<typeof ConsolePanel> | null>(null);
-const deploymentProgressDismissed = ref(false);
+const deploymentProgressDismissed = ref(true);
 const fileDialogOpen = ref(false);
 const configDialogOpen = ref(false);
 const mapEditorDialogOpen = ref(false);
@@ -105,9 +128,9 @@ const newServerName = ref("我的 Minecraft 服务端");
 const selectedFilePaths = ref<string[]>([]);
 const fileSelectionAnchorPath = ref("");
 const fileDragSelecting = ref(false);
-const filesLoading = ref(false);
+const filesLoading = fileLoad.loading;
 const fixedModelDisplayName = "OpenAI Compatible";
-const modelForm = reactive({ displayName: fixedModelDisplayName, baseUrl: "https://api.openai.com/v1", modelName: "gpt-4o-mini", apiKey: "", isDefault: true, contextSizeK: 120 });
+const modelForm = reactive<{ displayName: string; baseUrl: string; modelName: string; apiKey: string; apiType: ModelApiType; availableModels: string[]; isDefault: boolean; contextSizeK: number }>({ displayName: fixedModelDisplayName, baseUrl: "https://api.openai.com/v1", modelName: "gpt-4o-mini", apiKey: "", apiType: "chat_completions", availableModels: [], isDefault: true, contextSizeK: 120 });
 const agentContextUsage = ref<AgentContextUsage>({
   contextSizeK: 120,
   maxTokens: 120000,
@@ -118,25 +141,35 @@ const agentContextUsage = ref<AgentContextUsage>({
 });
 const modelSaving = ref(false);
 const modelTesting = ref(false);
+const modelListBusy = ref(false);
 const serverForm = reactive<ServerConfigForm>({ name: "", javaPath: "", javaVersion: "", minMemory: "1G", maxMemory: "2G", jarFile: "server.jar", startArgs: "nogui", startupCommand: "", minecraftVersion: "", modpackName: "", promptOverride: "", useGlobalPrompt: true });
 const javaVersionToInstall = ref("21");
 const javaDownloadSource = ref<JavaDownloadSource>("auto-cn");
 
-type DeploymentProgressState = "not_started" | "running" | "progress" | "completed" | "failed" | "cancelled";
-
 const pendingAgentAttachments = ref<PendingAgentAttachment[]>([]);
 const serverUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
 const serverSlotUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
+const serverSlotUploadServerId = ref("");
+const inactiveServerSlotUpload: UploadState = { active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false };
+const selectedServerSlotUpload = computed(() => serverSlotUploadServerId.value === selectedServerId.value ? serverSlotUpload : inactiveServerSlotUpload);
 const agentUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
 const agentDownloads = ref<AgentDownloadProgress[]>([]);
 const agentWorkflow = ref<AgentWorkflowProgress | null>(null);
 const serverSlot = ref<ServerSlotStatus | null>(null);
+const serverSlotLoading = ref(false);
+const serverSlotError = ref("");
 const agentRetry = ref<AgentRetryState | null>(null);
+const agentActiveModel = ref("");
+/// Active model override per conversation scope ("global" or a server id).
+const modelOverrideByScope = ref<Record<string, string>>({});
+const dashboardActiveModel = ref("");
 const agentRetryNowSending = ref(false);
 const { items: statusBubbles, clear: clearStatusBubbles, dismiss: dismissStatusBubble, has: hasStatusBubble, show: showStatusBubble, upsert: upsertStatusBubble } = useStatusBubbles();
 
 let consoleSocket: WebSocket | undefined;
 let agentSocket: WebSocket | undefined;
+let agentMessageRevision = 0;
+let selectionGeneration = 0;
 let javaPollTimer: ReturnType<typeof setInterval> | undefined;
 let socketReconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let agentRetryClockTimer: ReturnType<typeof setInterval> | undefined;
@@ -173,6 +206,15 @@ const savedApiKeyHint = computed(() => models.value[0]?.apiKeyHint || "");
 const apiKeyPlaceholder = computed(() => savedApiKeyHint.value && savedApiKeyHint.value !== "未配置" ? savedApiKeyHint.value : "API Key（只覆盖，不回显）");
 const hasUnsavedApiKey = computed(() => modelForm.apiKey.length > 0);
 const modelBusy = computed(() => modelSaving.value || modelTesting.value);
+/** Model ids the user can switch to; falls back to the currently configured model. */
+const availableModelOptions = computed(() => {
+  const list = models.value[0]?.availableModels ?? modelForm.availableModels;
+  const current = models.value[0]?.modelName ?? modelForm.modelName;
+  const merged = new Set<string>(list);
+  if (current) merged.add(current);
+  return [...merged];
+});
+const instanceModelOptions = computed(() => availableModelOptions.value);
 const statusClass = computed(() => selectedServer.value ? `status-${selectedServer.value.status}` : "");
 const serverStatusText = computed(() => selectedServer.value ? statusText(selectedServer.value.status) : "未选择");
 const runningServerCount = computed(() => servers.value.filter((server) => server.status === "running").length);
@@ -248,12 +290,13 @@ const deploymentWorkflow = computed<AgentWorkflowProgress | null>(() => {
   if (!workflow) return null;
 
   const failedRun = agentStatus.value === "failed" || agentStatus.value === "cancelled";
-  if (!failedRun || workflow.status === "failed") return workflow;
+  const completed = workflow.steps.length > 0 && workflow.steps.every((step) => step.status === "completed");
+  if (!failedRun || workflow.status === "failed" || completed) return workflow;
 
   const fallbackStep = workflow.steps.find((step) => step.status === "running")
-    ?? workflow.steps.find((step) => step.status !== "completed")
-    ?? workflow.steps[workflow.steps.length - 1];
-  const failedStepId = workflow.currentStepId || fallbackStep?.id || "";
+    ?? workflow.steps.find((step) => step.id === workflow.currentStepId && step.status !== "completed")
+    ?? workflow.steps.find((step) => step.status !== "completed");
+  const failedStepId = fallbackStep?.id || "";
   const failedDetail = agentStatus.value === "cancelled" ? "任务已中断" : "任务执行失败";
 
   return {
@@ -269,26 +312,16 @@ const showDeploymentProgressCard = computed(() => Boolean(selectedServer.value))
 const deploymentProgressState = computed<DeploymentProgressState>(() => {
   const workflow = deploymentWorkflow.value;
   const workflowCompleted = workflow
-    && workflow.overallProgress >= 100
     && workflow.steps.length > 0
     && workflow.steps.every((step) => step.status === "completed");
-  if (!workflow) return serverSlot.value?.occupied ? "completed" : "not_started";
-  if (workflowCompleted) return "completed";
+  if (!workflow) return serverSlot.value?.occupied ? "ready" : "not_started";
   if (workflow.status === "failed") return agentStatus.value === "cancelled" ? "cancelled" : "failed";
+  if (workflowCompleted) return "completed";
+  if (agentStatus.value === "waiting_confirmation") return "waiting_confirmation";
+  if (agentStatus.value === "retrying") return "retrying";
   if (agentBusy.value) return "running";
   return "progress";
 });
-const deploymentProgressLabel = computed(() => {
-  if (deploymentProgressState.value === "not_started") return "未开始";
-  if (deploymentProgressState.value === "running") return "部署执行中";
-  if (deploymentProgressState.value === "completed") return "部署完成";
-  if (deploymentProgressState.value === "failed") return "部署失败";
-  if (deploymentProgressState.value === "cancelled") return "部署已中断";
-  return "部署进度";
-});
-const deploymentProgressCardStatus = computed(() => deploymentWorkflow.value?.status ?? "completed");
-const deploymentProgressPercent = computed(() => deploymentWorkflow.value?.overallProgress ?? (serverSlot.value?.occupied ? 100 : 0));
-const deploymentProgressDefaultDismissed = computed(() => deploymentProgressState.value === "not_started" || deploymentProgressState.value === "completed");
 const deleteConfirmMatches = computed(() => deleteDialog.server ? deleteDialog.confirmName.trim() === deleteDialog.server.name : false);
 const deleteServerBlocked = computed(() => deleteDialog.server ? !["stopped", "crashed"].includes(deleteDialog.server.status) : true);
 const renderedConsoleLogs = computed<RenderedConsoleLogEntry[]>(() => renderConsoleLogs(logs.value));
@@ -346,6 +379,7 @@ function showProviderKeyStatus(type: "loading" | "success" | "error", message: s
 
 function openSettings(tab?: SettingsTab) {
   if (tab) settingsTab.value = tab;
+  dashboardOpen.value = false;
   settingsOpen.value = true;
 }
 
@@ -360,7 +394,7 @@ function openProviderKeyDialog(requirement?: AgentToolConfigRequirement | AgentT
     };
   }
   providerKeyDialogOpen.value = true;
-  openSettings("agent");
+  openSettings(settingsOpen.value ? undefined : "tools");
 }
 
 function openProxyTestDialog() {
@@ -437,6 +471,10 @@ function openConfigDialog() {
   void loadJavaState().catch(() => undefined);
 }
 
+async function retryServerConfig() {
+  await Promise.allSettled([loadSettings(), loadJavaState()]);
+}
+
 function openMapEditorDialog() {
   restoreMapEditorFocus.value = false;
   mapEditorDialogOpen.value = true;
@@ -476,6 +514,7 @@ function handleInstanceMenuAfterLeave() {
 
 async function selectServerWithFeedback(id: string) {
   try {
+    dashboardOpen.value = false;
     await selectServer(id);
   } catch (error) {
     showStatusBubble("error", `切换实例失败：${getErrorMessage(error)}`, 6200);
@@ -500,6 +539,8 @@ function openDeleteServerFromMenu(server: ServerRecord) {
 function toggleWorkspaceSettings() {
   if (settingsOpen.value) {
     settingsOpen.value = false;
+    // Closing settings returns to the dashboard (the login landing view).
+    if (!selectedServerId.value) dashboardOpen.value = true;
     return;
   }
   openSettings();
@@ -552,9 +593,18 @@ watch(settingsOpen, (open) => {
   if (open) void loadJavaState().catch(() => undefined);
 });
 
-watch(deploymentProgressDefaultDismissed, (dismissed) => {
-  deploymentProgressDismissed.value = dismissed;
-}, { immediate: true });
+watch(deploymentWorkflow, (workflow, previous) => {
+  // Reveal the first workflow update; subsequent updates respect the user's choice.
+  if (workflow && !previous) deploymentProgressDismissed.value = false;
+});
+
+function openDeploymentAgent() {
+  deploymentProgressDismissed.value = true;
+  void nextTick(() => {
+    agentPanel.value?.focusPanel();
+    agentPanel.value?.focusInput();
+  });
+}
 
 async function safe<T>(action: () => Promise<T>, serverId = selectedServerId.value) {
   try {
@@ -630,6 +680,8 @@ function resetHistoryScrollPositions() {
 }
 
 function appendAgentMessage(role: AgentMessage["role"], content: string, status: AgentStatus | null = null, serverId = selectedServerId.value) {
+  if (serverId !== selectedServerId.value) return;
+  agentMessageRevision += 1;
   const shouldScroll = shouldStickAgentToBottom(role);
   agentMessages.value.push({ id: localMessageId(), serverId, role, content, status, createdAt: new Date().toISOString() });
   if (shouldScroll) scrollAgentHistoryToBottom();
@@ -637,6 +689,8 @@ function appendAgentMessage(role: AgentMessage["role"], content: string, status:
 }
 
 function upsertAgentMessage(id: string, role: AgentMessage["role"], content: string, status: AgentStatus | null, serverId = selectedServerId.value) {
+  if (serverId !== selectedServerId.value) return;
+  agentMessageRevision += 1;
   const shouldScroll = shouldStickAgentToBottom(role);
   const existingIndex = agentMessages.value.findIndex((message) => message.id === id);
   if (existingIndex >= 0) {
@@ -657,6 +711,7 @@ function upsertAgentMessage(id: string, role: AgentMessage["role"], content: str
 
 function appendAgentMessageDelta(id: string, delta: string, serverId = selectedServerId.value) {
   if (!delta) return;
+  agentMessageRevision += 1;
   const shouldScroll = shouldStickAgentToBottom("agent");
   const existingIndex = agentMessages.value.findIndex((message) => message.id === id);
   if (existingIndex >= 0) {
@@ -670,6 +725,21 @@ function appendAgentMessageDelta(id: string, delta: string, serverId = selectedS
     }
   } else {
     agentMessages.value.push({ id, serverId, role: "agent", content: delta, status: "running", createdAt: new Date().toISOString() });
+  }
+  if (shouldScroll) scrollAgentHistoryToBottom();
+  else updateAgentScrollState();
+}
+
+function updateAgentActivity(id: string, content: string, activity: AgentActivity, createdAt: string | undefined, delta: boolean, serverId: string) {
+  const shouldScroll = shouldStickAgentToBottom();
+  agentMessageRevision += 1;
+  const existing = agentMessages.value.find((message) => message.id === id);
+  if (existing) {
+    existing.content = delta ? existing.content + content : content;
+    existing.activity = activity;
+    existing.status = activity.status;
+  } else {
+    agentMessages.value.push({ id, serverId, role: "system", content, activity, status: activity.status, createdAt: createdAt ?? activity.startedAt });
   }
   if (shouldScroll) scrollAgentHistoryToBottom();
   else updateAgentScrollState();
@@ -694,14 +764,26 @@ async function syncAfterSocketReconnect(serverId: string) {
 }
 
 async function loadServers() {
-  servers.value = await api<ServerRecord[]>("/api/servers");
-  serversLoaded.value = true;
-  if (!selectedServerId.value && servers.value[0]) selectedServerId.value = servers.value[0].id;
+  await serverListLoad.run(() => api<ServerRecord[]>("/api/servers"), (data) => {
+    servers.value = data;
+    if (!selectedServerId.value && data[0]) selectedServerId.value = data[0].id;
+  });
   await loadServerErrorStates();
 }
 
-async function selectServer(id: string) {
+async function selectServer(id: string, options: { open?: boolean } = {}) {
+  const selection = ++selectionGeneration;
   closeSockets();
+  consoleLoad.reset();
+  historyLoad.reset();
+  contextLoad.reset();
+  fileLoad.reset();
+  textLoad.reset();
+  logs.value = [];
+  files.value = [];
+  fileDataPath.value = "";
+  textEditor.open = false;
+  if (options.open !== false) dashboardOpen.value = false;
   selectedServerId.value = id;
   consoleCommand.value = "";
   currentPath.value = ".";
@@ -713,13 +795,184 @@ async function selectServer(id: string) {
   agentDownloads.value = [];
   agentWorkflow.value = null;
   serverSlot.value = null;
+  serverSlotError.value = "";
+  deploymentProgressDismissed.value = true;
   agentRetry.value = null;
   agentRetryNowSending.value = false;
+  agentActiveModel.value = modelOverrideByScope.value[id] ?? "";
   agentMessages.value = [];
   resetHistoryScrollPositions();
-  await Promise.all([loadServerDetail(), loadLogs(), loadFiles(), loadAgentMessages(), loadPendingConfirmation(), loadServerSlotStatus()]);
+  const results = await Promise.allSettled([loadServerDetail(), loadLogs(), loadFiles(), loadAgentMessages(), loadPendingConfirmation(), loadServerSlotStatus()]);
+  if (id !== selectedServerId.value || selection !== selectionGeneration) return;
   connectSockets();
+  const failed = results.find((result) => result.status === "rejected");
+  if (failed?.status === "rejected") throw failed.reason;
 }
+
+/**
+ * Global-agent handoff: the backend already queued the task for the instance
+ * agent, so here we only move the UI to that instance's console.
+ */
+async function openInstanceFromDashboard(serverId: string) {
+  if (!servers.value.some((server) => server.id === serverId)) {
+    try {
+      servers.value = await api<ServerRecord[]>("/api/servers");
+    } catch {
+      showStatusBubble("error", "无法读取实例列表", 4000);
+      return;
+    }
+  }
+  globalAgent.consumeFocus();
+  dashboardOpen.value = false;
+  await selectServerWithFeedback(serverId);
+  showStatusBubble("success", `已跳转到实例：${selectedServer.value?.name ?? serverId}`, 2600);
+}
+
+function openDashboard() {
+  dashboardOpen.value = true;
+  settingsOpen.value = false;
+}
+
+const dashboardContextRemainingPercent = computed(() => Math.max(0, Math.min(100, globalAgent.contextUsage.value.remainingPercent)));
+const dashboardContextRingStyle = computed(() => {
+  const remaining = dashboardContextRemainingPercent.value;
+  const color = remaining > 40 ? "var(--green)" : remaining > 15 ? "var(--blue)" : "#e57373";
+  return { background: `conic-gradient(${color} ${remaining * 3.6}deg, rgba(255, 255, 255, 0.12) 0deg)` };
+});
+const dashboardContextRemainingLabel = computed(() => {
+  const usage = globalAgent.contextUsage.value;
+  return [
+    `剩余 ${dashboardContextRemainingPercent.value}%`,
+    `已用 ${usage.usedTokens.toLocaleString()} tokens`,
+    `剩余 ${usage.remainingTokens.toLocaleString()} tokens`,
+    `上限 ${usage.maxTokens.toLocaleString()} tokens (${usage.contextSizeK}K)`
+  ].join("\n");
+});
+const showDashboardOutputLoading = computed(() => {
+  if (!globalAgent.busy.value) return false;
+  const messages = globalAgent.messages.value;
+  let lastUser = -1;
+  let lastOutput = -1;
+  messages.forEach((message, index) => {
+    if (message.role === "user") lastUser = index;
+    if (message.role === "agent" && message.content.trim()) lastOutput = index;
+  });
+  return lastOutput <= lastUser;
+});
+const dashboardOutputLoadingText = computed(() => {
+  if (globalAgent.status.value === "thinking") return "Agent 正在分析任务";
+  if (globalAgent.status.value === "waiting_confirmation") return "等待确认后继续输出";
+  return "Agent 正在执行。";
+});
+function dashboardRetryMessage() {
+  const retry = globalAgent.retry.value;
+  if (!retry) return "";
+  return `模型连接短暂波动，${Math.max(0, Math.ceil((new Date(retry.nextRetryAt).getTime() - Date.now()) / 1000))} 秒后自动重试（第 ${retry.attempt} 次）`;
+}
+
+function dashboardShouldStickToBottom(role?: AgentMessage["role"]) {
+  if (role === "user") return true;
+  const list = dashboardView.value?.getMessageList();
+  if (!list) return true;
+  return list.scrollHeight - list.scrollTop - list.clientHeight <= 72;
+}
+
+function scrollDashboardToBottom() {
+  if (!process.client) return;
+  void nextTick(() => requestAnimationFrame(() => {
+    const list = dashboardView.value?.getMessageList();
+    if (list) list.scrollTop = list.scrollHeight;
+  }));
+  dashboardScrollToBottom.value = false;
+}
+
+function updateDashboardScrollState() {
+  const list = dashboardView.value?.getMessageList();
+  dashboardScrollToBottom.value = Boolean(list && list.scrollHeight - list.scrollTop - list.clientHeight > 72);
+}
+
+async function sendDashboardMessage() {
+  if (globalAgent.historyLoad.initialLoading.value || !settingsLoad.loaded.value) return;
+  const text = dashboardInput.value.trim();
+  const attachments = [...dashboardAttachments.value];
+  if ((!text && attachments.length === 0) || globalAgent.busy.value) return;
+  const attachmentContent = formatAgentAttachmentMessage(attachments);
+  const content = [text, attachmentContent].filter(Boolean).join("\n\n");
+  const effort = dashboardReasoningEffort.value;
+  dashboardInput.value = "";
+  dashboardAttachments.value = [];
+  scrollDashboardToBottom();
+  await globalAgent.send(content, effort);
+}
+
+async function uploadDashboardAgentFile(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  beginUpload(dashboardAgentUpload, file);
+  try {
+    const result = await upload<{ id: string; originalName: string }>("/api/uploads/global", form, {
+      onProgress: (progress) => updateUploadProgress(dashboardAgentUpload, progress)
+    });
+    finishUpload(dashboardAgentUpload);
+    if (result?.id) dashboardAttachments.value.push({ uploadId: result.id, originalName: result.originalName || file.name });
+  } catch (error) {
+    failUpload(dashboardAgentUpload);
+    showStatusBubble("error", `上传失败：${getErrorMessage(error)}`, 6000);
+  } finally {
+    input.value = "";
+  }
+}
+
+function openDashboardUploadPicker() {
+  if (globalAgent.busy.value) {
+    showStatusBubble("error", "Agent 正在处理任务，请等待完成后再上传文件", 4200);
+    return;
+  }
+  dashboardView.value?.openUploadPicker();
+}
+
+function removeDashboardAttachment(uploadId: string) {
+  dashboardAttachments.value = dashboardAttachments.value.filter((attachment) => attachment.uploadId !== uploadId);
+}
+
+async function clearDashboardContext() {
+  if (globalAgent.busy.value) return;
+  const confirmed = confirm("确定清除全局 Agent 的对话记录吗？实例与本机文件不会被删除。");
+  if (!confirmed) return;
+  await globalAgent.clearContext();
+  dashboardAttachments.value = [];
+}
+
+const dashboardPlaceholder = computed(() => {
+  if (globalAgent.status.value === "waiting_confirmation") return "请先处理确认弹窗，Agent 会继续或停止当前任务";
+  if (globalAgent.status.value === "retrying") return "模型接口暂时异常，Agent 正在等待重试";
+  if (globalAgent.busy.value) return "Agent 正在处理当前任务，可以先整理下一条需求";
+  return "描述你想做的事：部署整合包、启动实例、排查崩溃…";
+});
+
+function openCreateFromDashboard() {
+  // The ghost card is labelled "用对话创建", so start a real agent conversation.
+  dashboardInput.value = "帮我创建一个新的 Minecraft 实例，用 1.20.1 的生存服";
+  void nextTick(() => sendDashboardMessage());
+}
+
+/**
+ * The global agent can create instances / change their state. Refresh the list
+ * after each run so the dashboard reflects what the agent just did.
+ */
+watch(() => globalAgent.busy.value, (busy, wasBusy) => {
+  if (busy || !wasBusy) return;
+  void loadServers().catch(() => undefined);
+});
+
+// Route the UI when the global agent hands a task to an instance.
+watch(() => globalAgent.focus.value, (focus) => {
+  if (!focus) return;
+  void openInstanceFromDashboard(focus.serverId);
+});
 
 async function loadServerDetail() {
   if (!selectedServerId.value) return;
@@ -802,6 +1055,7 @@ async function deleteServer() {
 }
 
 async function saveServerConfig() {
+  if (!settingsLoad.loaded.value || !javaLoad.loaded.value) return;
   if (!selectedServerId.value) return;
   const memory = memoryConfigValue(serverMemoryMb.value);
   await safe(() => api<ServerRecord>(`/api/servers/${selectedServerId.value}`, {
@@ -834,9 +1088,20 @@ async function serverAction(action: "start" | "stop" | "kill" | "restart") {
 
 async function loadLogs() {
   if (!selectedServerId.value) return;
-  logs.value = await api<ConsoleLogEntry[]>(`/api/servers/${selectedServerId.value}/logs?limit=500`);
+  const serverId = selectedServerId.value;
+  await consoleLoad.run(() => api<ConsoleLogEntry[]>(`/api/servers/${serverId}/logs?limit=500`), (data) => { logs.value = data; });
   scrollConsoleHistoryToBottom();
   await loadServerErrorState();
+}
+
+async function refreshConsoleLogs() {
+  if (consoleRefreshing.value) return;
+  consoleRefreshing.value = true;
+  try {
+    await safe(() => loadLogs());
+  } finally {
+    consoleRefreshing.value = false;
+  }
 }
 
 async function loadServerErrorStates() {
@@ -890,30 +1155,45 @@ async function analyzeConsoleErrors() {
 }
 
 async function sendCommand() {
-  if (!selectedServerId.value || !consoleCommand.value.trim()) return;
+  const serverId = selectedServerId.value;
+  if (!serverId || !consoleCommand.value.trim()) return;
   const command = consoleCommand.value.trim();
   consoleCommand.value = "";
-  const history = consoleCommandHistories.value[selectedServerId.value] ??= [];
+  const history = consoleCommandHistories.value[serverId] ??= [];
   if (history.at(-1) !== command) history.push(command);
   if (consoleSocket?.readyState === WebSocket.OPEN) {
-    consoleSocket.send(JSON.stringify({ type: "command", command }));
-  } else {
-    await safe(() => api(`/api/servers/${selectedServerId.value}/command`, { method: "POST", body: { command } }));
+    try {
+      consoleSocket.send(JSON.stringify({ type: "command", command }));
+      return;
+    } catch {
+      // The socket can transition to CLOSING between the readyState check and send().
+    }
+  }
+  try {
+    await api(`/api/servers/${serverId}/command`, { method: "POST", body: { command } });
+  } catch (error) {
+    if (serverId === selectedServerId.value) {
+      consoleCommand.value = command;
+      showStatusBubble("error", `发送指令失败：${getErrorMessage(error)}`, 6200);
+    }
   }
 }
 
 async function loadFiles() {
   if (!selectedServerId.value) return;
-  filesLoading.value = true;
-  try {
-    const nextFiles = await api<FileEntry[]>(`/api/servers/${selectedServerId.value}/files?path=${encodeURIComponent(currentPath.value)}`);
+  const serverId = selectedServerId.value;
+  const path = currentPath.value;
+  if (fileDataPath.value !== path) {
+    fileLoad.reset();
+    files.value = [];
+  }
+  await fileLoad.run(() => api<FileEntry[]>(`/api/servers/${serverId}/files?path=${encodeURIComponent(path)}`), (nextFiles) => {
     files.value = nextFiles;
+    fileDataPath.value = path;
     const visiblePaths = new Set(nextFiles.map((file) => file.path));
     selectedFilePaths.value = selectedFilePaths.value.filter((path) => visiblePaths.has(path));
     if (fileSelectionAnchorPath.value && !visiblePaths.has(fileSelectionAnchorPath.value)) fileSelectionAnchorPath.value = selectedFilePaths.value.at(-1) ?? "";
-  } finally {
-    filesLoading.value = false;
-  }
+  });
 }
 
 async function openFolder(path: string) {
@@ -1059,14 +1339,16 @@ function showFileProperties(file: FileEntry) {
 
 async function editFile(path: string) {
   if (!selectedServerId.value) return;
-  const result = await safe(() => api<{ content: string }>(`/api/servers/${selectedServerId.value}/files/text?path=${encodeURIComponent(path)}`));
+  const serverId = selectedServerId.value;
+  textLoad.reset();
   textEditor.path = path;
-  textEditor.content = result?.content ?? "";
+  textEditor.content = "";
   textEditor.open = true;
+  await textLoad.run(() => api<{ content: string }>(`/api/servers/${serverId}/files/text?path=${encodeURIComponent(path)}`), (result) => { textEditor.content = result.content; });
 }
 
 async function saveTextFile() {
-  if (!selectedServerId.value) return;
+  if (!selectedServerId.value || textLoad.loading.value || !textLoad.loaded.value) return;
   await safe(() => api(`/api/servers/${selectedServerId.value}/files/text`, { method: "PUT", body: { path: textEditor.path, content: textEditor.content } }));
   textEditor.open = false;
   await loadFiles();
@@ -1098,10 +1380,12 @@ async function uploadServerFile(event: Event) {
 async function uploadServerSlot(event: Event) {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
-  if (!file || !selectedServerId.value) return;
+  if (!file || !selectedServerId.value || serverSlotUpload.active) return;
   const serverId = selectedServerId.value;
   const form = new FormData();
   form.append("file", file);
+  serverSlotUploadServerId.value = serverId;
+  serverSlotError.value = "";
   beginUpload(serverSlotUpload, file);
   try {
     const result = await safe(() => upload<ServerSlotStatus>(`/api/servers/${serverId}/agent/server-slot/upload`, form, {
@@ -1111,7 +1395,7 @@ async function uploadServerSlot(event: Event) {
     if (serverId === selectedServerId.value && result) serverSlot.value = result;
   } catch (error) {
     failUpload(serverSlotUpload);
-    throw error;
+    if (serverId === selectedServerId.value) serverSlotError.value = `上传失败：${getErrorMessage(error)}`;
   } finally {
     input.value = "";
   }
@@ -1119,9 +1403,39 @@ async function uploadServerSlot(event: Event) {
 
 async function loadAgentMessages() {
   if (!selectedServerId.value) return;
-  agentMessages.value = await api<AgentMessage[]>(`/api/servers/${selectedServerId.value}/agent/messages`);
-  await loadAgentContextUsage();
-  scrollAgentHistoryToBottom();
+  const serverId = selectedServerId.value;
+  const revision = agentMessageRevision;
+  await Promise.all([
+    historyLoad.run(() => api<AgentMessage[]>(`/api/servers/${serverId}/agent/messages`), (messages) => {
+      if (serverId !== selectedServerId.value || revision !== agentMessageRevision) return;
+      const shouldScroll = shouldStickAgentToBottom();
+      agentMessages.value = messages;
+      if (shouldScroll) scrollAgentHistoryToBottom();
+    }),
+    loadAgentContextUsage()
+  ]);
+}
+
+/** Persist a per-conversation model choice and notify the backend. */
+async function setInstanceModel(modelName: string) {
+  const serverId = selectedServerId.value;
+  if (!serverId || !modelName) return;
+  modelOverrideByScope.value = { ...modelOverrideByScope.value, [serverId]: modelName };
+  agentActiveModel.value = modelName;
+  if (agentSocket?.readyState === WebSocket.OPEN) {
+    agentSocket.send(JSON.stringify({ type: "set-model", modelName }));
+  } else {
+    await api(`/api/servers/${serverId}/agent/model`, { method: "POST", body: { modelName } }).catch(() => undefined);
+  }
+  showStatusBubble("success", `本会话已切换模型：${modelName}`, 2400);
+}
+
+async function setGlobalModel(modelName: string) {
+  if (!modelName) return;
+  modelOverrideByScope.value = { ...modelOverrideByScope.value, global: modelName };
+  dashboardActiveModel.value = modelName;
+  await globalAgent.setModel(modelName);
+  showStatusBubble("success", `全局会话已切换模型：${modelName}`, 2400);
 }
 
 async function loadAgentContextUsage() {
@@ -1138,7 +1452,8 @@ async function loadAgentContextUsage() {
     return;
   }
   try {
-    agentContextUsage.value = await api<AgentContextUsage>(`/api/servers/${selectedServerId.value}/agent/context-usage`);
+    const serverId = selectedServerId.value;
+    await contextLoad.run(() => api<AgentContextUsage>(`/api/servers/${serverId}/agent/context-usage`), (data) => { agentContextUsage.value = data; });
   } catch {
     // keep previous estimate if endpoint is temporarily unavailable
   }
@@ -1146,16 +1461,31 @@ async function loadAgentContextUsage() {
 
 async function loadPendingConfirmation() {
   if (!selectedServerId.value) return;
-  const result = await api<{ confirmation: AgentConfirmationRequest | null }>(`/api/servers/${selectedServerId.value}/agent/confirmation`);
+  const serverId = selectedServerId.value;
+  const selection = selectionGeneration;
+  const result = await api<{ confirmation: AgentConfirmationRequest | null }>(`/api/servers/${serverId}/agent/confirmation`);
+  if (serverId !== selectedServerId.value || selection !== selectionGeneration) return;
   pendingConfirmation.value = result.confirmation;
 }
 
 async function loadServerSlotStatus() {
   if (!selectedServerId.value) return;
-  serverSlot.value = await api<ServerSlotStatus>(`/api/servers/${selectedServerId.value}/agent/server-slot`);
+  const serverId = selectedServerId.value;
+  const selection = selectionGeneration;
+  serverSlotLoading.value = true;
+  serverSlotError.value = "";
+  try {
+    const slot = await api<ServerSlotStatus>(`/api/servers/${serverId}/agent/server-slot`);
+    if (serverId === selectedServerId.value && selection === selectionGeneration) serverSlot.value = slot;
+  } catch (error) {
+    if (serverId === selectedServerId.value && selection === selectionGeneration) serverSlotError.value = `无法读取服务端包：${getErrorMessage(error)}`;
+  } finally {
+    if (serverId === selectedServerId.value && selection === selectionGeneration) serverSlotLoading.value = false;
+  }
 }
 
 async function sendAgentMessage() {
+  if (historyLoad.initialLoading.value || !settingsLoad.loaded.value) return;
   if (!selectedServerId.value || (!agentInput.value.trim() && pendingAgentAttachments.value.length === 0) || agentBusy.value) return;
   const serverId = selectedServerId.value;
   const textContent = agentInput.value.trim();
@@ -1173,14 +1503,17 @@ async function sendAgentMessage() {
     agentSocket.send(JSON.stringify({ type: "message", content, reasoningEffort }));
   } else {
     confirmationPoll = setInterval(() => {
-      if (serverId === selectedServerId.value) loadPendingConfirmation().catch(() => undefined);
+      if (serverId === selectedServerId.value) {
+        loadPendingConfirmation().catch(() => undefined);
+        loadAgentMessages().catch(() => undefined);
+      }
     }, 1000);
 
     try {
-      const result = await safe(() => api<{ response: string }>(`/api/servers/${serverId}/agent/messages`, { method: "POST", body: { content, reasoningEffort } }));
+      const result = await safe(() => api<{ response: string; status: AgentStatus }>(`/api/servers/${serverId}/agent/messages`, { method: "POST", body: { content, reasoningEffort } }), serverId);
       if (serverId === selectedServerId.value && result.response) {
-        appendAgentMessage("agent", result.response, result.response.startsWith("执行失败：") ? "failed" : "completed", serverId);
-        agentStatus.value = result.response.startsWith("执行失败：") ? "failed" : "completed";
+        agentStatus.value = result.status ?? (result.response.startsWith("执行失败：") ? "failed" : "completed");
+        await loadAgentMessages();
         await refreshAfterAgentRun();
         await loadAgentContextUsage();
       }
@@ -1199,9 +1532,9 @@ async function sendAgentMessage() {
 function formatAgentAttachmentMessage(attachments: PendingAgentAttachment[]) {
   if (attachments.length === 0) return "";
   return [
-    "本条消息附带以下已上传到当前服务端目录的文件：",
-    ...attachments.map((attachment) => `- ${attachment.originalName}，服务端路径=${attachment.path}`),
-    "这些文件已经位于当前服务端目录内；请结合这条文字消息处理附件，可使用 list_server_files 和 read_server_text_file 直接查看文本文件内容。"
+    "本条消息附带以下已上传给当前 Agent 的临时文件：",
+    ...attachments.map((attachment) => `- ${attachment.originalName}，uploadId=${attachment.uploadId}`),
+    "这些文件尚未放入服务端目录。请先使用 list_uploaded_files 确认，再根据任务调用 save_upload_to_server_slot 或 move_upload_to_server；不要把 uploadId 当作服务端路径。"
   ].join("\n");
 }
 
@@ -1285,17 +1618,15 @@ async function uploadAgentFile(event: Event) {
   const file = input.files?.[0];
   if (!file || !selectedServerId.value) return;
   const form = new FormData();
-  form.append("path", ".");
   form.append("file", file);
   beginUpload(agentUpload, file);
   try {
-    const result = await safe(() => upload<{ path: string }>(`/api/servers/${selectedServerId.value}/files/upload`, form, {
+    const result = await safe(() => upload<{ id: string; originalName: string }>(`/api/uploads/${selectedServerId.value}`, form, {
       onProgress: (progress) => updateUploadProgress(agentUpload, progress)
     }));
     finishUpload(agentUpload);
-    if (result?.path) {
-      pendingAgentAttachments.value.push({ path: result.path, originalName: file.name });
-      await loadFiles();
+    if (result?.id) {
+      pendingAgentAttachments.value.push({ uploadId: result.id, originalName: result.originalName || file.name });
     }
   } catch (error) {
     failUpload(agentUpload);
@@ -1305,8 +1636,8 @@ async function uploadAgentFile(event: Event) {
   }
 }
 
-function removePendingAgentAttachment(path: string) {
-  pendingAgentAttachments.value = pendingAgentAttachments.value.filter((attachment) => attachment.path !== path);
+function removePendingAgentAttachment(uploadId: string) {
+  pendingAgentAttachments.value = pendingAgentAttachments.value.filter((attachment) => attachment.uploadId !== uploadId);
 }
 
 function openAgentUploadPicker() {
@@ -1318,7 +1649,7 @@ function openAgentUploadPicker() {
 }
 
 async function loadSettings() {
-  const [modelData, skillData, toolData, promptData, agentSettings, providerKeys, javaData] = await Promise.all([
+  await settingsLoad.run(() => Promise.all([
     api<ModelConfig[]>("/api/models"),
     api<SkillRecord[]>("/api/skills"),
     api<AgentToolRecord[]>("/api/tools"),
@@ -1326,46 +1657,50 @@ async function loadSettings() {
     api<AgentSettings>("/api/settings/agent"),
     api<AgentToolSettings>("/api/settings/provider-keys"),
     api<JavaManagementState>("/api/java")
-  ]);
-  models.value = modelData;
-  const model = modelData[0];
-  if (model) {
-    Object.assign(modelForm, {
-      displayName: fixedModelDisplayName,
-      baseUrl: model.baseUrl,
-      modelName: model.modelName,
-      apiKey: "",
-      isDefault: true,
-      contextSizeK: model.contextSizeK || 120
-    });
-    agentContextUsage.value = {
-      ...agentContextUsage.value,
-      contextSizeK: model.contextSizeK || 120,
-      maxTokens: (model.contextSizeK || 120) * 1000,
-      remainingTokens: Math.max(0, (model.contextSizeK || 120) * 1000 - agentContextUsage.value.usedTokens),
-      remainingRatio: Math.max(0, 1 - agentContextUsage.value.usedTokens / ((model.contextSizeK || 120) * 1000)),
-      remainingPercent: Math.round(Math.max(0, 1 - agentContextUsage.value.usedTokens / ((model.contextSizeK || 120) * 1000)) * 100)
-    };
-  }
-  skills.value = skillData;
-  agentTools.value = toolData;
-  globalPrompt.value = promptData.prompt;
-  providerKeySettings.value = providerKeys;
-  providerKeyForm.curseForgeApiKey = "";
-  providerKeyForm.modrinthApiKey = "";
-  providerKeyForm.braveSearchApiKey = "";
-  providerKeyForm.tavilyApiKey = "";
-  agentAutoConfirm.value = agentSettings.autoConfirm;
-  agentDownloadProxyEnabled.value = agentSettings.downloadProxyEnabled;
-  agentDownloadProxyUrl.value = agentSettings.downloadProxyUrl;
-  agentPythonPackageIndexUrl.value = agentSettings.pythonPackageIndexUrl;
-  agentMemoryMb.value = agentSettings.memoryMb;
-  systemMemoryMb.value = agentSettings.systemMemoryMb;
-  applyJavaState(javaData);
+  ]), ([modelData, skillData, toolData, promptData, agentSettings, providerKeys, javaData]) => {
+    models.value = modelData;
+    const model = modelData[0];
+    if (model) {
+      Object.assign(modelForm, {
+        displayName: fixedModelDisplayName,
+        baseUrl: model.baseUrl,
+        modelName: model.modelName,
+        apiKey: "",
+        apiType: model.apiType ?? "chat_completions",
+        availableModels: model.availableModels ?? [],
+        isDefault: true,
+        contextSizeK: model.contextSizeK || 120
+      });
+      agentContextUsage.value = {
+        ...agentContextUsage.value,
+        contextSizeK: model.contextSizeK || 120,
+        maxTokens: (model.contextSizeK || 120) * 1000,
+        remainingTokens: Math.max(0, (model.contextSizeK || 120) * 1000 - agentContextUsage.value.usedTokens),
+        remainingRatio: Math.max(0, 1 - agentContextUsage.value.usedTokens / ((model.contextSizeK || 120) * 1000)),
+        remainingPercent: Math.round(Math.max(0, 1 - agentContextUsage.value.usedTokens / ((model.contextSizeK || 120) * 1000)) * 100)
+      };
+    }
+    skills.value = skillData;
+    agentTools.value = toolData;
+    globalPrompt.value = promptData.prompt;
+    providerKeySettings.value = providerKeys;
+    providerKeyForm.curseForgeApiKey = "";
+    providerKeyForm.modrinthApiKey = "";
+    providerKeyForm.braveSearchApiKey = "";
+    providerKeyForm.tavilyApiKey = "";
+    agentAutoConfirm.value = agentSettings.autoConfirm;
+    agentDownloadProxyEnabled.value = agentSettings.downloadProxyEnabled;
+    agentDownloadProxyUrl.value = agentSettings.downloadProxyUrl;
+    agentPythonPackageIndexUrl.value = agentSettings.pythonPackageIndexUrl;
+    agentMemoryMb.value = agentSettings.memoryMb;
+    systemMemoryMb.value = agentSettings.systemMemoryMb;
+    applyJavaState(javaData);
+    javaLoad.acceptSnapshot();
+  });
 }
 
 async function loadJavaState() {
-  applyJavaState(await api<JavaManagementState>("/api/java"));
+  await javaLoad.run(() => api<JavaManagementState>("/api/java"), applyJavaState);
 }
 
 function applyJavaState(state: JavaManagementState) {
@@ -1394,6 +1729,8 @@ async function saveModel() {
     baseUrl: modelForm.baseUrl,
     modelName: modelForm.modelName,
     apiKey: modelForm.apiKey || undefined,
+    apiType: modelForm.apiType,
+    availableModels: modelForm.availableModels,
     isDefault: true,
     contextSizeK: Math.min(2000, Math.max(8, Math.round(Number(modelForm.contextSizeK) || 120)))
   };
@@ -1409,6 +1746,8 @@ async function saveModel() {
         baseUrl: saved.baseUrl,
         modelName: saved.modelName,
         apiKey: "",
+        apiType: saved.apiType ?? modelForm.apiType,
+        availableModels: saved.availableModels ?? [],
         isDefault: true,
         contextSizeK: saved.contextSizeK || 120
       });
@@ -1424,13 +1763,42 @@ async function saveModel() {
   }
 }
 
+async function listAvailableModels() {
+  if (modelListBusy.value || modelBusy.value) return;
+  modelListBusy.value = true;
+  showModelStatus("loading", "正在拉取上游模型列表...");
+  try {
+    const result = await safe(() => api<{ models: string[]; config?: ModelConfig }>("/api/models/available", {
+      method: "POST",
+      body: {
+        id: models.value[0]?.id,
+        baseUrl: modelForm.baseUrl,
+        apiKey: modelForm.apiKey || undefined,
+        apiType: modelForm.apiType,
+        persist: true
+      }
+    }));
+    const list = result?.models ?? [];
+    modelForm.availableModels = list;
+    if (result?.config) models.value = [result.config];
+    if (list.length > 0 && !list.includes(modelForm.modelName)) modelForm.modelName = list[0] ?? modelForm.modelName;
+    showModelStatus("success", `已拉取 ${list.length} 个可用模型`);
+  } catch (error) {
+    showModelStatus("error", `拉取失败：${getErrorMessage(error)}`);
+  } finally {
+    modelListBusy.value = false;
+  }
+}
+
 async function testModel(id?: string) {
   if (modelBusy.value || (!id && hasUnsavedApiKey.value)) return;
   modelTesting.value = true;
   showModelStatus("loading", "正在测试模型连接...");
   const body = id ? { id } : {
     baseUrl: modelForm.baseUrl,
-    modelName: modelForm.modelName
+    modelName: modelForm.modelName,
+    apiType: modelForm.apiType,
+    apiKey: modelForm.apiKey || undefined
   };
   try {
     await safe(() => api("/api/models/test", { method: "POST", body }));
@@ -1695,24 +2063,6 @@ function agentDownloadDetail(download: AgentDownloadProgress) {
   return download.destinationPath;
 }
 
-function workflowStatusText(status: AgentWorkflowStepStatus) {
-  return {
-    pending: "等待中",
-    running: "进行中",
-    completed: "已完成",
-    failed: "失败"
-  }[status];
-}
-
-function workflowStepClass(status: AgentWorkflowStepStatus) {
-  return {
-    pending: "",
-    running: "risk-medium",
-    completed: "status-running",
-    failed: "risk-high"
-  }[status];
-}
-
 function mergeAgentDownload(download: AgentDownloadProgress) {
   const index = agentDownloads.value.findIndex((item) => item.id === download.id);
   if (index >= 0) agentDownloads.value[index] = download;
@@ -1849,6 +2199,7 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
       serverErrorStates.value = { ...serverErrorStates.value, [payload.errorState.serverId]: payload.errorState };
     }
     if (payload.type === "snapshot" && Array.isArray(payload.entries)) {
+      consoleLoad.acceptSnapshot();
       const shouldScroll = shouldStickConsoleToBottom();
       logs.value = payload.entries;
       if (logs.value.length > 800) logs.value.splice(0, logs.value.length - 800);
@@ -1866,6 +2217,9 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
       loadServers();
       loadServerErrorState(serverId).catch(() => undefined);
     }
+    if (payload.type === "error" && payload.content) {
+      showStatusBubble("error", `发送指令失败：${payload.content}`, 6200);
+    }
   };
   nextConsoleSocket.onclose = () => handleSocketClose(nextConsoleSocket);
   nextConsoleSocket.onerror = () => nextConsoleSocket.close();
@@ -1878,7 +2232,21 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
   };
   nextAgentSocket.onmessage = (event) => {
     if (agentSocket !== nextAgentSocket || serverId !== selectedServerId.value) return;
-    const payload = JSON.parse(event.data) as { type?: string; status?: AgentStatus; content?: string; messageId?: string; confirmation?: AgentConfirmationRequest; toolConfigRequired?: AgentToolConfigRequired; retry?: AgentRetryState; download?: AgentDownloadProgress; workflow?: AgentWorkflowProgress; serverSlot?: ServerSlotStatus };
+    const payload = JSON.parse(event.data) as { type?: string; status?: AgentStatus; content?: string; messageId?: string; messages?: AgentMessage[]; activity?: AgentActivity; createdAt?: string; confirmation?: AgentConfirmationRequest; toolConfigRequired?: AgentToolConfigRequired; retry?: AgentRetryState; download?: AgentDownloadProgress; workflow?: AgentWorkflowProgress; serverSlot?: ServerSlotStatus; modelName?: string | null };
+    if (payload.type === "snapshot" && payload.messages) {
+      historyLoad.acceptSnapshot();
+      const shouldScroll = shouldStickAgentToBottom();
+      agentMessageRevision += 1;
+      agentMessages.value = payload.messages;
+      agentRetry.value = payload.retry ?? null;
+      if (payload.status) agentStatus.value = payload.status;
+      if (payload.modelName) agentActiveModel.value = payload.modelName;
+      if (shouldScroll) scrollAgentHistoryToBottom();
+    }
+    if (payload.type === "model") agentActiveModel.value = payload.modelName ?? "";
+    if ((payload.type === "activity" || payload.type === "activity_delta") && payload.messageId && payload.activity) {
+      updateAgentActivity(payload.messageId, payload.content ?? "", payload.activity, payload.createdAt, payload.type === "activity_delta", serverId);
+    }
     if (payload.type === "status" && payload.status) {
       agentStatus.value = payload.status;
       if (payload.status !== "retrying") clearAgentRetryState();
@@ -1903,9 +2271,13 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
     }
     if (payload.type === "download_progress" && payload.download) mergeAgentDownload(payload.download);
     if (payload.type === "workflow_progress" && payload.workflow) agentWorkflow.value = payload.workflow;
-    if (payload.type === "server_slot" && payload.serverSlot) serverSlot.value = payload.serverSlot;
+    if (payload.type === "server_slot" && payload.serverSlot) {
+      serverSlot.value = payload.serverSlot;
+      serverSlotError.value = "";
+    }
     if (payload.type === "log" && payload.content) {
-      appendAgentMessage("system", payload.content, null, serverId);
+      if (payload.messageId) upsertAgentMessage(payload.messageId, "system", payload.content, null, serverId);
+      else appendAgentMessage("system", payload.content, null, serverId);
     }
     if (payload.type === "message" && payload.messageId) {
       if (isTerminalAgentStatus(payload.status)) agentRetry.value = null;
@@ -1948,11 +2320,16 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
 
 onMounted(async () => {
   window.addEventListener("mouseup", endFileDragSelection);
-  await safe(async () => {
-    await loadServers();
-    await loadSettings();
-    if (selectedServerId.value) await selectServer(selectedServerId.value);
-  });
+  globalAgent.connect();
+  void globalAgent.loadMessages().catch(() => undefined);
+  await Promise.allSettled([
+    safe(async () => {
+      await loadServers();
+      // Do not let a delayed startup request override a user's navigation.
+      if (selectedServerId.value && dashboardOpen.value && !settingsOpen.value) await selectServer(selectedServerId.value, { open: false });
+    }),
+    safe(loadSettings)
+  ]);
   startJavaPolling();
   startAgentRetryClock();
 });
@@ -1961,6 +2338,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("mouseup", endFileDragSelection);
   clearStatusBubbles();
   closeSockets();
+  globalAgent.close();
   if (javaPollTimer) clearInterval(javaPollTimer);
   if (agentRetryClockTimer) clearInterval(agentRetryClockTimer);
 });
@@ -2006,7 +2384,7 @@ onBeforeUnmount(() => {
 
     <CreateServerDialog v-model:name="newServerName" :open="createDialogOpen" @close="closeCreateServerDialog" @create="createServer" />
 
-    <EmptyWorkspaceLanding v-if="showEmptyLanding" @create="openCreateServerDialog" />
+    <EmptyWorkspaceLanding v-if="showEmptyLanding && !dashboardOpen" @create="openCreateServerDialog" />
 
     <InstanceSwitcherDialog
       :open="instanceMenuOpen"
@@ -2022,20 +2400,24 @@ onBeforeUnmount(() => {
     />
 
     <ServerSidebar
-      v-if="hasServers"
+      v-if="hasServers || dashboardOpen"
       ref="serverSidebar"
+       :loading="serverListLoad.initialLoading.value"
+       :loaded="serversLoaded"
        :servers="servers"
        :selected-server-id="selectedServerId"
        :errored-server-ids="erroredServerIds"
        :settings-open="settingsOpen"
+       :dashboard-open="dashboardOpen"
        @create="openCreateServerDialog"
+       @open-dashboard="openDashboard"
        @open-instance-menu="openInstanceMenu"
        @open-settings="toggleWorkspaceSettings"
        @logout="logout"
        @select="selectServerWithFeedback"
     />
 
-    <main v-if="hasServers" class="main">
+    <main v-if="hasServers || dashboardOpen" class="main">
       <AgentConfirmationDialog :confirmation="pendingConfirmation" @resolve="resolveAgentConfirmation" />
 
       <DeleteServerDialog
@@ -2052,9 +2434,67 @@ onBeforeUnmount(() => {
 
       <div class="content-stage">
        <Transition name="server-switch" mode="out-in">
+        <DashboardView
+          v-if="dashboardOpen"
+          key="dashboard"
+          ref="dashboardView"
+          :attachments="dashboardAttachments"
+          :auto-confirm="agentAutoConfirm"
+          :busy="globalAgent.busy.value"
+          :context-remaining-label="dashboardContextRemainingLabel"
+          :context-ring-style="dashboardContextRingStyle"
+          :context-usage="globalAgent.contextUsage.value"
+          :input="dashboardInput"
+          :messages="globalAgent.messages.value"
+           :history-loading="globalAgent.historyLoad.initialLoading.value"
+           :context-loading="globalAgent.contextLoad.initialLoading.value"
+           :context-error="!globalAgent.contextLoad.loaded.value ? globalAgent.contextLoad.error.value : ''"
+           :history-error="globalAgent.historyLoad.error.value"
+           :config-loading="settingsLoad.initialLoading.value"
+           :config-error="!settingsLoad.loaded.value ? settingsLoad.error.value : ''"
+           :servers-error="serverListLoad.error.value"
+          :model-name="dashboardActiveModel || models.find(model => model.isDefault)?.modelName || models[0]?.modelName"
+          :model-options="availableModelOptions"
+          :output-loading="showDashboardOutputLoading"
+          :output-loading-text="dashboardOutputLoadingText"
+          :reasoning-effort="dashboardReasoningEffort"
+          :retry="globalAgent.retry.value"
+          :retry-message="dashboardRetryMessage()"
+          :retry-now-sending="false"
+          :scroll-to-bottom-visible="dashboardScrollToBottom"
+          :servers="servers"
+          :servers-loaded="serversLoaded"
+          :status="globalAgent.status.value"
+          :status-text="statusText"
+          :upload="dashboardAgentUpload"
+          :upload-detail="uploadDetail"
+          @cancel="globalAgent.cancel()"
+          @clear="clearDashboardContext"
+          @compress="globalAgent.compressContext()"
+          @create="openCreateFromDashboard"
+           @reload-history="globalAgent.loadMessages().catch(() => undefined)"
+           @reload-servers="loadServers().catch(() => undefined)"
+          @message-scroll="updateDashboardScrollState"
+          @open-instance="openInstanceFromDashboard"
+          @remove-attachment="removeDashboardAttachment"
+          @retry="globalAgent.retryNow()"
+          @reuse-message="dashboardInput = $event"
+          @scroll-to-bottom="scrollDashboardToBottom"
+          @send="sendDashboardMessage"
+          @update:auto-confirm="agentAutoConfirm = $event; saveAgentSettings()"
+          @update:input="dashboardInput = $event"
+          @update:model-name="setGlobalModel"
+          @update:reasoning-effort="dashboardReasoningEffort = $event"
+          @upload="uploadDashboardAgentFile"
+          @upload-requested="openDashboardUploadPicker"
+        />
+
         <WorkspaceSettingsPanel
-          v-if="settingsOpen"
+          v-else-if="settingsOpen"
           key="settings"
+           :loading="settingsLoad.loading.value"
+           :loaded="settingsLoad.loaded.value"
+           :load-error="settingsLoad.error.value"
            :agent-memory-label="agentMemoryLabel"
            :agent-memory-mb="agentMemoryMb"
            :agent-memory-warning="agentMemoryWarning"
@@ -2070,6 +2510,7 @@ onBeforeUnmount(() => {
           :java-versions="javaVersions"
           :model-busy="modelBusy"
           :model-form="modelForm"
+          :model-list-busy="modelListBusy"
           :model-saving="modelSaving"
           :model-testing="modelTesting"
           :provider-key-settings="providerKeySettings"
@@ -2096,10 +2537,11 @@ onBeforeUnmount(() => {
           @install-java="installJava"
           @open-provider-keys="openProviderKeyDialog"
           @open-proxy-test="openProxyTestDialog"
-          @refresh="loadSettings"
+           @refresh="loadSettings().catch(() => undefined)"
           @reset-prompt="resetGlobalPrompt"
           @save-agent-settings="saveAgentSettings"
           @save-model="saveModel"
+          @list-models="listAvailableModels"
           @test-model="testModel()"
           @toggle-skill="toggleSkill"
            @update:agent-memory-mb="updateAgentMemorySetting"
@@ -2107,6 +2549,7 @@ onBeforeUnmount(() => {
           @update:java-download-source="javaDownloadSource = $event"
           @update:java-version-to-install="javaVersionToInstall = $event"
           @update:model-api-key="modelForm.apiKey = $event"
+          @update:model-api-type="modelForm.apiType = $event"
           @update:model-base-url="modelForm.baseUrl = $event"
           @update:model-context-size-k="modelForm.contextSizeK = $event"
           @update:model-name="modelForm.modelName = $event"
@@ -2135,30 +2578,37 @@ onBeforeUnmount(() => {
                 ref="consolePanel"
                 v-model:command="consoleCommand"
                 :analyzing="errorAnalysisSending"
+                :refreshing="consoleRefreshing"
+                :loading="consoleLoad.initialLoading.value"
+                :load-error="consoleLoad.error.value"
                 :command-history="consoleCommandHistory"
                 :error-state="selectedServerErrorState"
                 :has-error="selectedServerHasError"
                 :logs="logs"
                 :rendered-logs="renderedConsoleLogs"
                 @analyze="analyzeConsoleErrors"
-                @refresh="loadLogs"
+                @refresh="refreshConsoleLogs"
                 @send="sendCommand"
               />
 
               <DeploymentProgressPanel
                 v-if="showDeploymentProgressCard"
+                :key="selectedServerId"
                 :dismissed="deploymentProgressDismissed"
-                :label="deploymentProgressLabel"
-                :percent="deploymentProgressPercent"
+                :loading="historyLoad.initialLoading.value || (serverSlotLoading && !serverSlot)"
+                :load-error="historyLoad.error.value || serverSlotError"
+                :server-name="selectedServer?.name ?? ''"
+                :state="deploymentProgressState"
                 :slot="serverSlot"
+                :slot-loading="serverSlotLoading"
+                :slot-error="serverSlotError"
                 :slot-size="formatBytes"
-                :slot-upload="serverSlotUpload"
+                :slot-upload="selectedServerSlotUpload"
+                :upload-busy="serverSlotUpload.active"
                 :slot-upload-detail="uploadDetail"
-                :status="deploymentProgressCardStatus"
                 :workflow="deploymentWorkflow"
-                :workflow-status-class="workflowStepClass"
-                :workflow-status-text="workflowStatusText"
                 @refresh="loadServerSlotStatus"
+                @open-agent="openDeploymentAgent"
                 @upload-server-slot="uploadServerSlot"
                 @toggle-dismissed="deploymentProgressDismissed = !deploymentProgressDismissed"
               />
@@ -2175,6 +2625,14 @@ onBeforeUnmount(() => {
               :context-usage="agentContextUsage"
               :input="agentInput"
               :messages="agentMessages"
+              :history-loading="historyLoad.initialLoading.value"
+              :context-loading="contextLoad.initialLoading.value"
+              :context-error="!contextLoad.loaded.value ? contextLoad.error.value : ''"
+              :history-error="historyLoad.error.value"
+              :config-loading="settingsLoad.initialLoading.value"
+              :config-error="!settingsLoad.loaded.value ? settingsLoad.error.value : ''"
+              :model-name="agentActiveModel || models.find(model => model.isDefault)?.modelName || models[0]?.modelName"
+              :model-options="instanceModelOptions"
               :output-loading="showAgentOutputLoading"
               :output-loading-text="agentOutputLoadingText"
               :placeholder="agentPlaceholder"
@@ -2186,7 +2644,9 @@ onBeforeUnmount(() => {
               :status="agentStatus"
               :upload="agentUpload"
               :upload-detail="uploadDetail"
+              :upload-session-id="selectedServerId"
               @cancel="cancelAgentRun"
+              @reload-history="loadAgentMessages().catch(() => undefined)"
               @clear="clearAgentContext"
               @compress="compressAgentContext"
               @message-scroll="updateAgentScrollState"
@@ -2194,8 +2654,10 @@ onBeforeUnmount(() => {
               @retry="retryAgentNow"
               @scroll-to-bottom="scrollAgentHistoryToBottom"
               @send="sendAgentMessage"
+              @reuse-message="agentInput = $event"
               @update:auto-confirm="agentAutoConfirm = $event; saveAgentSettings()"
               @update:input="agentInput = $event"
+              @update:model-name="setInstanceModel"
               @update:reasoning-effort="agentReasoningEffort = $event"
               @upload="uploadAgentFile"
               @upload-requested="openAgentUploadPicker"
@@ -2223,6 +2685,7 @@ onBeforeUnmount(() => {
             :files="sortedFiles"
             :format-bytes="formatBytes"
             :loading="filesLoading"
+            :load-error="fileLoad.error.value"
             :parent-directory-path="parentDirectoryPath"
             :selected-file="selectedFile ?? null"
             :selected-file-paths="selectedFilePaths"
@@ -2238,7 +2701,7 @@ onBeforeUnmount(() => {
             @go-up="goUp"
             @open-entry="openFileEntry"
             @open-folder="openFolder"
-            @refresh="loadFiles"
+            @refresh="loadFiles().catch(() => undefined)"
             @remove-selected="removeSelectedFiles"
             @rename-file="renameFile"
             @show-properties="showFileProperties"
@@ -2252,6 +2715,8 @@ onBeforeUnmount(() => {
         <div v-if="configDialogOpen && selectedServer" class="modal-backdrop">
           <ServerConfigDialog
             :form="serverForm"
+            :loading="settingsLoad.initialLoading.value || javaLoad.initialLoading.value"
+            :load-error="!settingsLoad.loaded.value ? settingsLoad.error.value : !javaLoad.loaded.value ? javaLoad.error.value : ''"
             :format-memory="formatMemoryMb"
             :java-versions="configJavaVersionOptions"
             :memory-label="serverMemoryLabel"
@@ -2262,6 +2727,7 @@ onBeforeUnmount(() => {
             :system-memory-label="systemMemoryLabel"
             @close="configDialogOpen = false"
             @save="saveServerConfig"
+            @retry="retryServerConfig"
             @select-java="applyServerJavaSelection"
             @update:memory-mb="serverMemoryMb = $event"
           />
@@ -2270,10 +2736,13 @@ onBeforeUnmount(() => {
 
       <TextFileEditorDialog
         :content="textEditor.content"
+        :loading="textLoad.loading.value"
+        :load-error="textLoad.error.value"
         :open="textEditor.open"
         :path="textEditor.path"
         @close="textEditor.open = false"
         @save="saveTextFile"
+        @retry="editFile(textEditor.path).catch(() => undefined)"
         @update:content="textEditor.content = $event"
       />
 
