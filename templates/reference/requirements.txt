@@ -1,0 +1,31 @@
+# Combined requirements from the bundled plugins (including disabled plugins).
+# ColorMe supports MCDReforged 2.15.7 and newer 2.x releases.
+mcdreforged>=2.15.7
+
+# ChatHub
+websocket-client>=1.8.0
+
+# MCDR Bot
+cryptography>=1.5
+requests
+PyNBT
+
+# Minecraft Data API / Task
+hjson
+parse
+
+# Prime Backup / MirrorMcsmcdR
+APScheduler>=3.8,<4
+SQLAlchemy>=2
+blake3
+pathspec
+psutil
+pydantic>=2
+pytz
+typing_extensions
+xxhash>=3
+zstandard
+
+# ChatBridge (disabled by default)
+pycryptodome
+colorlog
