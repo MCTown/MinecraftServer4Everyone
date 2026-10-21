@@ -92,7 +92,7 @@ export function registerWebSocketRoutes(app: FastifyInstance, services: RouteSer
     };
 
     eventBus.on("agent", onAgent);
-    send({ type: "snapshot", messages: services.agentService.listMessages(id), status: services.agentService.getStatus(id), retry: services.agentService.getRetry(id), modelName: services.agentService.getActiveModelName(id) });
+    send({ type: "snapshot", ...services.agentService.getPresentation(id), confirmation: services.agentService.getPendingConfirmation(id), messages: services.agentService.listMessages(id), status: services.agentService.getStatus(id), retry: services.agentService.getRetry(id), modelName: services.agentService.getActiveModelName(id) });
     send({ type: "status", status: services.agentService.getStatus(id) });
     send({ type: "model", modelName: services.agentService.getActiveModelName(id) });
     services.fileService.getServerSlotStatus(id).then((serverSlot) => send({ type: "server_slot", serverSlot })).catch(() => undefined);
@@ -163,6 +163,8 @@ export function registerWebSocketRoutes(app: FastifyInstance, services: RouteSer
     eventBus.on("agent", onAgent);
     send({
       type: "snapshot",
+      ...services.agentService.getPresentation(scopeId),
+      confirmation: services.agentService.getPendingGlobalConfirmation(),
       messages: services.agentService.listGlobalMessages(),
       status: services.agentService.getGlobalStatus(),
       retry: services.agentService.getGlobalRetry(),

@@ -19,14 +19,23 @@ export function createInstallJavaVersionTool(ctx: AgentToolContext): AgentTool {
       }
     },
     execute: async (input) => {
+      const checkCancelled = () => {
+        if (ctx.signal?.aborted) throw new DOMException("Java 安装任务已中断", "AbortError");
+      };
+      checkCancelled();
       const version = stringInput(input, "version");
+      const serverId = ctx.getServerId();
       await requireConfirmation(ctx, {
         title: `安装 Java ${version}`,
         description: `Agent 准备下载并安装 Java ${version} 到应用工作区 ${appConfig.jdksDir}，然后写入当前服务端配置。`,
         risk: "high"
       });
+      checkCancelled();
       const result = await ctx.javaService.installVersion(version);
-      await ctx.serverService.updateServer(ctx.getServerId(), { javaPath: result.path, javaVersion: version });
+      // JavaService coalesces installs across scopes. Do not cancel a shared install,
+      // but never apply its result to this instance after this job was cancelled.
+      checkCancelled();
+      await ctx.serverService.updateServer(serverId, { javaPath: result.path, javaVersion: version });
       return JSON.stringify(result, null, 2);
     }
   };

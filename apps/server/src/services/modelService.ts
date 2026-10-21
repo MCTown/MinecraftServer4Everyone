@@ -59,6 +59,7 @@ export interface ChatMessageInput {
   content: string | null;
   tool_call_id?: string;
   tool_calls?: ChatToolCall[];
+  reasoning_content?: string;
 }
 
 export interface ChatToolDefinition {
@@ -84,12 +85,17 @@ export interface ChatCompletionResult {
   toolCalls: ChatToolCall[];
   reasoning: string;
   usage: ModelUsage | null;
+  /** Exact provider text for lossless replay; display text may be normalized. */
+  replayContent?: string;
+  replayReasoning?: string;
 }
 
 export interface ModelUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
 }
 
 export class ModelRemoteError extends Error {
@@ -423,10 +429,19 @@ export class ModelService {
       }
       : {
         model: modelName,
-        messages: input.messages,
+        messages: input.messages.map((message) => {
+          // DeepSeek requires all prior reasoning when tools are present. Other
+          // OpenAI-compatible routes may reject this provider-specific field.
+          if (new URL(baseUrl).hostname === "api.deepseek.com" || modelName.toLowerCase().startsWith("deepseek")) return message;
+          const { reasoning_content: _reasoning, ...rest } = message;
+          return rest;
+        }),
         temperature: input.temperature ?? 0.2,
         ...(input.reasoningEffort ? { reasoning_effort: input.reasoningEffort } : {}),
-        ...(input.tools?.length ? { tools: input.tools, tool_choice: "auto" } : {})
+        // With tools present, auto is the Chat Completions default. Omitting
+        // this redundant field also avoids gateways forwarding its string
+        // verbatim to an Anthropic upstream that expects an object.
+        ...(input.tools?.length ? { tools: input.tools } : {})
       };
     return { baseUrl, apiKey, apiType, modelName, body };
   }
@@ -715,7 +730,8 @@ export class ModelService {
     return {
       promptTokens: inputTokens,
       completionTokens: outputTokens,
-      totalTokens: typeof totalTokens === "number" ? totalTokens : inputTokens + outputTokens
+      totalTokens: typeof totalTokens === "number" ? totalTokens : inputTokens + outputTokens,
+      ...this.extractCacheUsage(usage, "input_tokens_details")
     };
   }
 
@@ -732,6 +748,8 @@ export class ModelService {
       content: this.extractContent(content),
       toolCalls: this.extractToolCalls(message),
       reasoning: this.extractReasoning(message),
+      replayContent: this.extractContent(content, false),
+      replayReasoning: this.extractReasoning(message, false),
       usage: null
     };
   }
@@ -862,6 +880,8 @@ export class ModelService {
       content: content.trim(),
       toolCalls: [...toolCalls.values()].filter(this.isToolCall),
       reasoning: reasoning.trim(),
+      replayContent: content,
+      replayReasoning: reasoning,
       usage
     };
   }
@@ -877,7 +897,19 @@ export class ModelService {
     return {
       promptTokens,
       completionTokens,
-      totalTokens: typeof totalTokens === "number" ? totalTokens : promptTokens + completionTokens
+      totalTokens: typeof totalTokens === "number" ? totalTokens : promptTokens + completionTokens,
+      ...this.extractCacheUsage(usage, "prompt_tokens_details")
+    };
+  }
+
+  private extractCacheUsage(usage: object, detailsKey: string) {
+    const record = usage as Record<string, unknown>;
+    const details = record[detailsKey] as { cached_tokens?: unknown } | undefined;
+    const hit = record.prompt_cache_hit_tokens ?? details?.cached_tokens;
+    const miss = record.prompt_cache_miss_tokens;
+    return {
+      ...(typeof hit === "number" ? { cacheHitTokens: hit } : {}),
+      ...(typeof miss === "number" ? { cacheMissTokens: miss } : {})
     };
   }
 

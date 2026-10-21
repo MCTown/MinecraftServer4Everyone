@@ -1,4 +1,4 @@
-import { mkdir, rename, rm } from "node:fs/promises";
+import { access, cp, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { desc, eq } from "drizzle-orm";
 import { appConfig } from "../config.js";
@@ -106,7 +106,17 @@ export class ServerService {
     const now = nowIso();
     const id = createId("server");
     const directory = path.join(appConfig.serversDir, id);
-    await mkdir(directory, { recursive: true });
+    let templateDirectory = path.join(appConfig.templatesDir, "reference");
+    try {
+      await access(templateDirectory);
+    } catch (error) {
+      if (!isMissingPathError(error)) throw error;
+      templateDirectory = path.join(appConfig.projectRoot, "templates", "reference");
+    }
+    await mkdir(appConfig.serversDir, { recursive: true });
+    // Own a fresh directory before copying, so failures cannot leave a usable
+    // database record or remove a directory that belonged to another instance.
+    await mkdir(directory);
 
     const row: typeof servers.$inferInsert = {
       id,
@@ -128,7 +138,14 @@ export class ServerService {
       createdAt: now,
       updatedAt: now
     };
-    getDb().insert(servers).values(row).run();
+    try {
+      await cp(templateDirectory, directory, { recursive: true, force: false, errorOnExist: false });
+      await mkdir(path.join(directory, "server"), { recursive: true });
+      getDb().insert(servers).values(row).run();
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true });
+      throw error;
+    }
     return rowToServer(row as typeof servers.$inferSelect);
   }
 

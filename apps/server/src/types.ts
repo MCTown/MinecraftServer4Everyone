@@ -248,9 +248,12 @@ export interface AgentWorkflowStep {
   status: AgentWorkflowStepStatus;
   progress: number;
   detail: string;
+  roundIndex?: number;
+  parallelGroup?: string;
 }
 
 export interface AgentWorkflowProgress {
+  turn?: { runId: string; turnId: string; index: number; total: number; stepIds: string[]; waitingForJobs?: boolean };
   title: string;
   currentStepId: string;
   overallProgress: number;
@@ -278,6 +281,8 @@ export interface AgentRetryEvent {
 }
 
 export interface AgentActivity {
+  background?: boolean;
+  jobId?: string;
   kind: "reasoning" | "tool" | "retry";
   status: "running" | "waiting_confirmation" | "completed" | "failed" | "cancelled";
   title: string;
@@ -292,7 +297,9 @@ export interface AgentActivity {
 }
 
 export interface AgentEvent {
-  type: "status" | "message" | "message_delta" | "activity" | "activity_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared" | "tool_config_required" | "focus_instance" | "model";
+  turnId?: string;
+  stepId?: string;
+  type: "status" | "message" | "message_delta" | "activity" | "activity_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared" | "tool_config_required" | "focus_instance" | "model" | "inbox_updated";
   status?: AgentStatus;
   content?: string;
   messageId?: string;
@@ -323,6 +330,8 @@ export interface AgentFocusInstance {
 }
 
 export interface AgentMessageRecord {
+  turnId?: string | null;
+  stepId?: string | null;
   id: string;
   serverId: string;
   role: AgentRole;
@@ -335,6 +344,23 @@ export interface AgentMessageRecord {
 export interface GlobalAgentMessage extends AgentMessageRecord {
   focusServerId: string | null;
 }
+export interface AgentQuestionInput {
+  question: string;
+  multiple: boolean;
+  options: { label: string; description?: string }[];
+}
+
+export interface AgentQuestionRequest extends AgentQuestionInput {
+  id: string;
+  serverId: string;
+  createdAt: string;
+}
+
+export interface AgentQuestionAnswer {
+  status: "answered" | "cancelled" | "expired";
+  selected: string[];
+}
+
 export interface AgentConfirmationRequest {
   id: string;
   serverId: string;

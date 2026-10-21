@@ -57,6 +57,8 @@ export function materializeCurseForgeManifestPackToolInfo(settings?: AgentToolSe
 
 export function listAgentToolInfos(settings?: AgentToolSettings) {
   return [
+    { name: "ask_user", description: "向用户提出单选或多选题，等待真实选择后继续执行；不会被自动确认跳过。", category: "用户交互", controllable: false as const },
+    { name: "begin_deployment_workflow", description: "启动按 turn 调度的部署流程；串行节点独立一轮，并行组全部收束后自动推进。", category: "流程编排", controllable: false as const },
     webSearchToolInfo({ braveConfigured: settings?.braveSearchApiKeyConfigured ?? false, tavilyConfigured: settings?.tavilyApiKeyConfigured ?? false }),
     fetchWebPageToolInfo,
     shellToolInfo,

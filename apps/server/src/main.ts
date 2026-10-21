@@ -72,6 +72,7 @@ async function bootstrap() {
   });
 
   await app.listen({ host: appConfig.host, port: appConfig.port });
+  agentService.startInbox();
 }
 
 bootstrap().catch((error) => {

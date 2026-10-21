@@ -1,10 +1,12 @@
 import path from "node:path";
+import type { AgentQuestionInput, AgentQuestionAnswer } from "../types.js";
 import type { ChatToolDefinition } from "../services/modelService.js";
 import type { FileService } from "../services/fileService.js";
 import type { JavaService } from "../services/javaService.js";
 import type { ProcessManager } from "../services/processManager.js";
 import type { ServerService } from "../services/serverService.js";
 import type { UploadService } from "../services/uploadService.js";
+import type { DeploymentWorkflow } from "../services/deploymentWorkflow.js";
 import type { AgentConfirmationRequest, AgentDownloadProgress, AgentToolConfigRequired, AgentToolConfigRequirement, AgentWorkflowProgress, ConsoleLogEntry, ServerSlotStatus } from "../types.js";
 
 export const stringProperty = { type: "string" };
@@ -40,8 +42,14 @@ export interface AgentToolContext {
   uploadService: UploadService;
   javaService: JavaService;
   signal?: AbortSignal;
+  askUser?: (request: AgentQuestionInput) => Promise<AgentQuestionAnswer>;
+  /** Omit the interactive question tool for non-interactive benchmark runs. */
+  allowAskUser?: boolean;
   downloadProxyUrl?: () => string | undefined;
   getPythonPackageIndexUrl?: () => string | undefined;
+  getDeploymentWorkflow?: () => DeploymentWorkflow;
+  getWorkflowProgress?: () => AgentWorkflowProgress | null;
+  beginDeploymentWorkflow?: () => string;
   getCurseForgeApiKey?: () => string;
   getModrinthApiKey?: () => string;
   getBraveSearchApiKey?: () => string;

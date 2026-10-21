@@ -246,7 +246,13 @@ for (const scenario of [
       overrideDirectories: [], slot: slot(root, "pack.mrpack")
     });
     const calls = installerProcess(t, scenario.expectedArgs);
-    const result = JSON.parse(await createDeployMrpackServerTool(ctx).execute({ javaPath: process.execPath }));
+    const deployment = createDeployMrpackServerTool(ctx);
+    const files = JSON.parse(await deployment.execute({ phase: "files" }));
+    assert.equal(files.phase, "files");
+    assert.deepEqual(downloads, [], "file restoration must not download or execute an installer");
+    assert.equal(updates.length, 0, "file restoration must not overwrite Java or launch configuration");
+    assert.equal(calls.length, 0);
+    const result = JSON.parse(await deployment.execute({ phase: "loader", javaPath: process.execPath }));
     assert.equal(result.ok, true);
     assert.equal(result.loader.type, "neoforge");
     assert.deepEqual(downloads, [{ url: `https://maven.neoforged.net/releases/net/neoforged/${scenario.coordinate}/${scenario.file}`, destination: `server/${scenario.file}` }]);

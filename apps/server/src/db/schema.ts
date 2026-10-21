@@ -54,6 +54,8 @@ export const appSettings = sqliteTable("app_settings", {
 
 export const agentMessages = sqliteTable("agent_messages", {
   id: text("id").primaryKey(),
+  turnId: text("turn_id"),
+  stepId: text("step_id"),
   serverId: text("server_id").notNull(),
   role: text("role").notNull(),
   content: text("content").notNull(),
@@ -69,6 +71,8 @@ export const agentMessages = sqliteTable("agent_messages", {
  */
 export const globalAgentMessages = sqliteTable("global_agent_messages", {
   id: text("id").primaryKey(),
+  turnId: text("turn_id"),
+  stepId: text("step_id"),
   conversationId: text("conversation_id").notNull(),
   role: text("role").notNull(),
   content: text("content").notNull(),

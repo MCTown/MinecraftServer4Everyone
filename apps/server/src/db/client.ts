@@ -3,6 +3,8 @@ import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 import { appConfig, defaultSystemPrompt } from "../config.js";
 import { nowIso } from "../utils/time.js";
 import * as schema from "./schema.js";
+import { ExecutionStore } from "../agent/executionStore.js";
+import { ToolRuntime } from "../agent/toolRuntime.js";
 
 let sqlite: Database.Database | null = null;
 let database: BetterSQLite3Database<typeof schema> | null = null;
@@ -12,6 +14,30 @@ export function initDatabase() {
   sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
   sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS agent_session_events (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, scope_id TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_session_events_scope ON agent_session_events(scope_id, seq);
+    CREATE TABLE IF NOT EXISTS agent_tool_jobs (
+      id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_tool_jobs_scope ON agent_tool_jobs(scope_id);
+    CREATE TABLE IF NOT EXISTS agent_inbox (
+      id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, state TEXT NOT NULL, payload TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_inbox_scope_state ON agent_inbox(scope_id, state);
+    CREATE TABLE IF NOT EXISTS agent_executions (
+      id TEXT PRIMARY KEY, scope_id TEXT NOT NULL, parent_turn_id TEXT, status TEXT NOT NULL, payload TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_executions_scope ON agent_executions(scope_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_executions_parent ON agent_executions(parent_turn_id);
+    CREATE TABLE IF NOT EXISTS agent_execution_steps (
+      id TEXT PRIMARY KEY, turn_id TEXT NOT NULL REFERENCES agent_executions(id), step_index INTEGER NOT NULL, payload TEXT NOT NULL,
+      UNIQUE(turn_id, step_index)
+    );
+    CREATE TABLE IF NOT EXISTS agent_execution_tools (
+      id TEXT PRIMARY KEY, turn_id TEXT NOT NULL REFERENCES agent_executions(id), payload TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS servers (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -130,6 +156,14 @@ export function initDatabase() {
   }
 
   database = drizzle(sqlite, { schema });
+  for (const table of ["agent_messages", "global_agent_messages"]) {
+    const columns = sqlite.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    for (const column of ["turn_id", "step_id"]) {
+      if (!columns.some((entry) => entry.name === column)) sqlite.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+    }
+  }
+  ExecutionStore.recoverInterrupted();
+  ToolRuntime.recoverInterrupted();
   const existingPrompt = sqlite.prepare("SELECT value FROM app_settings WHERE key = ?").get("global_system_prompt");
   if (!existingPrompt) {
     sqlite.prepare("INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)")

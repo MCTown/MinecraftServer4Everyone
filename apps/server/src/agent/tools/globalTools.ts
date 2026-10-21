@@ -1,4 +1,5 @@
 import type { AgentFocusInstance } from "../../types.js";
+import { createAskUserTool } from "./askUserTool.js";
 import type { ConsoleLogService } from "../../services/consoleLogService.js";
 import type { ProcessManager } from "../../services/processManager.js";
 import type { ServerService } from "../../services/serverService.js";
@@ -22,6 +23,7 @@ export function createGlobalAgentTools(
   context: AgentToolContext
 ): AgentTool[] {
   const tools: AgentTool[] = [
+    createAskUserTool(context),
     // Server-independent research tools work unchanged in the global scope.
     createWebSearchTool(context),
     createFetchWebPageTool(context)
@@ -57,7 +59,7 @@ export function createGlobalAgentTools(
       type: "function",
       function: {
         name: "create_server",
-        description: "创建一个新的空实例（服务端），返回新的 serverId 和目录。创建后如需部署或启动该系统，请接着调用 focus_instance 把任务交接给新实例的 Agent。",
+        description: "创建新的服务端并自动套用内置 reference MCDReforged 模板，返回新的 serverId 和目录；不安装 Java/Python、不部署 Minecraft、不启动，无需重复初始化模板。创建后如需部署或启动，请接着调用 focus_instance 把任务交接给新实例的 Agent。",
         parameters: objectSchema({ name: stringProperty }, ["name"])
       }
     },
@@ -70,6 +72,8 @@ export function createGlobalAgentTools(
         name: server.name,
         directory: server.directory,
         status: server.status,
+        template: "reference",
+        minecraftServerDirectory: "server",
         nextStep: "如需继续部署或启动，请调用 focus_instance 并传入该 serverId。"
       }, null, 2);
     }

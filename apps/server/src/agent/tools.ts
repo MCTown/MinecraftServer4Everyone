@@ -1,4 +1,5 @@
 import path from "node:path";
+import { createAskUserTool } from "./tools/askUserTool.js";
 import { spawn } from "node:child_process";
 import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { fetch } from "undici";
@@ -18,26 +19,18 @@ import { createId } from "../utils/id.js";
 import type { AgentDownloadProgress } from "../types.js";
 import type { CurseForgeManifestSlotInfo } from "../services/fileService.js";
 import { fetchDispatcher, isJavaExecutable, javaProxyArgs, proxyEnv } from "../services/proxySupport.js";
+import { defaultDeploymentWorkflow } from "../services/deploymentWorkflow.js";
+import { buildWorkflowProgress } from "./workflowProgress.js";
 
 export type { AgentCapabilityId, AgentTool } from "./toolKit.js";
 
-const workflowSteps = [
-  { id: "identify_modpack", label: "确认整合包" },
-  { id: "prepare_server_slot", label: "获取服务端包到槽位" },
-  { id: "apply_mcdr_template", label: "套用 MCDR 模板" },
-  { id: "extract_to_workspace", label: "解压到 server 目录" },
-  { id: "direct_run_test", label: "直启验证" },
-  { id: "configure_python", label: "配置内置 Python" },
-  { id: "configure_mcdr", label: "配置 MCDReforged" },
-  { id: "final_mcdr_test", label: "最终验证" }
-] as const;
-
 const agentReadTextMaxChars = 120000;
 
-type WorkflowStepId = typeof workflowSteps[number]["id"];
-
-function isWorkflowStepId(value: string): value is WorkflowStepId {
-  return workflowSteps.some((step) => step.id === value);
+function emitWorkflowProgress(ctx: AgentToolContext, stepId: string, status: "pending" | "running" | "completed" | "failed", progress: number, detail: string, title = "整合包服务端部署流程") {
+  const workflow = ctx.getDeploymentWorkflow?.() ?? defaultDeploymentWorkflow();
+  // Existing-file repair tools may run outside a deployment, or a custom stage.
+  if (!workflow.steps.some((step) => step.id === stepId && step.enabled)) return;
+  ctx.workflowProgress?.(buildWorkflowProgress(workflow, ctx.getWorkflowProgress?.(), { stepId, status, progress, detail, title }));
 }
 
 function clampPercent(value: number) {
@@ -460,18 +453,7 @@ async function downloadCurseForgeManifestMods(ctx: AgentToolContext, mods: Curse
         proxyUrl: ctx.downloadProxyUrl?.(),
         onProgress: (progress) => emitProgress({ ...progress, status: progress.percent >= 100 ? "completed" : "downloading" })
       }));
-      ctx.workflowProgress?.({
-        title: "CurseForge 清单包还原",
-        currentStepId: "extract_to_workspace",
-        overallProgress: clampPercent(300 / workflowSteps.length + ((index + 1) / Math.max(mods.length, 1)) * 100 / workflowSteps.length),
-        status: index + 1 === mods.length ? "completed" : "running",
-        steps: workflowSteps.map((step, stepIndex) => ({
-          ...step,
-          status: stepIndex < 3 ? "completed" : stepIndex === 3 ? index + 1 === mods.length ? "completed" : "running" : "pending",
-          progress: stepIndex < 3 ? 100 : stepIndex === 3 ? Math.round(((index + 1) / Math.max(mods.length, 1)) * 100) : 0,
-          detail: stepIndex === 3 ? `正在下载模组 ${index + 1}/${mods.length}: ${mod.fileName}` : ""
-        }))
-      });
+      emitWorkflowProgress(ctx, "extract_to_workspace", "running", ((index + 1) / Math.max(mods.length, 1)) * 100, `正在下载模组 ${index + 1}/${mods.length}: ${mod.fileName}`, "CurseForge 清单包还原");
     } catch (error) {
       emitProgress({ loadedBytes: 0, totalBytes: null, percent: 0, status: isAbortError(error) ? "cancelled" : "failed", error: error instanceof Error ? error.message : String(error) });
       throw new Error(`下载清单模组 ${index + 1}/${mods.length} 失败；已成功下载 ${downloadedPaths.length} 个模组。${error instanceof Error ? error.message : String(error)}`);
@@ -1157,12 +1139,25 @@ async function ensureForgeServerTextFiles(serverDirectory: string, modpackName: 
 export { createGlobalAgentTools } from "./tools/globalTools.js";
 
 export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
+  const workflowSteps = (ctx.getDeploymentWorkflow?.() ?? defaultDeploymentWorkflow()).steps.filter((step) => step.enabled);
   const capabilityNames = Object.keys(installableCapabilities).join(", ");
   const templateNames = ["default", "reference"];
   const tools: AgentTool[] = [
+    ...(ctx.allowAskUser === false ? [] : [createAskUserTool(ctx)]),
     createWebSearchTool(ctx),
     createFetchWebPageTool(ctx),
     createRunShellCommandTool(ctx),
+    {
+      definition: { type: "function", function: {
+        name: "begin_deployment_workflow",
+        description: "开始完整整合包部署的 turn 编排。仅用户要求完整部署时调用；普通查询、排错、安装单个模组不调用。系统将指定本轮节点并在完成后自动进入下一轮；同一并行组共用一轮，所有分支和后台任务必须汇合。",
+        parameters: objectSchema({})
+      } },
+      execute: async () => {
+        if (!ctx.beginDeploymentWorkflow) throw new Error("当前会话不支持启动部署流程");
+        return ctx.beginDeploymentWorkflow();
+      }
+    },
     {
       definition: {
         type: "function",
@@ -1180,27 +1175,13 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
       },
       execute: async (input) => {
         const stepId = stringInput(input, "stepId");
-        if (!isWorkflowStepId(stepId)) throw new Error(`Unknown workflow step: ${stepId}`);
+        if (!workflowSteps.some((step) => step.id === stepId)) throw new Error(`Unknown or disabled workflow step: ${stepId}`);
         const rawStatus = stringInput(input, "status");
         if (!["pending", "running", "completed", "failed"].includes(rawStatus)) throw new Error(`Unknown workflow status: ${rawStatus}`);
         const status = rawStatus as "pending" | "running" | "completed" | "failed";
         const progress = clampPercent(typeof input.progress === "number" ? input.progress : 0);
         const detail = stringInput(input, "detail");
-        const stepIndex = workflowSteps.findIndex((step) => step.id === stepId);
-        const steps = workflowSteps.map((step, index) => ({
-          ...step,
-          status: index < stepIndex ? "completed" as const : index === stepIndex ? status : "pending" as const,
-          progress: index < stepIndex ? 100 : index === stepIndex ? progress : 0,
-          detail: index === stepIndex ? detail : ""
-        }));
-        const isFinalComplete = status === "completed" && stepIndex === workflowSteps.length - 1;
-        ctx.workflowProgress?.({
-          title: stringInput(input, "title", "整合包服务端部署流程"),
-          currentStepId: stepId,
-          overallProgress: isFinalComplete ? 100 : clampPercent((stepIndex / workflowSteps.length) * 100 + progress / workflowSteps.length),
-          status,
-          steps
-        });
+        emitWorkflowProgress(ctx, stepId, status, progress, detail, stringInput(input, "title", "整合包服务端部署流程"));
         return `已更新工作流进度：${stepId} ${status} ${progress}%`;
       }
     },
@@ -1380,18 +1361,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         });
         await mkdir(path.join((await ctx.serverService.requireServer(ctx.getServerId())).directory, "server"), { recursive: true });
         const result = await ctx.fileService.extractServerSlotIntoServer(ctx.getServerId(), destinationPath, {
-          onProgress: (progress) => ctx.workflowProgress?.({
-            title: "整合包服务端部署流程",
-            currentStepId: "extract_to_workspace",
-            overallProgress: clampPercent(300 / workflowSteps.length + progress.percent / workflowSteps.length),
-            status: progress.percent >= 100 ? "completed" : "running",
-            steps: workflowSteps.map((step, index) => ({
-              ...step,
-              status: index < 3 ? "completed" : index === 3 ? progress.percent >= 100 ? "completed" : "running" : "pending",
-              progress: index < 3 ? 100 : index === 3 ? progress.percent : 0,
-              detail: index === 3 ? `正在解压到 ${destinationPath}：${progress.currentEntry}` : ""
-            }))
-          })
+          onProgress: (progress) => emitWorkflowProgress(ctx, "extract_to_workspace", "running", progress.percent, `正在解压到 ${destinationPath}：${progress.currentEntry}`)
         });
         return JSON.stringify(result, null, 2);
       }
@@ -1433,7 +1403,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
                 `使用 download_https_file_to_server 将官方 ${loader.name} installer 下载到 server/${loader.installerFileName}`,
                 `调用 install_agent_capability(capability=${loader.type}_server_setup)`,
                 `调用 setup_${loader.type}_server，并使用 manifest 的 Minecraft/${loader.name} 版本与已安装 Java`,
-                "按常规流程直启验证，再配置 MCDReforged"
+                "按流程配置内置 Python 与 MCDReforged，最后统一验证"
               ]
             }
             : {
@@ -1568,7 +1538,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "initialize_server_template",
-          description: "将内置模板复制到当前服务端目录。部署整合包时必须优先使用 reference 模板；reference 是内置 MCDReforged 模板，会创建 config.yml、permission.yml、plugins/、config/ 和 server/，后续 Minecraft 服务端文件必须放入 server/。",
+          description: "将内置模板复制到当前服务端目录，仅用于旧实例补齐或明确要求的模板修复。新建服务端已由后端自动套用 reference 模板，不必重复调用。reference 是内置 MCDReforged 模板，会创建 config.yml、permission.yml、plugins/、config/ 和 server/；后续 Minecraft 文件必须放入 server/。先检查已有文件，默认不覆盖。",
           parameters: objectSchema({ template: { type: "string", enum: templateNames }, overwrite: { type: "boolean" } })
         }
       },
@@ -1654,11 +1624,29 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "start_current_server",
-          description: "按当前服务端配置启动。后端只保证同一时间运行一个服务端，不区分 MCDR/普通服务端；startupCommand 非空时按统一启动指令执行，空时才自动选择服务端自带 run/start/server/launch 脚本或生成 Java 启动脚本。直启验证和 MCDR 验证前应由 Agent 先通过 update_current_server_config 切换 startupCommand。",
+          description: "按当前服务端配置启动。后端只保证同一时间运行一个服务端，不区分 MCDR/普通服务端；startupCommand 非空时按统一启动指令执行，空时才自动选择服务端自带 run/start/server/launch 脚本或生成 Java 启动脚本。最终验证前应由 Agent 先通过 update_current_server_config 将 startupCommand 切换为 MCDR 启动方式。",
           parameters: objectSchema({})
         }
       },
       execute: async () => JSON.stringify(await ctx.processManager.start(ctx.getServerId()))
+    },
+    {
+      definition: {
+        type: "function",
+        function: {
+          name: "wait_for_server_startup",
+          description: "阻塞等待当前服务端日志明确出现 Minecraft 启动完成标记 Done (...)!。必须在 start_current_server 后调用，用它替代 sleep、固定等待或反复轮询；服务端提前退出、取消或超时会立即返回错误。默认最多等待 180 秒，可通过 timeoutSeconds 调整（5-600 秒）。",
+          parameters: objectSchema({ timeoutSeconds: { type: "number", description: "最长等待秒数，默认 180，范围 5-600" } })
+        }
+      },
+      execute: async (input) => {
+        const rawTimeout = typeof input.timeoutSeconds === "number" ? input.timeoutSeconds : 180;
+        const timeoutSeconds = Math.min(Math.max(Math.floor(rawTimeout), 5), 600);
+        return JSON.stringify(await ctx.processManager.waitForStartup(ctx.getServerId(), {
+          timeoutMs: timeoutSeconds * 1000,
+          signal: ctx.signal
+        }));
+      }
     },
     {
       definition: {
@@ -1893,7 +1881,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         }
         if (layout === "mcdr") {
           layoutWarnings.push(
-            `${loaderName} 已安装到 server/。本工具不完成 MCDR 最终配置：直启验证后必须调用 configure_builtin_python_environment，编辑根目录 config.yml（working_directory=server，start_command 从 server/ 启动，handler 符合 ${loaderName}），再 update_current_server_config 设置 startupCommand={python} -m mcdreforged。`
+            `${loaderName} 已安装到 server/。本工具不完成 MCDR 最终配置：继续按系统中的流程编排完成内置 Python（configure_builtin_python_environment，已成功配置可复用）、根目录 config.yml（working_directory=server，start_command 从 server/ 启动，handler 符合 ${loaderName}）和 startupCommand={python} -m mcdreforged 的最终验证。`
           );
         }
         const normalizedArgsPath = argsPath.replace(/\\/g, "/");
@@ -1922,12 +1910,12 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
           nextSteps: layout === "mcdr"
             ? [
               "用 list_server_files 确认 mods/libraries/run 脚本/eula 在 server/ 内，根目录无 Minecraft 本体文件",
-              "update_current_server_config 将 startupCommand 设为 cd server && sh run.sh（或 server/ 内实际脚本）后 start_current_server 做直启验证",
+              "确认 config.yml 的 start_command 指向 server/ 内实际脚本，再配置 startupCommand={python} -m mcdreforged",
               "configure_builtin_python_environment",
               "编辑 config.yml 后 startupCommand={python} -m mcdreforged 做最终验证"
             ]
             : [
-              `确认 ${loaderName} args 与 eula 已就绪后按当前 startArgs 直启验证`
+              `确认 ${loaderName} args 与 eula 已就绪后进入 MCDReforged 最终验证`
             ],
           outputTail: output.slice(-3000),
           server: updated

@@ -226,7 +226,7 @@ export function createDeployMrpackServerTool(ctx: AgentToolContext): AgentTool {
       function: {
         name: deployMrpackServerToolInfo.name,
         description: deployMrpackServerToolInfo.description,
-        parameters: objectSchema({ javaPath: stringProperty, overwrite: { type: "boolean" } })
+        parameters: objectSchema({ javaPath: stringProperty, overwrite: { type: "boolean" }, phase: { type: "string", enum: ["files", "loader", "all"], description: "files 仅还原文件，loader 仅安装启动文件，all 执行全部（默认）。" } })
       }
     },
     execute: async (input) => {
@@ -238,17 +238,20 @@ export function createDeployMrpackServerTool(ctx: AgentToolContext): AgentTool {
       }
       const javaPath = stringInput(input, "javaPath");
       const overwrite = booleanInput(input, "overwrite");
+      const phase = stringInput(input, "phase") || "all";
+      if (!["files", "loader", "all"].includes(phase)) throw new Error("phase 必须是 files、loader 或 all");
+      if (phase === "loader" && !javaPath) throw new Error("Loader 阶段必须提供已验证的工作区 javaPath");
       const server = await ctx.serverService.requireServer(ctx.getServerId());
       const destinationPaths = includedFiles.map((file) => path.join("server", serverPath(safeFilePath(file))));
       const conflicts = (await Promise.all(destinationPaths.map(async (target) => await pathExists(path.join(server.directory, target)) ? target : null))).filter((target): target is string => Boolean(target));
-      if (conflicts.length > 0 && !overwrite) throw new Error(`目标文件已存在，默认拒绝覆盖：${conflicts.slice(0, 10).join(", ")}`);
+      if (phase !== "loader" && conflicts.length > 0 && !overwrite) throw new Error(`目标文件已存在，默认拒绝覆盖：${conflicts.slice(0, 10).join(", ")}`);
       await requireConfirmation(ctx, {
         title: "部署 Modrinth mrpack 服务端",
-        description: `Agent 准备将槽位中的 ${info.slot.fileName} 部署为 ${info.name || "Modrinth 整合包"}：下载并校验 ${includedFiles.length} 个服务端文件（required+optional），合并 overrides/server-overrides，并安装 ${loader.type} ${loader.version || ""}。${conflicts.length > 0 ? `将覆盖 ${conflicts.length} 个已有文件。` : ""}`,
+        description: `Agent 准备将槽位中的 ${info.slot.fileName} 部署为 ${info.name || "Modrinth 整合包"}（phase=${phase}）：${phase !== "loader" ? `下载并校验 ${includedFiles.length} 个服务端文件（required+optional），合并 overrides/server-overrides。` : ""}${phase !== "files" ? `安装 ${loader.type} ${loader.version || ""}。` : ""}${phase !== "loader" && conflicts.length > 0 ? `将覆盖 ${conflicts.length} 个已有文件。` : ""}`,
         risk: "high"
       });
       const downloadedFiles: string[] = [];
-      for (const [index, file] of includedFiles.entries()) {
+      for (const [index, file] of (phase === "loader" ? [] : includedFiles).entries()) {
         const relative = safeFilePath(file);
         const destination = path.join("server", serverPath(relative));
         if (!overwrite && await pathExists(path.join(server.directory, destination))) continue;
@@ -265,12 +268,13 @@ export function createDeployMrpackServerTool(ctx: AgentToolContext): AgentTool {
         }
         if (lastError) throw lastError;
       }
-      const overrides = await ctx.fileService.materializeMrpackOverrides(ctx.getServerId(), "server", overwrite);
+      const overrides = phase === "loader" ? { copiedOverrides: [] } : await ctx.fileService.materializeMrpackOverrides(ctx.getServerId(), "server", overwrite);
+       if (phase === "files") return JSON.stringify({ ok: true, phase, format: "mrpack", pack: summary(info), downloadedFiles, copiedOverrides: overrides.copiedOverrides, nextSteps: ["在还原到 server 目录阶段调用 deploy_mrpack_server_from_server_slot(phase=loader, javaPath=已验证的工作区Java)"] }, null, 2);
       const configuredLoader = await writeLoader(ctx, info, loader, javaPath || (await ctx.javaService.executableForInstalledVersion(ctx.javaService.recommendVersion(info.minecraftVersion))) || "java", overwrite);
       await writeFile(path.join(server.directory, "server", "eula.txt"), "eula=true\n", "utf8");
       const updated = await ctx.serverService.updateServer(ctx.getServerId(), {
         javaPath: javaPath || null,
-        javaVersion: ctx.javaService.recommendVersion(info.minecraftVersion),
+        javaVersion: phase === "loader" ? server.javaVersion : ctx.javaService.recommendVersion(info.minecraftVersion),
         minMemory: "4G",
         maxMemory: "4G",
         jarFile: ["vanilla", "fabric", "quilt"].includes(configuredLoader.type) ? "server.jar" : "",
@@ -279,7 +283,7 @@ export function createDeployMrpackServerTool(ctx: AgentToolContext): AgentTool {
         modpackName: info.name || info.versionId || "Modrinth mrpack",
         serverType: configuredLoader.type
       });
-      return JSON.stringify({ ok: true, format: "mrpack", pack: summary(info), loader: configuredLoader, downloadedFiles, copiedOverrides: overrides.copiedOverrides, server: updated, nextSteps: ["检查 server/ 中的 eula.txt、server.properties 与启动文件", "如需 MCDReforged，使用 reference 模板的 config.yml 将工作目录指向 server/，再配置 startupCommand={python} -m mcdreforged", "先直启验证，确认服务端完成启动后再配置 MCDReforged"] }, null, 2);
+       return JSON.stringify({ ok: true, format: "mrpack", pack: summary(info), loader: configuredLoader, downloadedFiles, copiedOverrides: overrides.copiedOverrides, server: updated, nextSteps: ["检查 server/ 中的 eula.txt、server.properties 与启动文件", "最终验证阶段将服务端启动命令写入 MCDReforged config.yml，再切换 startupCommand={python} -m mcdreforged"] }, null, 2);
     }
   };
 }

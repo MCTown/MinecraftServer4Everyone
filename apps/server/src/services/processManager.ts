@@ -88,6 +88,12 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const MINECRAFT_STARTUP_COMPLETE = /\bDone\s*\([^\r\n)]*\)!/;
+
+function isAbortSignal(signal: AbortSignal | undefined) {
+  return Boolean(signal?.aborted);
+}
+
 function windowsSystemExecutable(name: string) {
   const systemRoot = process.env.SystemRoot || process.env.SYSTEMROOT || "C:\\Windows";
   return path.join(systemRoot, "System32", name);
@@ -146,6 +152,60 @@ export class ProcessManager {
 
   getActiveServerId() {
     return this.running?.serverId ?? null;
+  }
+
+  /**
+   * Wait for Minecraft's explicit startup marker instead of making the Agent
+   * guess with a fixed sleep. Process and timeout events are handled here so
+   * callers cannot accidentally keep waiting after a failed launch.
+   */
+  async waitForStartup(serverId: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}) {
+    const timeoutMs = Math.min(Math.max(Math.floor(options.timeoutMs ?? 180_000), 1_000), 600_000);
+    const startedAt = Date.now();
+    const server = await this.serverService.requireServer(serverId);
+    if (isAbortSignal(options.signal)) throw new Error("等待服务端启动已取消");
+    if (["stopped", "crashed", "orphaned"].includes(server.status)) {
+      throw new Error(`服务端当前未运行，无法等待启动完成，状态：${server.status}`);
+    }
+    if (this.running && this.running.serverId !== serverId) {
+      throw new Error(`另一个服务端正在运行：${this.running.serverId}`);
+    }
+    const existing = this.consoleLogService.listAll(serverId).find((entry) => MINECRAFT_STARTUP_COMPLETE.test(entry.text));
+    if (existing) {
+      return {
+        serverId,
+        ready: true as const,
+        elapsedMs: Math.max(0, Date.now() - startedAt),
+        matchedLog: existing.text.trim()
+      };
+    }
+
+    return new Promise<{ serverId: string; ready: true; elapsedMs: number; matchedLog: string }>((resolve, reject) => {
+      let settled = false;
+      const finish = (error: Error | null, result?: { matchedLog: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        eventBus.off("console", onConsole);
+        eventBus.off("serverStatus", onStatus);
+        options.signal?.removeEventListener("abort", onAbort);
+        if (error) reject(error);
+        else resolve({ serverId, ready: true, elapsedMs: Date.now() - startedAt, matchedLog: result!.matchedLog });
+      };
+      const onConsole = (entry: import("../types.js").ConsoleLogEntry) => {
+        if (entry.serverId !== serverId) return;
+        if (MINECRAFT_STARTUP_COMPLETE.test(entry.text)) finish(null, { matchedLog: entry.text.trim() });
+      };
+      const onStatus = (event: { serverId: string; status: ServerRecord["status"] }) => {
+        if (event.serverId !== serverId || !["stopped", "crashed", "orphaned"].includes(event.status)) return;
+        finish(new Error(`服务端在完成启动前已退出，当前状态：${event.status}`));
+      };
+      const onAbort = () => finish(new Error("等待服务端启动已取消"));
+      const timeout = setTimeout(() => finish(new Error(`等待服务端启动超时（${timeoutMs}ms）。日志中未发现 Minecraft 的 Done (...)! 启动完成标记。`)), timeoutMs);
+      eventBus.on("console", onConsole);
+      eventBus.on("serverStatus", onStatus);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   /**

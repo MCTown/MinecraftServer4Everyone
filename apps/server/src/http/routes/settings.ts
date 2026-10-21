@@ -5,6 +5,7 @@ import { listAgentToolInfos } from "../../agent/toolCatalog.js";
 import { fetchDispatcher } from "../../services/proxySupport.js";
 import { idParams, parseBody } from "../helpers.js";
 import type { RouteServices } from "../types.js";
+import { compileDeploymentWorkflow, defaultDeploymentWorkflow, deploymentWorkflowSchema, workflowIssues } from "../../services/deploymentWorkflow.js";
 
 function normalizeProxyTestTarget(rawTarget: string | undefined) {
   const trimmed = rawTarget?.trim() || "www.google.com";
@@ -96,6 +97,23 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
   });
 
   app.post("/api/prompts/global/reset", async () => ({ prompt: services.promptService.resetGlobalPrompt() }));
+
+  const validWorkflowSchema = deploymentWorkflowSchema.superRefine((workflow, context) => {
+    for (const message of workflowIssues(workflow)) context.addIssue({ code: z.ZodIssueCode.custom, message });
+  });
+  function parseWorkflowBody<T>(schema: z.ZodSchema<T>, input: unknown) {
+    const parsed = schema.safeParse(input);
+    if (!parsed.success) throw Object.assign(new Error(parsed.error.issues.map((issue) => issue.message).join("；")), { statusCode: 400 });
+    return parsed.data;
+  }
+  app.get("/api/settings/deployment-workflow", async () => services.promptService.getDeploymentWorkflowState());
+  app.put("/api/settings/deployment-workflow", async (request) => services.promptService.setDeploymentWorkflow(parseWorkflowBody(validWorkflowSchema, request.body)));
+  app.post("/api/settings/deployment-workflow/reset", async () => services.promptService.setDeploymentWorkflow(defaultDeploymentWorkflow()));
+  // Draft preview never persists settings or calls a model.
+  app.post("/api/settings/deployment-workflow/preview", async (request) => {
+    const body = parseWorkflowBody(z.object({ workflow: validWorkflowSchema, serverId: z.string().optional() }), request.body);
+    return { prompt: compileDeploymentWorkflow(body.workflow), effectivePrompt: await services.agentService.previewSystemPrompt(body.workflow, body.serverId) };
+  });
 
   const agentSettingsSchema = z.object({
     autoConfirm: z.boolean().optional(),
