@@ -8,6 +8,7 @@ import type { AgentSettings, AgentToolSettings } from "../types.js";
 import { nowIso } from "../utils/time.js";
 import { ServerService } from "./serverService.js";
 import { SkillService } from "./skillService.js";
+import { compileDeploymentWorkflow, defaultDeploymentWorkflow, deploymentStageCatalog, deploymentWorkflowSchema, migrateDeploymentWorkflow, normalizeGraphWorkflow, workflowIssues, type DeploymentWorkflow } from "./deploymentWorkflow.js";
 
 const agentAutoConfirmKey = "agent_auto_confirm";
 const agentDownloadProxyEnabledKey = "agent_download_proxy_enabled";
@@ -20,6 +21,7 @@ const braveSearchApiKeySettingKey = "brave_search_api_key";
 const tavilyApiKeySettingKey = "tavily_api_key";
 const searxngBaseUrlSettingKey = "searxng_base_url";
 const minimumAgentMemoryMb = 512;
+const deploymentWorkflowKey = "deployment_workflow_v1";
 
 function systemMemoryMb() {
   return Math.max(minimumAgentMemoryMb, Math.floor(os.totalmem() / 1024 / 1024));
@@ -174,11 +176,34 @@ export class PromptService {
     return this.setGlobalPrompt(defaultSystemPrompt);
   }
 
-  async getEffectivePrompt(serverId: string) {
-    const server = await this.serverService.requireServer(serverId);
-    const basePrompt = !server.useGlobalPrompt && server.promptOverride ? server.promptOverride : this.getGlobalPrompt();
+  getDeploymentWorkflow(): DeploymentWorkflow {
+    const saved = this.getSetting(deploymentWorkflowKey);
+    if (!saved) return defaultDeploymentWorkflow();
+    try {
+      const stored = deploymentWorkflowSchema.parse(JSON.parse(saved));
+      const parsed = deploymentWorkflowSchema.parse(migrateDeploymentWorkflow(stored));
+      if (!workflowIssues(parsed).length) return normalizeGraphWorkflow(parsed);
+    } catch { /* A corrupt setting must not remove deployment safety checks. */ }
+    return defaultDeploymentWorkflow();
+  }
+
+  getDeploymentWorkflowState() {
+    const workflow = this.getDeploymentWorkflow();
+    return { workflow, defaults: defaultDeploymentWorkflow(), catalog: deploymentStageCatalog, prompt: compileDeploymentWorkflow(workflow) };
+  }
+
+  setDeploymentWorkflow(workflow: DeploymentWorkflow) {
+    const parsed = deploymentWorkflowSchema.parse(workflow);
+    const issues = workflowIssues(parsed);
+    if (issues.length) throw new Error(issues.join("；"));
+    this.setSetting(deploymentWorkflowKey, JSON.stringify(normalizeGraphWorkflow(parsed)));
+    return this.getDeploymentWorkflowState();
+  }
+
+  async getEffectivePrompt(serverId?: string, workflow = this.getDeploymentWorkflow()) {
+    const server = serverId ? await this.serverService.requireServer(serverId) : null;
+    const basePrompt = server && !server.useGlobalPrompt && server.promptOverride ? server.promptOverride : this.getGlobalPrompt();
     const skillContents = await this.skillService.getEnabledSkillContents();
-    if (skillContents.length === 0) return basePrompt;
-    return `${basePrompt}\n\n# Enabled Skills\n\n${skillContents.join("\n\n")}`;
+    return [basePrompt, skillContents.length ? `# Enabled Skills\n\n${skillContents.join("\n\n")}` : "", compileDeploymentWorkflow(workflow)].filter(Boolean).join("\n\n");
   }
 }

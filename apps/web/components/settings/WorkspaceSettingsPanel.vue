@@ -2,9 +2,10 @@
 import type { AgentToolRecord, AgentToolSettings, JavaDownloadSource, JavaDownloadSourceOption, JavaInstallTask, JavaInstallTaskStatus, JavaVersionRecord, ModelApiType, SkillRecord } from "~/types/app";
 import type { SettingsNavItem, SettingsTab } from "~/types/ui";
 import type { IconName } from "~/utils/icons";
+import DeploymentWorkflowEditor from "~/components/settings/DeploymentWorkflowEditor.vue";
 
 const navIcons: Record<SettingsTab, IconName> = {
-  overview: "sliders", model: "cpu", skills: "sparkles", tools: "tools", agent: "agent", java: "coffee"
+  overview: "sliders", model: "cpu", workflow: "workflow", skills: "sparkles", tools: "tools", agent: "agent", java: "coffee"
 };
 
 interface ModelForm {
@@ -96,6 +97,11 @@ function updateAgentMemory(event: Event) {
 const search = ref("");
 const { theme, setTheme } = useTheme();
 const content = ref<HTMLElement | null>(null);
+const workflowEditor = ref<InstanceType<typeof DeploymentWorkflowEditor> | null>(null);
+function refreshSettings() {
+  emit("refresh");
+  if (props.settingsTab === "workflow") void workflowEditor.value?.refresh();
+}
 const skillFilter = ref<"all" | "enabled" | "disabled">("all");
 const currentPage = computed(() => props.settingsNavItems.find((item) => item.id === props.settingsTab));
 const enabledSkills = computed(() => props.skills.filter((skill) => skill.enabled).length);
@@ -109,6 +115,7 @@ const filteredTools = computed(() => props.agentTools.filter((tool) => `${tool.n
 const pageDescriptions: Record<SettingsTab, string> = {
   overview: "为你的工作空间，设定恰到好处的默认值。",
   model: "连接模型服务，为所有实例提供 AI 支持。",
+  workflow: "让部署步骤井然有序，让 Agent 按你的流程行动。",
   skills: "选择 Agent 遵循的工作流，让每次部署更可靠。",
   tools: "了解 Agent 可用的工具，管理它们需要的访问凭据。",
   agent: "调整执行方式、资源偏好与网络连接。",
@@ -152,7 +159,7 @@ watch(() => props.settingsTab, async () => {
           <h1>{{ currentPage?.label }}</h1>
           <p class="settings-page-description">{{ pageDescriptions[props.settingsTab] }}</p>
         </div>
-        <button type="button" class="settings-refresh" :disabled="props.loading" @click="emit('refresh')"><AppIcon name="refresh" :spin="props.loading" />{{ props.loading ? '刷新中…' : '刷新配置' }}</button>
+        <button type="button" class="settings-refresh" :disabled="props.loading" @click="refreshSettings"><AppIcon name="refresh" :spin="props.loading" />{{ props.loading ? '刷新中…' : '刷新配置' }}</button>
       </header>
 
       <div :key="props.settingsTab" class="settings-page-body">
@@ -175,7 +182,7 @@ watch(() => props.settingsTab, async () => {
         <div class="settings-overview-grid">
           <button v-for="item in props.settingsNavItems.filter((item) => item.id !== 'overview')" :key="item.id" type="button" class="settings-overview-link" @click="emit('update:settings-tab', item.id)">
             <span class="settings-category-icon"><AppIcon :name="navIcons[item.id]" :size="22" /></span>
-            <span class="settings-overview-copy"><strong>{{ item.label }}</strong><small>{{ item.desc }}</small><span class="settings-link-detail">{{ item.id === 'model' ? (props.modelForm.baseUrl ? '已填写连接地址' : '等待配置连接') : item.id === 'skills' ? `${enabledSkills} 个技能已启用` : item.id === 'tools' ? (missingCredentials ? `${missingCredentials} 个工具需要凭据` : `${props.agentTools.length} 个工具可用`) : item.id === 'agent' ? (props.autoConfirm ? '自动确认已开启' : '写操作需手动确认') : `${installedJava} 个版本已安装` }}</span></span>
+            <span class="settings-overview-copy"><strong>{{ item.label }}</strong><small>{{ item.desc }}</small><span class="settings-link-detail">{{ item.id === 'model' ? (props.modelForm.baseUrl ? '已填写连接地址' : '等待配置连接') : item.id === 'workflow' ? '可视化编排 · 实时 Prompt 预览' : item.id === 'skills' ? `${enabledSkills} 个技能已启用` : item.id === 'tools' ? (missingCredentials ? `${missingCredentials} 个工具需要凭据` : `${props.agentTools.length} 个工具可用`) : item.id === 'agent' ? (props.autoConfirm ? '自动确认已开启' : '写操作需手动确认') : `${installedJava} 个版本已安装` }}</span></span>
             <AppIcon name="arrowRight" class="settings-link-arrow" />
           </button>
         </div>
@@ -206,6 +213,8 @@ watch(() => props.settingsTab, async () => {
         </div>
         <aside class="settings-context-card"><AppIcon name="info" /><h3>一个连接，所有实例</h3><p>这里保存平台的默认模型连接。你仍然可以在对话中按会话切换模型。</p><hr /><h3>连接小提示</h3><p>Base URL 应包含服务商要求的版本路径。模型名称请使用服务商提供的准确 ID。</p><p>下载代理不影响模型请求。</p></aside>
       </div>
+
+      <DeploymentWorkflowEditor v-else-if="props.settingsTab === 'workflow'" ref="workflowEditor" />
 
       <div v-else-if="props.settingsTab === 'skills'" class="settings-catalog">
         <div class="settings-catalog-toolbar"><div class="settings-filter-group" aria-label="筛选技能"><button v-for="filter in (['all', 'enabled', 'disabled'] as const)" :key="filter" type="button" :aria-pressed="skillFilter === filter" @click="skillFilter = filter">{{ filter === 'all' ? '全部技能' : filter === 'enabled' ? '已启用' : '已禁用' }}<span>{{ filter === 'all' ? props.skills.length : filter === 'enabled' ? enabledSkills : props.skills.length - enabledSkills }}</span></button></div><label class="settings-search"><AppIcon name="search" /><input v-model="search" type="search" placeholder="搜索技能…" aria-label="搜索技能" /></label></div>

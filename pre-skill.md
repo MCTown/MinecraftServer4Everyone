@@ -45,10 +45,10 @@
 3. Minecraft 服务端本体必须放在 `server/` 目录下。服务端槽位中的 zip/tar.gz/tgz 必须用 `extract_server_slot_to_workspace` 解压到 `server`；不要解压到根目录，不要把 `mods`、`libraries`、`world`、`server.jar` 等 Minecraft 服务端文件放在 MCDReforged 根目录。
 4. Forge 1.17+ 用 `setup_forge_server` 时，在 reference 模板下必须安装到 `server/`，禁止把 libraries/mods/run 写到根目录。该工具成功只表示 Forge 已安装，不表示部署完成。
 5. 布局硬门禁：解压/安装后若根目录出现 `mods`、`libraries`、`world`、`run.sh`/`run.bat`、`eula.txt`、`server.properties`、`user_jvm_args.txt`、`server.jar` 任一，视为失败，必须先修复。
-6. 直启验证成功后，必须调用 `configure_builtin_python_environment` 下载并配置工作区内置 Python 3.10、pip 与 MCDReforged；不要直接使用或要求系统 Python、venv 或 ensurepip。
+6. 必须调用 `configure_builtin_python_environment` 下载并配置工作区内置 Python 3.10、pip 与 MCDReforged；不要直接使用或要求系统 Python、venv 或 ensurepip。
 7. `serverType` 只是标签；Agent 必须用 `update_current_server_config` 切换 `startupCommand`。直启用 `cd server && sh run.sh` 一类命令；MCDR 最终验证用 `{python} -m mcdreforged`。
 8. 编辑 MCDReforged 根目录 `config.yml`：`working_directory` 必须保持 `server`；`start_command` 必须是从 `server/` 工作目录可执行的非交互启动命令；`handler` 必须符合服务端核心/Loader。配置完成后设置 `startupCommand={python} -m mcdreforged`。未完成内置 Python、config.yml 与 MCDR startupCommand 时，部署不算完成。
 9. 在首次启动前，必须在真正的 Minecraft 服务端工作目录 `server/` 下创建或更新 `eula.txt`，内容至少包含 `eula=true`。不要等待服务端在终端里询问 EULA，也不要尝试通过交互输入回答 `true`；Agent 无法可靠处理这类交互，必须通过文件预先完成。
 10. 所有启动命令都必须使用非交互方式：Minecraft 服务端启动参数包含 `nogui`；不要运行会停在 stdin 提示、菜单、确认问题或 TUI 界面的命令。如果命令需要确认参数或配置文件，先写入文件或使用非交互参数解决。
-11. 直启验证应在 `server/` 内完成；最终验证必须通过 MCDReforged 启动服务端，并由后端使用工作区内置 Python 执行 `-m mcdreforged`。
+11. 最终验证必须通过 MCDReforged 启动服务端，并由后端使用工作区内置 Python 执行 `-m mcdreforged`；Minecraft 启动命令写入 MCDReforged 的 `start_command`，工作目录保持 `server/`。
 12. 检查服务端是否完成启动；如果日志显示 `Failed to load eula.txt`、`By answering 'true' to this prompt` 或 `You need to agree to the EULA`，停止等待交互，立即写入 `server/eula.txt` 后重新启动。
