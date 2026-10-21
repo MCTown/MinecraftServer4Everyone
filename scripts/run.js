@@ -186,7 +186,10 @@ async function main() {
     NUXT_HOST: internalWebHost,
     NUXT_PORT: String(webPort),
     NITRO_HOST: internalWebHost,
-    NITRO_PORT: String(webPort)
+    NITRO_PORT: String(webPort),
+    // Server-side rendering talks to the backend directly, so it needs the
+    // port chosen above instead of the APP_PORT default.
+    NUXT_API_BASE: process.env.NUXT_API_BASE ?? process.env.NUXT_PUBLIC_API_BASE ?? `http://127.0.0.1:${serverPort}`
   });
 
   startProcess("proxy", process.execPath, ["proxy.js"], {
