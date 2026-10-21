@@ -20,3 +20,7 @@ __pycache__/
 .openchamber/
 .serena/
 .tmp/
+# Machine-specific chathub credentials must never be committed.
+templates/reference/config/chathub/
+# Benchmark server packs are large local downloads used for evaluation only.
+benchmark/
