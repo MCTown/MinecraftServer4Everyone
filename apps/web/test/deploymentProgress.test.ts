@@ -46,3 +46,15 @@ test("absent and empty workflows do not invent deployment stages", () => {
   assert.deepEqual(resolveDeploymentStage(null, "ready"), { current: null, index: -1, next: null });
   assert.deepEqual(resolveDeploymentStage({ ...workflow(), steps: [] }, "running"), { current: null, index: -1, next: null });
 });
+
+test("parallel branches remain in the active turn until joined and never label a future node as current", () => {
+  const source = workflow();
+  source.steps.splice(2, 0, { id: "python", label: "独立分支", status: "pending", progress: 0, detail: "" });
+  source.turn = { runId: "run", turnId: "turn", index: 1, total: 3, stepIds: ["install", "python"] };
+  assert.equal(resolveDeploymentStage(source, "running").next?.id, "start");
+  source.steps[1]!.status = "completed";
+  assert.equal(resolveDeploymentStage(source, "running").current?.id, "python");
+  source.steps[2]!.status = "completed";
+  assert.equal(resolveDeploymentStage(source, "running").current?.id, "python");
+  assert.equal(resolveDeploymentStage(source, "running").next?.id, "start");
+});

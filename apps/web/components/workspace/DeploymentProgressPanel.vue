@@ -54,14 +54,19 @@ const uploadLabel = computed(() => props.slotUpload.done ? "上传完成" : uplo
 const compactLabel = computed(() => props.slotUpload.active ? uploadLabel.value : presentation.value.label);
 const compactPercent = computed(() => props.slotUpload.active ? uploadPercent.value : props.workflow ? normalizedPercent.value : null);
 const stage = computed(() => resolveDeploymentStage(props.workflow, props.state));
+const currentTurn = computed(() => props.workflow?.turn);
+const activeBranches = computed(() => props.workflow?.steps.filter((step) => currentTurn.value?.stepIds.includes(step.id)) ?? []);
+function isCurrent(id: string) { return currentTurn.value ? currentTurn.value.stepIds.includes(id) && !workflowFinished.value : stage.value.current?.id === id; }
 const stageTitle = computed(() => props.loading ? "正在读取部署记录…" : props.slotUpload.active ? uploadLabel.value
   : props.state === "completed" ? "所有部署阶段已完成"
     : stage.value.current?.label ?? (props.state === "not_started" ? "准备部署服务端" : presentation.value.label));
 const stageCaption = computed(() => props.slotUpload.active ? "准备安装包"
+  : currentTurn.value ? `Turn ${currentTurn.value.index + 1} / ${currentTurn.value.total}${activeBranches.value.length > 1 ? ' · 并行汇合' : ''}`
   : props.state === "completed" ? "部署结果"
     : stage.value.current ? `第 ${stage.value.index + 1} / ${props.workflow?.steps.length} 阶段`
       : props.workflow ? "等待阶段更新" : "部署准备");
 const stageDetail = computed(() => props.slotUpload.active ? "上传仅保存安装包，完成后由 Agent 继续部署。"
+  : currentTurn.value?.waitingForJobs ? "正在等待本轮后台工具结束并核验结果；不会提前启动下一 turn。"
   : props.state === "completed" ? presentation.value.hint
     : stage.value.current?.detail || presentation.value.hint);
 const stageIcon = computed<IconName>(() => props.slotUpload.active ? "upload" : presentation.value.icon);
@@ -153,6 +158,7 @@ function collapsePanel() {
               <span v-if="compactPercent !== null" class="deployment-overall-percent">{{ compactPercent }}<small>%</small><span>{{ props.slotUpload.active ? '上传进度' : '总进度' }}</span></span>
             </div>
             <p class="deployment-description">{{ stageDetail }}</p>
+            <p v-if="activeBranches.length > 1" class="deployment-description">本轮分支：{{ activeBranches.map(step => `${step.label}（${stepStatusText(step)}）`).join(' ∥ ') }}。全部完成后收束。</p>
             <div class="deployment-next-stage"><span>{{ props.state === 'completed' ? '接下来' : ['waiting_confirmation', 'retrying', 'failed', 'cancelled'].includes(props.state) ? '如何继续' : '下一步' }}</span><AppIcon name="arrowRight" :size="12" /><strong>{{ nextStageLabel }}</strong></div>
           </div>
 
@@ -160,15 +166,15 @@ function collapsePanel() {
             <h3 :title="props.workflow.title">部署流程</h3><span>{{ completedSteps }} / {{ props.workflow.steps.length }} 阶段已完成</span>
           </div>
           <div v-if="props.workflow" class="deployment-flow-meter" role="progressbar" aria-label="部署总进度" :aria-valuenow="normalizedPercent" :aria-valuetext="`${stageTitle}，总进度 ${normalizedPercent}%`" :aria-valuemin="0" :aria-valuemax="100">
-            <span v-for="step in props.workflow.steps" :key="step.id" :class="[`deployment-flow-${step.status}`, { 'is-current': step.id === stage.current?.id }]" :title="`${step.label}：${stepStatusText(step)}`"><span :style="{ width: `${step.status === 'completed' ? 100 : clampPercent(step.progress)}%` }" /></span>
+            <span v-for="step in props.workflow.steps" :key="step.id" :class="[`deployment-flow-${step.status}`, { 'is-current': isCurrent(step.id) }]" :title="`${step.label}：${stepStatusText(step)}`"><span :style="{ width: `${step.status === 'completed' ? 100 : clampPercent(step.progress)}%` }" /></span>
           </div>
           <ol v-if="props.workflow?.steps.length" class="deployment-timeline" aria-label="部署步骤">
             <li
               v-for="(step, index) in props.workflow.steps"
               :key="step.id"
               class="deployment-step"
-              :class="[`deployment-step-${step.status}`, { 'is-current': step.id === stage.current?.id, 'is-interrupted': props.state === 'cancelled' }]"
-              :aria-current="step.id === stage.current?.id ? 'step' : undefined"
+              :class="[`deployment-step-${step.status}`, { 'is-current': isCurrent(step.id), 'is-interrupted': props.state === 'cancelled' }]"
+              :aria-current="isCurrent(step.id) ? 'step' : undefined"
               :data-workflow-step-id="step.id"
             >
               <span class="deployment-step-marker" aria-hidden="true">
@@ -178,7 +184,7 @@ function collapsePanel() {
                 <span v-else>{{ String(index + 1).padStart(2, '0') }}</span>
               </span>
               <div class="deployment-step-copy">
-                <div class="deployment-step-heading"><strong>{{ step.label }}</strong><span>{{ stepStatusText(step) }}</span></div>
+                <div class="deployment-step-heading"><strong>{{ step.label }}<small v-if="step.roundIndex !== undefined"> · T{{ step.roundIndex + 1 }}{{ step.parallelGroup ? ' 并行' : '' }}</small></strong><span>{{ stepStatusText(step) }}</span></div>
               </div>
             </li>
           </ol>

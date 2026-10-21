@@ -7,6 +7,7 @@ import AgentActivityRow from "~/components/agent/AgentActivityRow.vue";
 import { renderAgentMarkdown } from "~/utils/agentMarkdown";
 import { agentStatusLabel, buildAgentTurns, type AgentTurn } from "~/utils/agentTimeline";
 import { copyAgentText } from "~/utils/agentClipboard";
+import { cacheRateLabel } from "~/utils/cacheUsage";
 
 const props = defineProps<{
   attachments: PendingAgentAttachment[];
@@ -177,7 +178,16 @@ defineExpose({ focusPanel, focusInput, getMessageList, openUploadPicker });
         <span v-else-if="props.contextError" class="context-ring" role="img" aria-label="上下文用量暂不可用" title="上下文用量暂不可用">—</span>
         <div v-else class="context-ring" :style="props.contextRingStyle" role="img" :aria-label="props.contextRemainingLabel" tabindex="0">
           <span class="context-ring-core"><strong>{{ Math.round(props.contextUsage.remainingRatio * 100) }}</strong><small>%</small></span>
-          <div class="context-ring-tooltip" role="tooltip"><strong>上下文用量</strong><span>剩余 {{ Math.round(props.contextUsage.remainingRatio * 100) }}%</span><span>已用 {{ props.contextUsage.usedTokens.toLocaleString() }} tokens</span><span>剩余 {{ props.contextUsage.remainingTokens.toLocaleString() }} tokens</span><span>上限 {{ props.contextUsage.maxTokens.toLocaleString() }} tokens</span></div>
+          <div class="context-ring-tooltip" role="tooltip">
+            <strong>上下文用量</strong>
+            <span>剩余 {{ Math.round(props.contextUsage.remainingRatio * 100) }}%</span>
+            <span>已用 {{ props.contextUsage.usedTokens.toLocaleString() }} tokens</span>
+            <span>剩余 {{ props.contextUsage.remainingTokens.toLocaleString() }} tokens</span>
+            <span>上限 {{ props.contextUsage.maxTokens.toLocaleString() }} tokens</span>
+            <strong>最近一次请求</strong>
+            <span>缓存率 {{ cacheRateLabel(props.contextUsage.cache) }}</span>
+            <span v-if="props.contextUsage.cache?.status === 'available'">命中 {{ props.contextUsage.cache.hitTokens?.toLocaleString() }} / {{ props.contextUsage.cache.inputTokens?.toLocaleString() }} tokens</span>
+          </div>
         </div>
         <button class="agent-icon-button" type="button" title="压缩上下文" aria-label="压缩上下文" :disabled="props.busy || !props.messages.length" @click="emit('compress')"><AgentIcon name="compress" /></button>
         <button class="agent-icon-button" type="button" title="清除上下文" aria-label="清除上下文" :disabled="props.busy || !props.messages.length" @click="emit('clear')"><AgentIcon name="trash" /></button>

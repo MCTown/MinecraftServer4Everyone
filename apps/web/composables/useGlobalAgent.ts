@@ -1,4 +1,4 @@
-import type { AgentActivity, AgentContextUsage, AgentFocusInstance, AgentMessage, AgentRetryState, AgentStatus } from "~/types/app";
+import type { AgentActivity, AgentConfirmationRequest, AgentContextUsage, AgentFocusInstance, AgentMessage, AgentRetryState, AgentStatus, AgentToolConfigRequired } from "~/types/app";
 
 /**
  * Dashboard-level Agent conversation. Mirrors the per-instance agent's REST and
@@ -10,6 +10,9 @@ import type { AgentActivity, AgentContextUsage, AgentFocusInstance, AgentMessage
  */
 export function useGlobalAgent() {
   const { api } = useApi();
+  const delivery = useAgentDelivery();
+  const confirmation = ref<AgentConfirmationRequest | null>(null);
+  const toolConfigRequired = ref<AgentToolConfigRequired | null>(null);
 
   const messages = ref<AgentMessage[]>([]);
   const historyLoad = useResourceLoadState();
@@ -26,9 +29,10 @@ export function useGlobalAgent() {
     remainingRatio: 1,
     remainingPercent: 100
   });
-  const focus = ref<AgentFocusInstance | null>(null);
+  const focus = ref<(AgentFocusInstance & { id?: string }) | null>(null);
 
-  const busy = computed(() => ["thinking", "running", "waiting_confirmation", "retrying"].includes(status.value));
+  const busy = computed(() => ["thinking", "running", "waiting_confirmation", "retrying"].includes(status.value)
+    || delivery.pending.value.some((item) => item.scopeId === "global"));
 
   let socket: WebSocket | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -109,13 +113,18 @@ export function useGlobalAgent() {
 
   function handleEvent(payload: {
     type?: string; status?: AgentStatus; content?: string; messageId?: string; messages?: AgentMessage[];
-    activity?: AgentActivity; createdAt?: string; retry?: AgentRetryState; focus?: AgentFocusInstance; modelName?: string | null;
+    activity?: AgentActivity; createdAt?: string; retry?: AgentRetryState; focus?: (AgentFocusInstance & { id?: string }) | null; modelName?: string | null;
+    confirmation?: AgentConfirmationRequest | null;
+    toolConfigRequired?: AgentToolConfigRequired | null;
   }) {
     if (payload.type === "snapshot" && payload.messages) {
       messageRevision += 1;
       historyLoad.acceptSnapshot();
       messages.value = payload.messages;
       retry.value = payload.retry ?? null;
+      confirmation.value = payload.confirmation ?? null;
+      toolConfigRequired.value = payload.toolConfigRequired ?? null;
+      if (payload.focus) focus.value = payload.focus;
       if (payload.status) status.value = payload.status;
       if (payload.modelName !== undefined && payload.modelName !== null) activeModel.value = payload.modelName;
       void loadContextUsage();
@@ -123,6 +132,9 @@ export function useGlobalAgent() {
     if (payload.type === "model") {
       activeModel.value = payload.modelName ?? "";
     }
+    if (payload.type === "confirmation_required") confirmation.value = payload.confirmation ?? null;
+    if (payload.type === "confirmation_resolved") confirmation.value = null;
+    if (payload.type === "tool_config_required") toolConfigRequired.value = payload.toolConfigRequired ?? null;
     if ((payload.type === "activity" || payload.type === "activity_delta") && payload.messageId && payload.activity) {
       updateActivity(payload.messageId, payload.content ?? "", payload.activity, payload.createdAt, payload.type === "activity_delta");
     }
@@ -213,18 +225,7 @@ export function useGlobalAgent() {
     if (!text || busy.value) return;
     appendMessage("user", text);
     status.value = "thinking";
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: "message", content: text, reasoningEffort }));
-      return;
-    }
-    try {
-      const result = await api<{ response: string; status: AgentStatus }>("/api/agent/messages", { method: "POST", body: { content: text, reasoningEffort } });
-      status.value = result.status ?? "completed";
-      await loadMessages();
-    } catch (error) {
-      status.value = "failed";
-      appendMessage("system", `错误：${error instanceof Error ? error.message : String(error)}`);
-    }
+    await delivery.send("global", text, reasoningEffort);
   }
 
   async function retryNow() {
@@ -247,6 +248,7 @@ export function useGlobalAgent() {
 
   async function cancel() {
     if (!busy.value) return;
+    delivery.discardScope("global");
     status.value = "cancelled";
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "cancel" }));
     else await api("/api/agent/cancel", { method: "POST" }).catch(() => undefined);
@@ -276,8 +278,20 @@ export function useGlobalAgent() {
     return value;
   }
 
+  async function resolveConfirmation(approved: boolean) {
+    const current = confirmation.value;
+    if (!current) return;
+    await api("/api/agent/confirmation", { method: "POST", body: { confirmationId: current.id, approved } });
+    if (confirmation.value?.id === current.id) confirmation.value = null;
+  }
+
+  async function acknowledgeFocus(id?: string) {
+    if (id) await api("/api/agent/focus/ack", { method: "POST", body: { id } });
+    if (!id || focus.value?.id === id) focus.value = null;
+  }
+
   return {
-    messages, status, retry, contextUsage, focus, busy, historyLoad, contextLoad, activeModel,
+    messages, status, retry, contextUsage, focus, busy, historyLoad, contextLoad, activeModel, confirmation, resolveConfirmation, acknowledgeFocus, toolConfigRequired,
     loadMessages, loadContextUsage, connect, close, send, retryNow, cancel, clearContext, compressContext, consumeFocus, setModel
   };
 }

@@ -8,6 +8,7 @@ const loading = ref(false);
 const router = useRouter();
 
 async function handleLogin() {
+  if (loading.value) return;
   if (!password.value.trim()) {
     error.value = "请输入密码";
     return;
@@ -21,16 +22,12 @@ async function handleLogin() {
     });
     const maxAge = 7 * 24 * 60 * 60;
     document.cookie = `mcsa_token=${result.token}; path=/; max-age=${maxAge}; SameSite=Lax`;
-    router.replace("/");
+    await router.replace("/");
   } catch (e: any) {
-    error.value = e?.data?.error || e?.message || "登录失败";
+    error.value = e?.data?.error || e?.message || "登录失败，请稍后重试";
   } finally {
     loading.value = false;
   }
-}
-
-function onKeydown(e: KeyboardEvent) {
-  if (e.key === "Enter") handleLogin();
 }
 </script>
 
@@ -51,7 +48,6 @@ function onKeydown(e: KeyboardEvent) {
           placeholder="输入访问密码"
           autocomplete="current-password"
           autofocus
-          @keydown="onKeydown"
         />
         <p v-if="error" class="login-error">{{ error }}</p>
         <button type="submit" :disabled="loading">

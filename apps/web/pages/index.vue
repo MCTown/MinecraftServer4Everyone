@@ -2,6 +2,7 @@
 import type { UploadProgress } from "~/composables/useApi";
 import type { AgentActivity } from "~/types/app";
 import AgentConfirmationDialog from "~/components/dialogs/AgentConfirmationDialog.vue";
+import AgentQuestionDialog from "~/components/dialogs/AgentQuestionDialog.vue";
 import CreateServerDialog from "~/components/dialogs/CreateServerDialog.vue";
 import DeleteServerDialog from "~/components/dialogs/DeleteServerDialog.vue";
 import FileManagerDialog from "~/components/dialogs/FileManagerDialog.vue";
@@ -25,6 +26,7 @@ import { createIncrementalConsoleRenderer } from "~/utils/consoleRendering";
 import type { RenderedConsoleLogEntry } from "~/utils/consoleRendering";
 import { formatBytes, formatMemoryConfig, formatMemoryMb, parseMemoryToMb } from "~/utils/formatters";
 import { useStatusBubbles } from "~/composables/useStatusBubbles";
+import { readBrowserState, writeBrowserState } from "~/utils/browserState";
 import type { DeploymentProgressState, PendingAgentAttachment, ServerConfigForm, SettingsNavItem, SettingsTab, StatusBubbleItem, StatusBubbleType, UploadState } from "~/types/ui";
 
 definePageMeta({ middleware: "auth" });
@@ -35,8 +37,16 @@ const clock = useClock();
 const router = useRouter();
 
 const globalAgent = useGlobalAgent();
+const delivery = useAgentDelivery();
 watch(globalAgent.activeModel, (value) => { dashboardActiveModel.value = value; });
+watch(globalAgent.toolConfigRequired, (value) => {
+  if (value) {
+    pendingToolConfig.value = value;
+    showProviderKeyStatus("error", value.message, true);
+  }
+});
 const dashboardOpen = ref(true);
+const mobileWorkspaceTab = ref<"console" | "deployment" | "agent">("console");
 const dashboardInput = ref("");
 const dashboardAgentUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
 const dashboardAttachments = ref<PendingAgentAttachment[]>([]);
@@ -95,9 +105,11 @@ const agentStatus = ref<AgentStatus>("idle");
 const showAgentScrollToBottom = ref(false);
 const settingsOpen = ref(false);
 const settingsTab = ref<SettingsTab>("overview");
+const deploymentWorkflowDirty = useState<boolean>("deployment-workflow-dirty", () => false);
 const settingsNavItems: SettingsNavItem[] = [
   { id: "overview", label: "设置总览", desc: "工作空间配置概况" },
   { id: "model", label: "模型接入", desc: "连接你的 AI 模型" },
+  { id: "workflow", label: "流程编排", desc: "拖拽部署步骤，动态组装提示词" },
   { id: "skills", label: "技能管理", desc: "Agent 工作流与能力" },
   { id: "tools", label: "工具与凭据", desc: "工具目录与平台密钥" },
   { id: "agent", label: "Agent 行为", desc: "执行偏好与网络设置" },
@@ -228,7 +240,8 @@ const erroredServerIds = computed(() => {
 });
 const selectedServerErrorState = computed(() => selectedServerId.value ? serverErrorStates.value[selectedServerId.value] ?? null : null);
 const selectedServerHasError = computed(() => Boolean(selectedServerId.value && erroredServerIds.value.has(selectedServerId.value)));
-const agentBusy = computed(() => ["thinking", "running", "waiting_confirmation", "retrying"].includes(agentStatus.value));
+const agentBusy = computed(() => ["thinking", "running", "waiting_confirmation", "retrying"].includes(agentStatus.value)
+  || delivery.pending.value.some((item) => item.scopeId === selectedServerId.value));
 const contextRemainingPercent = computed(() => Math.max(0, Math.min(100, agentContextUsage.value.remainingPercent)));
 const contextRingStyle = computed(() => {
   const remaining = contextRemainingPercent.value;
@@ -573,6 +586,7 @@ const agentOutputLoadingText = computed(() => {
 
 watch(selectedServer, (server) => {
   if (!server) return;
+  mobileWorkspaceTab.value = "console";
   Object.assign(serverForm, {
     name: server.name,
     javaPath: server.javaPath ?? "",
@@ -772,6 +786,8 @@ async function loadServers() {
 }
 
 async function selectServer(id: string, options: { open?: boolean } = {}) {
+  saveWorkspaceState();
+  switchingDraft = true;
   const selection = ++selectionGeneration;
   closeSockets();
   consoleLoad.reset();
@@ -787,7 +803,7 @@ async function selectServer(id: string, options: { open?: boolean } = {}) {
   selectedServerId.value = id;
   consoleCommand.value = "";
   currentPath.value = ".";
-  settingsOpen.value = false;
+  if (options.open !== false) settingsOpen.value = false;
   fileDialogOpen.value = false;
   configDialogOpen.value = false;
   mapEditorDialogOpen.value = false;
@@ -804,6 +820,9 @@ async function selectServer(id: string, options: { open?: boolean } = {}) {
   resetHistoryScrollPositions();
   const results = await Promise.allSettled([loadServerDetail(), loadLogs(), loadFiles(), loadAgentMessages(), loadPendingConfirmation(), loadServerSlotStatus()]);
   if (id !== selectedServerId.value || selection !== selectionGeneration) return;
+  restoreInstanceDraft(id);
+  switchingDraft = false;
+  saveWorkspaceState();
   connectSockets();
   const failed = results.find((result) => result.status === "rejected");
   if (failed?.status === "rejected") throw failed.reason;
@@ -822,9 +841,10 @@ async function openInstanceFromDashboard(serverId: string) {
       return;
     }
   }
-  globalAgent.consumeFocus();
+  const focusId = globalAgent.focus.value?.id;
   dashboardOpen.value = false;
-  await selectServerWithFeedback(serverId);
+  await selectServer(serverId);
+  await globalAgent.acknowledgeFocus(focusId);
   showStatusBubble("success", `已跳转到实例：${selectedServer.value?.name ?? serverId}`, 2600);
 }
 
@@ -971,7 +991,7 @@ watch(() => globalAgent.busy.value, (busy, wasBusy) => {
 // Route the UI when the global agent hands a task to an instance.
 watch(() => globalAgent.focus.value, (focus) => {
   if (!focus) return;
-  void openInstanceFromDashboard(focus.serverId);
+  void openInstanceFromDashboard(focus.serverId).catch(() => undefined);
 });
 
 async function loadServerDetail() {
@@ -1498,35 +1518,7 @@ async function sendAgentMessage() {
   appendAgentMessage("user", content, null, serverId);
   agentStatus.value = "thinking";
 
-  let confirmationPoll: ReturnType<typeof setInterval> | undefined;
-  if (agentSocket?.readyState === WebSocket.OPEN) {
-    agentSocket.send(JSON.stringify({ type: "message", content, reasoningEffort }));
-  } else {
-    confirmationPoll = setInterval(() => {
-      if (serverId === selectedServerId.value) {
-        loadPendingConfirmation().catch(() => undefined);
-        loadAgentMessages().catch(() => undefined);
-      }
-    }, 1000);
-
-    try {
-      const result = await safe(() => api<{ response: string; status: AgentStatus }>(`/api/servers/${serverId}/agent/messages`, { method: "POST", body: { content, reasoningEffort } }), serverId);
-      if (serverId === selectedServerId.value && result.response) {
-        agentStatus.value = result.status ?? (result.response.startsWith("执行失败：") ? "failed" : "completed");
-        await loadAgentMessages();
-        await refreshAfterAgentRun();
-        await loadAgentContextUsage();
-      }
-    } catch {
-      if (serverId === selectedServerId.value) {
-        agentStatus.value = "failed";
-        agentInput.value = textContent;
-        pendingAgentAttachments.value = attachments;
-      }
-    } finally {
-      if (confirmationPoll) clearInterval(confirmationPoll);
-    }
-  }
+  await delivery.send(serverId, content, reasoningEffort);
 }
 
 function formatAgentAttachmentMessage(attachments: PendingAgentAttachment[]) {
@@ -1539,20 +1531,21 @@ function formatAgentAttachmentMessage(attachments: PendingAgentAttachment[]) {
 }
 
 async function resolveAgentConfirmation(approved: boolean) {
+  if (dashboardOpen.value) {
+    await safe(() => globalAgent.resolveConfirmation(approved));
+    return;
+  }
   if (!selectedServerId.value || !pendingConfirmation.value) return;
   const confirmationId = pendingConfirmation.value.id;
-  pendingConfirmation.value = null;
-  if (agentSocket?.readyState === WebSocket.OPEN) {
-    agentSocket.send(JSON.stringify({ type: "confirmation", confirmationId, approved }));
-  } else {
-    await safe(() => api(`/api/servers/${selectedServerId.value}/agent/confirmation`, { method: "POST", body: { confirmationId, approved } }));
-    agentStatus.value = approved ? "running" : "failed";
-  }
+  const serverId = selectedServerId.value;
+  await safe(() => api(`/api/servers/${serverId}/agent/confirmation`, { method: "POST", body: { confirmationId, approved } }));
+  if (serverId === selectedServerId.value && pendingConfirmation.value?.id === confirmationId) pendingConfirmation.value = null;
 }
 
 async function cancelAgentRun() {
   if (!selectedServerId.value || !agentBusy.value) return;
   const serverId = selectedServerId.value;
+  delivery.discardScope(serverId);
   pendingConfirmation.value = null;
   agentRetry.value = null;
   agentRetryNowSending.value = false;
@@ -2232,13 +2225,18 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
   };
   nextAgentSocket.onmessage = (event) => {
     if (agentSocket !== nextAgentSocket || serverId !== selectedServerId.value) return;
-    const payload = JSON.parse(event.data) as { type?: string; status?: AgentStatus; content?: string; messageId?: string; messages?: AgentMessage[]; activity?: AgentActivity; createdAt?: string; confirmation?: AgentConfirmationRequest; toolConfigRequired?: AgentToolConfigRequired; retry?: AgentRetryState; download?: AgentDownloadProgress; workflow?: AgentWorkflowProgress; serverSlot?: ServerSlotStatus; modelName?: string | null };
+    const payload = JSON.parse(event.data) as { type?: string; status?: AgentStatus; content?: string; messageId?: string; messages?: AgentMessage[]; activity?: AgentActivity; createdAt?: string; confirmation?: AgentConfirmationRequest; toolConfigRequired?: AgentToolConfigRequired; retry?: AgentRetryState; download?: AgentDownloadProgress; downloads?: AgentDownloadProgress[]; workflow?: AgentWorkflowProgress; serverSlot?: ServerSlotStatus; modelName?: string | null };
     if (payload.type === "snapshot" && payload.messages) {
       historyLoad.acceptSnapshot();
       const shouldScroll = shouldStickAgentToBottom();
       agentMessageRevision += 1;
       agentMessages.value = payload.messages;
       agentRetry.value = payload.retry ?? null;
+      pendingConfirmation.value = payload.confirmation ?? null;
+      agentDownloads.value = payload.downloads ?? [];
+      agentWorkflow.value = payload.workflow ?? null;
+      pendingToolConfig.value = payload.toolConfigRequired ?? null;
+      if (payload.toolConfigRequired) showProviderKeyStatus("error", payload.toolConfigRequired.message, true);
       if (payload.status) agentStatus.value = payload.status;
       if (payload.modelName) agentActiveModel.value = payload.modelName;
       if (shouldScroll) scrollAgentHistoryToBottom();
@@ -2318,23 +2316,118 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
   nextAgentSocket.onerror = () => nextAgentSocket.close();
 }
 
+interface InstanceDraft {
+  input: string;
+  attachments: PendingAgentAttachment[];
+  path: string;
+  command: string;
+  editor: typeof textEditor;
+  config?: ServerConfigForm;
+  configOpen?: boolean;
+}
+interface WorkspaceState {
+  selectedServerId: string;
+  dashboardOpen: boolean;
+  settingsOpen?: boolean;
+  settingsTab?: SettingsTab;
+  mobileWorkspaceTab: "console" | "deployment" | "agent";
+  dashboardInput: string;
+  dashboardAttachments: PendingAgentAttachment[];
+  instances: Record<string, InstanceDraft>;
+  commandHistories?: Record<string, string[]>;
+  promptEditor?: typeof promptEditor;
+}
+let workspaceReady = false;
+let switchingDraft = false;
+let instanceDrafts: Record<string, InstanceDraft> = {};
+let deliveryTimer: ReturnType<typeof setInterval> | undefined;
+
+function saveWorkspaceState() {
+  if (!workspaceReady || switchingDraft) return;
+  if (selectedServerId.value) instanceDrafts[selectedServerId.value] = {
+    input: agentInput.value, attachments: [...pendingAgentAttachments.value], path: currentPath.value,
+    command: consoleCommand.value, editor: { ...textEditor }, config: { ...serverForm }, configOpen: configDialogOpen.value
+  };
+  writeBrowserState("workspace", {
+    selectedServerId: selectedServerId.value, dashboardOpen: dashboardOpen.value, mobileWorkspaceTab: mobileWorkspaceTab.value,
+    settingsOpen: settingsOpen.value, settingsTab: settingsTab.value,
+    dashboardInput: dashboardInput.value, dashboardAttachments: dashboardAttachments.value, instances: instanceDrafts,
+    commandHistories: consoleCommandHistories.value, promptEditor: { ...promptEditor, saving: false }
+  } satisfies WorkspaceState);
+}
+
+function restoreInstanceDraft(id: string) {
+  const draft = instanceDrafts[id];
+  agentInput.value = draft?.input ?? "";
+  pendingAgentAttachments.value = draft?.attachments ?? [];
+  consoleCommand.value = draft?.command ?? "";
+  Object.assign(textEditor, draft?.editor ?? { open: false, path: "", content: "" });
+  if (draft?.editor.open) textLoad.acceptSnapshot();
+  if (draft?.configOpen && draft.config) {
+    Object.assign(serverForm, draft.config);
+    configDialogOpen.value = true;
+  }
+  if (draft?.path && draft.path !== currentPath.value) {
+    currentPath.value = draft.path;
+    void loadFiles().catch(() => undefined);
+  }
+}
+
+watch([dashboardInput, dashboardAttachments, agentInput, pendingAgentAttachments, currentPath, consoleCommand,
+  () => ({ ...textEditor }), () => ({ ...serverForm }), configDialogOpen, () => ({ ...promptEditor }), consoleCommandHistories,
+  dashboardOpen, settingsOpen, settingsTab, mobileWorkspaceTab], saveWorkspaceState, { deep: true, flush: "sync" });
+
+function beforePageExit(event: BeforeUnloadEvent) {
+  saveWorkspaceState();
+  if (deploymentWorkflowDirty.value || [serverUpload, serverSlotUpload, agentUpload, dashboardAgentUpload].some((item) => item.active && !item.done)) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+}
+
 onMounted(async () => {
+  const saved = readBrowserState<WorkspaceState>("workspace");
+  if (saved) {
+    instanceDrafts = saved.instances ?? {};
+    selectedServerId.value = saved.selectedServerId ?? "";
+    dashboardOpen.value = saved.dashboardOpen ?? true;
+    settingsOpen.value = saved.settingsOpen ?? false;
+    if (saved.settingsTab && settingsNavItems.some((item) => item.id === saved.settingsTab)) settingsTab.value = saved.settingsTab;
+    if (!selectedServerId.value && !dashboardOpen.value && !settingsOpen.value) dashboardOpen.value = true;
+    mobileWorkspaceTab.value = saved.mobileWorkspaceTab ?? "console";
+    dashboardInput.value = saved.dashboardInput ?? "";
+    dashboardAttachments.value = saved.dashboardAttachments ?? [];
+    consoleCommandHistories.value = saved.commandHistories ?? {};
+    if (saved.promptEditor) Object.assign(promptEditor, saved.promptEditor, { saving: false });
+  }
+  delivery.restore();
+  deliveryTimer = setInterval(() => void delivery.flush(), 3000);
+  void delivery.flush();
+  window.addEventListener("beforeunload", beforePageExit);
+  window.addEventListener("pagehide", saveWorkspaceState);
   window.addEventListener("mouseup", endFileDragSelection);
   globalAgent.connect();
   void globalAgent.loadMessages().catch(() => undefined);
   await Promise.allSettled([
     safe(async () => {
       await loadServers();
-      // Do not let a delayed startup request override a user's navigation.
-      if (selectedServerId.value && dashboardOpen.value && !settingsOpen.value) await selectServer(selectedServerId.value, { open: false });
+      if (!servers.value.some((server) => server.id === selectedServerId.value)) selectedServerId.value = servers.value[0]?.id ?? "";
+      // Navigation or a focus handoff may already have selected an instance while loading.
+      if (selectedServerId.value && selectionGeneration === 0) await selectServer(selectedServerId.value, { open: !dashboardOpen.value && !settingsOpen.value });
     }),
     safe(loadSettings)
   ]);
+  workspaceReady = true;
+  saveWorkspaceState();
   startJavaPolling();
   startAgentRetryClock();
 });
 
 onBeforeUnmount(() => {
+  saveWorkspaceState();
+  window.removeEventListener("beforeunload", beforePageExit);
+  window.removeEventListener("pagehide", saveWorkspaceState);
+  if (deliveryTimer) clearInterval(deliveryTimer);
   window.removeEventListener("mouseup", endFileDragSelection);
   clearStatusBubbles();
   closeSockets();
@@ -2353,6 +2446,14 @@ onBeforeUnmount(() => {
     </div>
 
     <StatusBubble :items="statusBubbles" @action="handleStatusBubbleAction" />
+    <div v-if="delivery.pending.value.length" class="card stack" role="status">
+      <strong>有 {{ delivery.pending.value.length }} 条消息等待服务器确认接收，将自动重试；不会重复创建任务。</strong>
+      <p class="muted">关闭页面后会保留待发送消息。移除仅停止重试，不会取消可能已经接收的任务。</p>
+      <div v-for="item in delivery.pending.value" :key="item.requestId" class="row">
+        <span>{{ item.content.slice(0, 100) }}</span>
+        <button type="button" @click="delivery.discard(item.requestId)">移除待发送</button>
+      </div>
+    </div>
 
     <ProviderKeyDialog
       :form="providerKeyForm"
@@ -2384,7 +2485,7 @@ onBeforeUnmount(() => {
 
     <CreateServerDialog v-model:name="newServerName" :open="createDialogOpen" @close="closeCreateServerDialog" @create="createServer" />
 
-    <EmptyWorkspaceLanding v-if="showEmptyLanding && !dashboardOpen" @create="openCreateServerDialog" />
+    <EmptyWorkspaceLanding v-if="showEmptyLanding && !dashboardOpen && !settingsOpen" @create="openCreateServerDialog" />
 
     <InstanceSwitcherDialog
       :open="instanceMenuOpen"
@@ -2400,7 +2501,7 @@ onBeforeUnmount(() => {
     />
 
     <ServerSidebar
-      v-if="hasServers || dashboardOpen"
+      v-if="hasServers || dashboardOpen || settingsOpen"
       ref="serverSidebar"
        :loading="serverListLoad.initialLoading.value"
        :loaded="serversLoaded"
@@ -2417,8 +2518,9 @@ onBeforeUnmount(() => {
        @select="selectServerWithFeedback"
     />
 
-    <main v-if="hasServers || dashboardOpen" class="main">
-      <AgentConfirmationDialog :confirmation="pendingConfirmation" @resolve="resolveAgentConfirmation" />
+    <main v-if="hasServers || dashboardOpen || settingsOpen" class="main">
+      <AgentConfirmationDialog :confirmation="dashboardOpen ? globalAgent.confirmation.value : pendingConfirmation" @resolve="resolveAgentConfirmation" />
+      <AgentQuestionDialog :scope-id="dashboardOpen ? 'global' : selectedServerId" />
 
       <DeleteServerDialog
         v-model:confirm-name="deleteDialog.confirmName"
@@ -2572,7 +2674,13 @@ onBeforeUnmount(() => {
             @open-map-editor="openMapEditorDialog"
           />
 
-          <div class="operation-grid">
+          <nav class="mobile-workspace-nav" role="group" aria-label="服务端面板">
+            <button type="button" :aria-pressed="mobileWorkspaceTab === 'console'" @click="mobileWorkspaceTab = 'console'">控制台</button>
+            <button type="button" :aria-pressed="mobileWorkspaceTab === 'deployment'" @click="mobileWorkspaceTab = 'deployment'">部署</button>
+            <button type="button" :aria-pressed="mobileWorkspaceTab === 'agent'" @click="mobileWorkspaceTab = 'agent'">Agent</button>
+          </nav>
+
+          <div id="server-mobile-workspace" class="operation-grid" :data-mobile-tab="mobileWorkspaceTab">
             <div class="left-operation-stack">
               <ConsolePanel
                 ref="consolePanel"

@@ -180,6 +180,8 @@ export interface ServerErrorDigest {
 }
 
 export interface AgentActivity {
+  background?: boolean;
+  jobId?: string;
   kind: "reasoning" | "tool" | "retry";
   status: "running" | "waiting_confirmation" | "completed" | "failed" | "cancelled";
   title: string;
@@ -194,6 +196,8 @@ export interface AgentActivity {
 }
 
 export interface AgentMessage {
+  turnId?: string | null;
+  stepId?: string | null;
   id: string;
   serverId: string;
   role: "user" | "agent" | "system";
@@ -273,9 +277,12 @@ export interface AgentWorkflowStep {
   status: AgentWorkflowStepStatus;
   progress: number;
   detail: string;
+  roundIndex?: number;
+  parallelGroup?: string;
 }
 
 export interface AgentWorkflowProgress {
+  turn?: { runId: string; turnId: string; index: number; total: number; stepIds: string[]; waitingForJobs?: boolean };
   title: string;
   currentStepId: string;
   overallProgress: number;
@@ -339,6 +346,12 @@ export interface ModelConfig {
 }
 
 export interface AgentContextUsage {
+  cache?: {
+    status: "available" | "unavailable" | "inconsistent";
+    rate?: number;
+    hitTokens?: number;
+    inputTokens?: number;
+  };
   contextSizeK: number;
   maxTokens: number;
   usedTokens: number;
@@ -410,4 +423,12 @@ export interface JavaManagementState {
   installed: JavaInstall[];
   tasks: JavaInstallTask[];
   sources: JavaDownloadSourceOption[];
+}
+export interface AgentQuestionRequest {
+  id: string;
+  serverId: string;
+  question: string;
+  multiple: boolean;
+  options: { label: string; description?: string }[];
+  createdAt: string;
 }
