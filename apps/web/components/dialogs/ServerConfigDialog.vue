@@ -65,3 +65,15 @@ function updateMemory(event: Event) {
     </template>
   </form>
 </template>
+
+<style scoped>
+/* Keep scrolling independent of the global .card overflow rule. */
+.config-dialog {
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+}
+
+.config-dialog > * {
+  flex-shrink: 0;
+}
+</style>

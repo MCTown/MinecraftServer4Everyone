@@ -29,11 +29,8 @@ const availableSlots = ref(9);
 let resizeObserver: ResizeObserver | undefined;
 let measureFrame: number | undefined;
 
-// Dashboard, create and settings always have a slot; overflow reserves one more.
-const visibleCapacity = computed(() => {
-  const withoutMenu = Math.max(0, availableSlots.value - 3);
-  return props.servers.length <= withoutMenu ? withoutMenu : Math.max(0, withoutMenu - 1);
-});
+// Dashboard, instance menu, create and settings always have a slot.
+const visibleCapacity = computed(() => Math.max(0, availableSlots.value - 4));
 
 const visibleServers = computed(() => {
   const capacity = visibleCapacity.value;
@@ -110,7 +107,7 @@ defineExpose({
       <button v-for="server in visibleServers" :key="server.id" class="rail-button rail-server" :class="{ active: server.id === props.selectedServerId && !props.dashboardOpen && !props.settingsOpen }" type="button" :title="serverTitle(server)" :aria-label="serverTitle(server)" @click="emit('select', server.id)">
         {{ server.name.slice(0, 2).toUpperCase() }}
       </button>
-      <button v-if="hiddenServerCount" ref="instanceMenuTrigger" class="rail-button rail-more" type="button" :title="`查看另外 ${hiddenServerCount} 个实例`" :aria-label="`查看另外 ${hiddenServerCount} 个实例`" @click="emit('open-instance-menu')">
+      <button ref="instanceMenuTrigger" class="rail-button rail-more" type="button" :title="hiddenServerCount ? `查看另外 ${hiddenServerCount} 个实例` : '查看全部实例'" :aria-label="hiddenServerCount ? `查看另外 ${hiddenServerCount} 个实例` : '查看全部实例'" @click="emit('open-instance-menu')">
         <AppIcon name="instances" />
         <span v-if="hiddenServerCount" class="rail-more-count" aria-hidden="true">{{ hiddenServerCount > 99 ? '99+' : hiddenServerCount }}</span>
       </button>

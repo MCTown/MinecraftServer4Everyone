@@ -19,7 +19,8 @@ export default defineNuxtConfig({
     "~/assets/css/components/loading.css",
     "~/assets/css/components/settings-redesign.css",
     // Global appearance is layered last, including all workspace and dialog styles.
-    "~/assets/css/theme.css"
+    "~/assets/css/theme.css",
+    "~/assets/css/layout/server-workspace-mobile.css"
   ],
   runtimeConfig: {
     apiBase: process.env.NUXT_API_BASE ?? process.env.NUXT_PUBLIC_API_BASE ?? `http://127.0.0.1:${process.env.APP_PORT ?? 8787}`,
