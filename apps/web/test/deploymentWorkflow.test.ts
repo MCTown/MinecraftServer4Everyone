@@ -35,7 +35,7 @@ test("free movement leaves topology unchanged; invalid connections remain editab
   assert.deepEqual(moved.canvas!.edges, original.canvas.edges);
   assert.deepEqual(moved.steps, original.steps);
   const invalid = connectWorkflowNodes(moved, "final_mcdr_test", "identify_modpack");
-  assert.equal(invalid.canvas!.edges.length, 7);
+  assert.equal(invalid.canvas!.edges.length, 8);
   assert.ok(workflowIssues(invalid, catalog).some(issue => issue.includes("闭环")));
   assert.deepEqual(workflowIssues(invalid, catalog), serverIssues(invalid));
   const restored = removeWorkflowEdge(invalid, invalid.canvas!.edges.at(-1)!.id);
@@ -47,13 +47,13 @@ test("manually drawn fork/join compiles to one turn and disabled nodes do not br
   const graph = withWorkflowCanvas(defaultDeploymentWorkflow());
   const pairs = [["identify_modpack", "prepare_server_slot"], ["prepare_server_slot", "check_java_dependencies"], ["prepare_server_slot", "configure_python"],
     ["check_java_dependencies", "extract_to_workspace"], ["configure_python", "extract_to_workspace"], ["extract_to_workspace", "configure_mcdr"],
-    ["configure_mcdr", "final_mcdr_test"]];
+    ["configure_mcdr", "install_modloader"], ["install_modloader", "final_mcdr_test"]];
   graph.canvas.edges = pairs.map(([from, to], index) => ({ id: `edge_${index}`, from: from!, to: to! }));
   const result = normalizeGraphWorkflow(graph);
   assert.deepEqual(analyzeWorkflowGraph(result).issues, []);
   assert.deepEqual(result.steps.slice(2, 4).map(step => step.id), ["check_java_dependencies", "configure_python"]);
   assert.equal(result.steps[2]!.parallelGroup, result.steps[3]!.parallelGroup);
-  assert.equal(workflowRounds(result.steps).length, 6);
+  assert.equal(workflowRounds(result.steps).length, 7);
   result.steps.splice(1, 0, { id: "custom_disabled", label: "停用", prompt: "", enabled: false });
   // An unconnected disabled node is still structurally visible and must be wired or deleted.
   assert.ok(analyzeWorkflowGraph(result).issues.some(issue => issue.message.includes("入口")));
@@ -89,7 +89,7 @@ test("editor creates explicit fork/join groups, moves groups atomically and diss
   const catalog = deploymentStageCatalog.map((step) => ({ ...step, requires: [...step.requires] }));
   const grouped = groupWorkflowStep(original, "configure_python", "check_java_dependencies", "parallel_test");
   assert.deepEqual(original, defaultDeploymentWorkflow());
-  assert.equal(workflowRounds(grouped.steps).length, 6);
+  assert.equal(workflowRounds(grouped.steps).length, 7);
   assert.deepEqual(workflowIssues(grouped, catalog), []);
   assert.deepEqual(workflowIssues(grouped, catalog), serverIssues(grouped));
   const moved = moveWorkflowStep(grouped, "configure_python", 1);
@@ -98,7 +98,7 @@ test("editor creates explicit fork/join groups, moves groups atomically and diss
   assert.deepEqual(workflowIssues(moved, catalog), [], "Java and Python may move ahead of the download");
   const separate = groupWorkflowStep(grouped, "configure_python", null);
   assert.equal(separate.steps.some((step) => step.parallelGroup), false);
-  assert.equal(workflowRounds(separate.steps).length, 7);
+  assert.equal(workflowRounds(separate.steps).length, 8);
   const sameTurn = groupWorkflowStep(original, "check_java_dependencies", "extract_to_workspace", "parallel_bad");
   assert.deepEqual(workflowIssues(sameTurn, catalog), []);
   assert.deepEqual(workflowIssues(sameTurn, catalog), serverIssues(sameTurn));

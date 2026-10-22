@@ -79,6 +79,7 @@ function runShell(command: string, cwd: string, timeoutMs: number, ctx: AgentToo
     let cleanupTimeout: NodeJS.Timeout | undefined;
 
     const append = (stream: "stdout" | "stderr", text: string) => {
+      ctx.jobOutput?.(text, stream);
       const combined = output[stream] + text;
       outputTruncated ||= combined.length > outputLimit;
       output[stream] = combined.slice(-outputLimit);
@@ -124,8 +125,12 @@ function runShell(command: string, cwd: string, timeoutMs: number, ctx: AgentToo
     timeout.unref();
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (text: string) => append("stdout", text));
-    child.stderr.on("data", (text: string) => append("stderr", text));
+    // Bound individual persisted chunks without losing text or multibyte decoding.
+    const appendChunks = (stream: "stdout" | "stderr", text: string) => {
+      for (let offset = 0; offset < text.length; offset += 16_384) append(stream, text.slice(offset, offset + 16_384));
+    };
+    child.stdout.on("data", (text: string) => appendChunks("stdout", text));
+    child.stderr.on("data", (text: string) => appendChunks("stderr", text));
     child.once("error", (error) => { failure ??= error; finish(null, null); });
     // Wait for close rather than exit so the last stdout/stderr chunks are included.
     child.once("close", (code, exitSignal) => {

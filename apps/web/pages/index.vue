@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { UploadProgress } from "~/composables/useApi";
 import type { AgentActivity } from "~/types/app";
+import { resolveDeploymentProgressState } from "~/utils/deploymentProgress";
 import AgentConfirmationDialog from "~/components/dialogs/AgentConfirmationDialog.vue";
 import AgentQuestionDialog from "~/components/dialogs/AgentQuestionDialog.vue";
 import CreateServerDialog from "~/components/dialogs/CreateServerDialog.vue";
@@ -134,6 +135,8 @@ const fileDialogFocusTarget = ref<"files" | "map" | null>(null);
 const textEditor = reactive({ open: false, path: "", content: "" });
 const promptEditor = reactive({ open: false, draft: "", saving: false });
 const createDialogOpen = ref(false);
+const creatingServer = ref(false);
+const createServerError = ref("");
 const deleteDialog = reactive<{ open: boolean; server: ServerRecord | null; confirmName: string; deleting: boolean; error: string }>({ open: false, server: null, confirmName: "", deleting: false, error: "" });
 const newServerName = ref("我的 Minecraft 服务端");
 
@@ -323,17 +326,7 @@ const deploymentWorkflow = computed<AgentWorkflowProgress | null>(() => {
 });
 const showDeploymentProgressCard = computed(() => Boolean(selectedServer.value));
 const deploymentProgressState = computed<DeploymentProgressState>(() => {
-  const workflow = deploymentWorkflow.value;
-  const workflowCompleted = workflow
-    && workflow.steps.length > 0
-    && workflow.steps.every((step) => step.status === "completed");
-  if (!workflow) return serverSlot.value?.occupied ? "ready" : "not_started";
-  if (workflow.status === "failed") return agentStatus.value === "cancelled" ? "cancelled" : "failed";
-  if (workflowCompleted) return "completed";
-  if (agentStatus.value === "waiting_confirmation") return "waiting_confirmation";
-  if (agentStatus.value === "retrying") return "retrying";
-  if (agentBusy.value) return "running";
-  return "progress";
+  return resolveDeploymentProgressState(deploymentWorkflow.value, agentStatus.value, agentBusy.value, Boolean(serverSlot.value?.occupied));
 });
 const deleteConfirmMatches = computed(() => deleteDialog.server ? deleteDialog.confirmName.trim() === deleteDialog.server.name : false);
 const deleteServerBlocked = computed(() => deleteDialog.server ? !["stopped", "crashed"].includes(deleteDialog.server.status) : true);
@@ -1003,19 +996,36 @@ async function loadServerDetail() {
 
 async function createServer() {
   const name = newServerName.value.trim();
-  if (!name) return;
-  const server = await safe(() => api<ServerRecord>("/api/servers", { method: "POST", body: { name } }));
-  servers.value.unshift(server);
-  createDialogOpen.value = false;
-  await selectServer(server.id);
+  if (!name || creatingServer.value) return;
+  creatingServer.value = true;
+  createServerError.value = "";
+  try {
+    const server = await api<ServerRecord>("/api/servers", { method: "POST", body: { name } });
+    servers.value.unshift(server);
+    createDialogOpen.value = false;
+    // Creation has succeeded. A console-loading failure must not invite a
+    // retry of the POST and create another instance.
+    try {
+      await selectServer(server.id);
+    } catch (error) {
+      showStatusBubble("error", `实例已创建，但控制台加载失败：${getErrorMessage(error)}`, 6000);
+    }
+  } catch (error) {
+    createServerError.value = `创建失败：${getErrorMessage(error)}`;
+  } finally {
+    creatingServer.value = false;
+  }
 }
 
 function openCreateServerDialog() {
+  if (creatingServer.value) return;
   newServerName.value = "";
+  createServerError.value = "";
   createDialogOpen.value = true;
 }
 
 function closeCreateServerDialog() {
+  if (creatingServer.value) return;
   createDialogOpen.value = false;
 }
 
@@ -2483,7 +2493,7 @@ onBeforeUnmount(() => {
       @update:target="proxyTestTarget = $event"
     />
 
-    <CreateServerDialog v-model:name="newServerName" :open="createDialogOpen" @close="closeCreateServerDialog" @create="createServer" />
+    <CreateServerDialog v-model:name="newServerName" :open="createDialogOpen" :creating="creatingServer" :error="createServerError" @close="closeCreateServerDialog" @create="createServer" />
 
     <EmptyWorkspaceLanding v-if="showEmptyLanding && !dashboardOpen && !settingsOpen" @create="openCreateServerDialog" />
 

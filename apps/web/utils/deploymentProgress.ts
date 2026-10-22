@@ -1,5 +1,21 @@
-import type { AgentWorkflowProgress } from "../types/app";
+import type { AgentStatus, AgentWorkflowProgress } from "../types/app";
 import type { DeploymentProgressState } from "../types/ui";
+
+export function resolveDeploymentProgressState(workflow: AgentWorkflowProgress | null, status: AgentStatus, busy: boolean, packageReady: boolean): DeploymentProgressState {
+  if (!workflow) return packageReady ? "ready" : "not_started";
+  if (workflow.status === "failed") return status === "cancelled" ? "cancelled" : "failed";
+  if (workflow.run) {
+    if (status === "cancelled") return "cancelled";
+    if (status === "failed") return "failed";
+    if (status === "waiting_confirmation") return "waiting_confirmation";
+    if (status === "retrying") return "retrying";
+    if (busy || workflow.run.waitingForJobs) return "running";
+  }
+  if (workflow.steps.length > 0 && workflow.steps.every((step) => step.status === "completed")) return "completed";
+  if (status === "waiting_confirmation") return "waiting_confirmation";
+  if (status === "retrying") return "retrying";
+  return busy ? "running" : "progress";
+}
 
 export function resolveDeploymentStage(workflow: AgentWorkflowProgress | null, state: DeploymentProgressState) {
   const steps = workflow?.steps ?? [];

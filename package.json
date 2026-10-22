@@ -16,6 +16,7 @@
     "dev:server": "npm run dev --workspace @mc-agent/server",
     "dev:web": "npm run dev --workspace @mc-agent/web",
     "restart": "node scripts/restart.js",
+    "benchmark": "node scripts/benchmark.mjs",
     "build": "npm run build --workspaces",
     "start": "node scripts/run.js start",
     "start:proxy": "node proxy.js",

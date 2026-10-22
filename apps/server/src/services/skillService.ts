@@ -8,23 +8,14 @@ import { nowIso } from "../utils/time.js";
 
 const builtInSkillId = "minecraft_deploy";
 const builtInSkillName = "服务端部署 Skill";
-const builtInSkillVersion = "1.16.0";
+const builtInSkillVersion = "1.17.0";
 const builtInSkillDescription = "自动套用模板后的整合包安装、Java 版本依赖检查、MCDReforged 配置、启动脚本生成和常见问题检查。";
 const builtInSkillContent = `# 服务端部署 Skill
 
-用于 Minecraft 服务端部署、安装单个模组与故障排查。部署顺序和阶段技术指令由系统追加的「当前部署流程（流程编排 · 权威配置）」提供，不能使用历史固定顺序覆盖它。
-
-## 工具使用参考（不定义部署顺序）
-- 完整部署先 begin_deployment_workflow，由后端指定本轮节点；串行节点各一个 turn，并行组共用一个 turn。工具调用携带本轮 workflowStepId，所有分支和后台工具真实完成后才可汇合，由系统自动推进。普通排错/查询不启动完整流程。
-- 新建服务端时后端自动套用 reference MCDReforged 模板，不重复初始化；旧实例确实缺少模板时先检查，再以 overwrite=false 补齐。
-- Java 版本依据已确认的 Minecraft、Loader 与整合包依赖确定；check_java_environment 检查工作区可用安装，缺失时 install_java_version，写入并核对当前配置。Loader 安装器与启动脚本必须使用已验证的工作区 Java，不依赖系统默认 Java。
-- 单个模组使用 download_mod_to_server_mods，只把 .jar 写入 server/mods/，不把 .mrpack/zip 当模组。
-- 平台文件获取优先官方 API，不抓取 CurseForge Files 网页。CurseForge 缺少 Key 或鉴权失败时等待配置，申请地址 https://console.curseforge.com/?#/api-keys；Modrinth 要求 PAT 时等待配置，地址 https://modrinth.com/settings/pats。
-- .mrpack 使用 inspect_mrpack_server_slot + deploy_mrpack_server_from_server_slot。CurseForge 清单使用 materialize_curseforge_manifest_pack_from_server_slot。完整服务端压缩包使用 extract_server_slot_to_workspace。文件始终放在 server/ 内。
-- Forge/NeoForge 使用对应 setup 能力，优先包内 installer，缺失时下载官方指定版本；installer 不是服务端 JAR。
-- 启动使用非交互方式与 nogui，提前写 server/eula.txt。先识别服务端包自带脚本，不盲目生成替代脚本。
-- 客户端模组先扫描，再按证据重命名为 .jar.disabled，不删除。日志明确点名的模组可用 disable_server_mods。
-- MCDR 用工作区内置 Python；插件依赖只按日志/requirements 安装并复查。所有成功结论必须有真实工具与日志证据。
+完整部署调用 begin_deployment_workflow，技术步骤以「当前部署流程」为准；普通查询和排错不启动完整流程。
+优先专用工具，Shell 用于补充检查和修复。合并独立的文件检查，复用已有成功证据，不重复安装或核验。
+仅在日志指向客户端模组时扫描并按证据禁用（重命名 .jar.disabled，不删除）。单个模组用 download_mod_to_server_mods。
+平台凭据缺失时报告缺少的凭据，不猜测。所有成功结论须有工具结果或日志依据。
 `;
 
 function publicSkill(row: typeof skills.$inferSelect) {

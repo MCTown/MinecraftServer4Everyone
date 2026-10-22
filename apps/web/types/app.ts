@@ -282,6 +282,7 @@ export interface AgentWorkflowStep {
 }
 
 export interface AgentWorkflowProgress {
+  run?: { executionId: string; mode: "continuous"; waitingForJobs?: boolean };
   turn?: { runId: string; turnId: string; index: number; total: number; stepIds: string[]; waitingForJobs?: boolean };
   title: string;
   currentStepId: string;

@@ -1,23 +1,36 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { analyzeWorkflowGraph, normalizeGraphWorkflow, withWorkflowCanvas } from "../src/services/deploymentGraph.js";
-import { compileDeploymentWorkflow, defaultDeploymentWorkflow as parallelDeploymentWorkflow, deploymentStageCatalog, deploymentRounds, deploymentWorkflowSchema, workflowIssues, type DeploymentWorkflow } from "../src/services/deploymentWorkflow.js";
+import { compileDeploymentWorkflow, defaultDeploymentWorkflow as parallelDeploymentWorkflow, deploymentStageCatalog, deploymentRounds, deploymentWorkflowSchema, migrateDeploymentWorkflow, workflowIssues, type DeploymentWorkflow } from "../src/services/deploymentWorkflow.js";
 
 // Explicit legacy serial fixture; defaults now include a sparse parallel graph.
 const defaultDeploymentWorkflow = (): DeploymentWorkflow => ({ version: 1, steps: deploymentStageCatalog.map(({ id, label, prompt }) => ({ id, label, prompt, enabled: true })) });
 
+test("seven-stage saved graph gains Loader/MCDR parallel round without mutating old snapshots", () => {
+  const old = parallelDeploymentWorkflow();
+  old.steps = old.steps.filter((step) => step.id !== "install_modloader");
+  old.canvas!.edges = old.canvas!.edges.filter((edge) => edge.from !== "install_modloader" && edge.to !== "install_modloader");
+  old.canvas!.edges.push({ id: "old_exit", from: "extract_to_workspace", to: "final_mcdr_test" });
+  const snapshot = structuredClone(old), migrated = migrateDeploymentWorkflow(old);
+  assert.deepEqual(old, snapshot);
+  assert.deepEqual(workflowIssues(migrated), []);
+  const rounds = deploymentRounds(migrated);
+  assert.ok(rounds.some((round) => round.steps.some((step) => step.id === "install_modloader") && round.steps.some((step) => step.id === "configure_mcdr")));
+  assert.deepEqual(migrateDeploymentWorkflow(migrated), migrated);
+});
+
 test("old serial and parallel workflows gain an editable graph without changing their turns", () => {
   const serial = defaultDeploymentWorkflow();
   const graph = withWorkflowCanvas(serial);
-  assert.equal(graph.canvas.edges.length, 6);
+  assert.equal(graph.canvas.edges.length, 7);
   assert.deepEqual(analyzeWorkflowGraph(graph).issues, []);
   assert.deepEqual(normalizeGraphWorkflow(graph).steps, serial.steps);
-  const python = serial.steps.splice(4, 1)[0]!; serial.steps.splice(2, 0, python);
+  const python = serial.steps.splice(serial.steps.findIndex((step) => step.id === "configure_python"), 1)[0]!; serial.steps.splice(2, 0, python);
   serial.steps[2]!.parallelGroup = python.parallelGroup = "parallel_java_python";
   const parallel = withWorkflowCanvas(serial);
   assert.deepEqual(workflowIssues(parallel), []);
   assert.deepEqual(deploymentRounds(parallel).map((round) => round.steps.map((step) => step.id)), [
-    ["identify_modpack"], ["prepare_server_slot"], ["configure_python"], ["check_java_dependencies"], ["extract_to_workspace"], ["configure_mcdr"], ["final_mcdr_test"]
+    ["identify_modpack"], ["prepare_server_slot"], ["configure_python"], ["check_java_dependencies"], ["extract_to_workspace"], ["install_modloader"], ["configure_mcdr"], ["final_mcdr_test"]
   ]);
   assert.equal(parallel.canvas.edges.filter(edge => edge.from === "prepare_server_slot").length, 1);
 });
@@ -58,16 +71,19 @@ test("default graph expresses the requested sparse dependencies and parallel rou
     ["identify_modpack", "prepare_server_slot"],
     ["identify_modpack", "check_java_dependencies"],
     ["prepare_server_slot", "extract_to_workspace"],
-    ["check_java_dependencies", "extract_to_workspace"],
+    ["extract_to_workspace", "install_modloader"],
+    ["check_java_dependencies", "install_modloader"],
     ["identify_modpack", "configure_python"],
+    ["extract_to_workspace", "configure_mcdr"],
     ["configure_python", "configure_mcdr"],
-    ["extract_to_workspace", "final_mcdr_test"],
+    ["install_modloader", "final_mcdr_test"],
     ["configure_mcdr", "final_mcdr_test"]
   ]);
   assert.deepEqual(deploymentRounds(workflow).map(round => round.steps.map(step => step.id)), [
     ["identify_modpack"],
     ["prepare_server_slot", "check_java_dependencies", "configure_python"],
-    ["extract_to_workspace", "configure_mcdr"],
+    ["extract_to_workspace"],
+    ["install_modloader", "configure_mcdr"],
     ["final_mcdr_test"]
   ]);
 });
@@ -79,7 +95,7 @@ test("sparse cross-layer edges are legal and stage order needs no hard-coded pre
   assert.deepEqual(analyzeWorkflowGraph(graph).issues, []);
   assert.deepEqual(workflowIssues(graph), []);
   const serial = defaultDeploymentWorkflow();
-  const order = ["identify_modpack", "configure_python", "configure_mcdr", "prepare_server_slot", "check_java_dependencies", "extract_to_workspace", "final_mcdr_test"];
+  const order = ["identify_modpack", "configure_python", "configure_mcdr", "prepare_server_slot", "check_java_dependencies", "extract_to_workspace", "install_modloader", "final_mcdr_test"];
   serial.steps.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   assert.deepEqual(workflowIssues(withWorkflowCanvas(serial)), []);
 });
@@ -89,7 +105,7 @@ test("well-formed topology still enforces safety gates and the four-branch limit
   const java = workflow.steps.splice(2, 1)[0]!; workflow.steps.splice(4, 0, java);
   assert.deepEqual(workflowIssues(withWorkflowCanvas(workflow)), []);
   const unsafe = defaultDeploymentWorkflow(); unsafe.steps[0]!.parallelGroup = unsafe.steps[1]!.parallelGroup = "parallel_unsafe";
-  assert.ok(workflowIssues(withWorkflowCanvas(unsafe)).some(issue => issue.includes("独占一个 turn")));
+  assert.ok(workflowIssues(withWorkflowCanvas(unsafe)).some(issue => issue.includes("独立关口")));
   const wide = defaultDeploymentWorkflow();
   for (let index = 0; index < 5; index++) wide.steps.splice(2, 0, { id: `custom_${index}`, label: "分支", prompt: "check", enabled: true, parallelGroup: "parallel_wide" });
   assert.ok(workflowIssues(withWorkflowCanvas(wide)).some(issue => issue.includes("最多包含 4")));

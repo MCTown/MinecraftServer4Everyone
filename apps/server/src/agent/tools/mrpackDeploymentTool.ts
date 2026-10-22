@@ -269,7 +269,7 @@ export function createDeployMrpackServerTool(ctx: AgentToolContext): AgentTool {
         if (lastError) throw lastError;
       }
       const overrides = phase === "loader" ? { copiedOverrides: [] } : await ctx.fileService.materializeMrpackOverrides(ctx.getServerId(), "server", overwrite);
-       if (phase === "files") return JSON.stringify({ ok: true, phase, format: "mrpack", pack: summary(info), downloadedFiles, copiedOverrides: overrides.copiedOverrides, nextSteps: ["在还原到 server 目录阶段调用 deploy_mrpack_server_from_server_slot(phase=loader, javaPath=已验证的工作区Java)"] }, null, 2);
+       if (phase === "files") return JSON.stringify({ ok: true, phase, format: "mrpack", pack: summary(info), downloadedFiles, copiedOverrides: overrides.copiedOverrides, nextSteps: ["在安装 ModLoader 阶段调用 deploy_mrpack_server_from_server_slot(phase=loader, javaPath=已验证的工作区Java, background=true)"] }, null, 2);
       const configuredLoader = await writeLoader(ctx, info, loader, javaPath || (await ctx.javaService.executableForInstalledVersion(ctx.javaService.recommendVersion(info.minecraftVersion))) || "java", overwrite);
       await writeFile(path.join(server.directory, "server", "eula.txt"), "eula=true\n", "utf8");
       const updated = await ctx.serverService.updateServer(ctx.getServerId(), {

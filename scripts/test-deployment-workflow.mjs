@@ -63,6 +63,7 @@ try {
    assert.equal(await page.locator('[data-workflow-validation] small').count(), 0, "removed automatic-check description stays hidden");
    assert.equal(await page.locator('[data-workflow-toggle]').count(), 0, "required stages stay enabled");
   const originalIds = await ids();
+  const originalEdges = await page.locator("[data-workflow-edge]").count();
   assert.equal(originalIds.length, 8);
   assert.ok(!originalIds.includes("apply_mcdr_template"));
   assert.equal(originalIds[2], "check_java_dependencies");
@@ -70,6 +71,10 @@ try {
    assert.equal(await page.locator("[data-parallel-group]").count(), 2);
    assert.equal(await node("configure_python").locator('.workflow-node-number').textContent(), "06", "stage numbers stay stable when execution order changes");
   const promptBefore = await page.locator(".workflow-prompt-text").innerText();
+  assert.ok(promptBefore.includes("同一次执行内按步骤依赖完成全部阶段"));
+  assert.ok(!promptBefore.includes("Turn 调度"));
+  assert.ok((await page.locator(".workflow-toolbar").innerText()).includes("单次执行"));
+  assert.equal(await page.locator(".workflow-node-detail").filter({ hasText: /Turn \d/ }).count(), 0);
   assert.ok(promptBefore.includes("check_java_environment(minecraftVersion=实际版本)"));
   assert.equal(await page.locator(".empty-workspace").count(), 0);
   const transformBefore = await node("configure_python").getAttribute("transform");
@@ -101,15 +106,15 @@ try {
   // Invalid edits stay visible; undo, line deletion and reconnect repair them.
   await connect("extract_to_workspace", "prepare_server_slot", true);
   assert.match(await page.locator("[data-workflow-validation]").innerText(), /闭环/);
-   assert.equal(await page.locator("[data-workflow-edge]").count(), 10);
+   assert.equal(await page.locator("[data-workflow-edge]").count(), originalEdges + 1);
   assert.ok(await page.locator(".workflow-node.invalid").count());
   assert.ok(await page.getByRole("button", { name: "保存编排", exact: true }).isDisabled());
   await undo(); await checkValid();
    await deleteEdge("获取服务端包到槽位", "还原到 server 目录");
   assert.match(await page.locator("[data-workflow-validation]").innerText(), /入口|出口/);
-   assert.equal(await page.locator("[data-workflow-edge]").count(), 8);
+   assert.equal(await page.locator("[data-workflow-edge]").count(), originalEdges - 1);
    await connect("prepare_server_slot", "extract_to_workspace", true); await checkValid();
-   assert.equal(await page.locator("[data-workflow-edge]").count(), 9);
+   assert.equal(await page.locator("[data-workflow-edge]").count(), originalEdges);
   // Two clicks and keyboard port activation are alternatives to dragging.
   await port("identify_modpack", "out").focus(); await page.keyboard.press("Enter");
   await port("identify_modpack", "in").focus(); await page.keyboard.press("Enter");
@@ -120,7 +125,7 @@ try {
    await connect("configure_python", "final_mcdr_test"); await checkValid();
    assert.equal(await page.locator("[data-parallel-group]").count(), 2);
   await page.waitForFunction(() => document.querySelector(".workflow-prompt-text")?.textContent.includes("→ 汇合（全部完成）"));
-   await deleteEdge("还原到 server 目录", "最终验证");
+   await deleteEdge("配置内置 Python", "最终验证");
    await connect("check_java_dependencies", "final_mcdr_test");
   await checkValid();
   assert.equal(await page.locator(".workflow-error").count(), 0, "a valid reconnection is not a rejected-operation error");
@@ -162,7 +167,9 @@ try {
   await save();
   const saved = (await (await context.request.get(apiPath)).json()).workflow;
   assert.equal(saved.steps.at(-2).label, "部署后备份检查");
-   assert.equal(saved.canvas.edges.length, 13);
+   assert.equal(saved.canvas.edges.length, await page.locator("[data-workflow-edge]").count());
+   assert.ok(saved.canvas.edges.some(edge => edge.from === customId));
+   assert.ok(saved.canvas.edges.some(edge => edge.to === customId));
   assert.equal(saved.steps.find(step => step.id === "configure_python").parallelGroup, saved.steps.find(step => step.id === "check_java_dependencies").parallelGroup);
   const badGraph = structuredClone(saved); badGraph.canvas.edges.push({ id: 'bad_api', from: 'final_mcdr_test', to: 'identify_modpack' });
   assert.equal((await context.request.put(apiPath, { data: badGraph })).status(), 400);

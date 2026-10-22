@@ -50,6 +50,7 @@ export interface AgentToolContext {
   getDeploymentWorkflow?: () => DeploymentWorkflow;
   getWorkflowProgress?: () => AgentWorkflowProgress | null;
   beginDeploymentWorkflow?: () => string;
+  legacyWorkflowRounds?: boolean;
   getCurseForgeApiKey?: () => string;
   getModrinthApiKey?: () => string;
   getBraveSearchApiKey?: () => string;
@@ -63,6 +64,8 @@ export interface AgentToolContext {
   workflowProgress?: (progress: AgentWorkflowProgress) => void;
   serverSlotStatus?: (status: ServerSlotStatus) => void;
   consoleLog?: (text: string, stream?: ConsoleLogEntry["stream"]) => void;
+  /** Durable per-job stream, independent of the presentation console's truncation. */
+  jobOutput?: (text: string, stream: "stdout" | "stderr") => void;
   /** Called when the global agent decides the task belongs to one instance. */
   focusInstance?: (focus: { serverId: string; serverName: string; task: string; reason: string }) => void;
 }

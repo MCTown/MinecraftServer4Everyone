@@ -8,6 +8,7 @@ import { installJavaVersionToolInfo } from "./tools/javaDownloadTool.js";
 import { configureBuiltinPythonToolInfo, installMcdrPluginDependenciesToolInfo } from "./tools/pythonRuntimeTool.js";
 import { deployMrpackServerToolInfo, inspectMrpackServerToolInfo } from "./tools/mrpackDeploymentTool.js";
 import { disableClientOnlyServerModsToolInfo, disableServerModsToolInfo, inspectClientOnlyServerModsToolInfo } from "./tools/clientOnlyModsTool.js";
+import { serverValidationToolInfo } from "./tools/serverValidationTool.js";
 
 export function downloadModToServerModsToolInfo(settings?: AgentToolSettings): AgentToolInfo {
   return {
@@ -69,6 +70,7 @@ export function listAgentToolInfos(settings?: AgentToolSettings) {
     inspectMrpackServerToolInfo,
     deployMrpackServerToolInfo,
     inspectClientOnlyServerModsToolInfo,
+    serverValidationToolInfo,
     disableClientOnlyServerModsToolInfo,
     disableServerModsToolInfo,
     downloadModToServerModsToolInfo(settings),

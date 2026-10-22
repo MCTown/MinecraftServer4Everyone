@@ -1,5 +1,6 @@
 import path from "node:path";
 import { createAskUserTool } from "./tools/askUserTool.js";
+import { createServerValidationTool } from "./tools/serverValidationTool.js";
 import { spawn } from "node:child_process";
 import { access, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { fetch } from "undici";
@@ -1150,7 +1151,9 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
     {
       definition: { type: "function", function: {
         name: "begin_deployment_workflow",
-        description: "开始完整整合包部署的 turn 编排。仅用户要求完整部署时调用；普通查询、排错、安装单个模组不调用。系统将指定本轮节点并在完成后自动进入下一轮；同一并行组共用一轮，所有分支和后台任务必须汇合。",
+        description: ctx.legacyWorkflowRounds
+          ? "开始完整整合包部署的 turn 编排。仅用户要求完整部署时调用；普通查询、排错、安装单个模组不调用。系统将指定本轮节点并在完成后自动进入下一轮；同一并行组共用一轮，所有分支和后台任务必须汇合。"
+          : "初始化完整整合包部署的步骤进度；重复调用不重置进度。在同一次执行内按流程依赖完成全部步骤，阶段完成后直接继续，不生成逐阶段总结或等待下一轮。仅用户要求完整部署时调用；普通查询、排错、安装单个模组不调用。后台任务须等待真实结果，最终统一汇报。",
         parameters: objectSchema({})
       } },
       execute: async () => {
@@ -1619,6 +1622,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
     createInstallJavaVersionTool(ctx),
     createConfigureBuiltinPythonTool(ctx),
     createInstallMcdrPluginDependenciesTool(ctx),
+    createServerValidationTool(ctx),
     {
       definition: {
         type: "function",
@@ -1653,7 +1657,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "stop_current_server",
-          description: "向当前服务端发送 stop 指令。",
+          description: "向当前服务端发送 stop 指令，仅返回 stopping，不代表进程已退出。重启前必须调用 wait_for_server_stopped；不要 sleep、反复轮询或立即启动。",
           parameters: objectSchema({})
         }
       },
@@ -1663,8 +1667,26 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
       definition: {
         type: "function",
         function: {
+          name: "wait_for_server_stopped",
+          description: "在 stop_current_server 后监听状态事件，等待当前服务端及其受跟踪进程完全退出，再允许重新启动。替代 sleep 和进程轮询；已停止则立即核对并返回。默认等待 180 秒，范围 5-600 秒。取消、超时或发现残留返回诊断，不发送 stop、不自动强杀。",
+          parameters: objectSchema({ timeoutSeconds: { type: "number", description: "最长等待秒数，默认 180，范围 5-600" } })
+        }
+      },
+      execute: async (input) => {
+        const rawTimeout = typeof input.timeoutSeconds === "number" && Number.isFinite(input.timeoutSeconds) ? input.timeoutSeconds : 180;
+        const timeoutSeconds = Math.min(Math.max(Math.floor(rawTimeout), 5), 600);
+        return JSON.stringify(await ctx.processManager.waitForStopped(ctx.getServerId(), {
+          timeoutMs: timeoutSeconds * 1000,
+          signal: ctx.signal
+        }));
+      }
+    },
+    {
+      definition: {
+        type: "function",
+        function: {
           name: "kill_current_server",
-          description: "强制结束当前服务端进程树或该服务端目录关联的后台残留进程。用于 stop 无响应、启动验证卡住、状态为 orphaned/疑似残留，或需要切换启动指令重新验证时。高风险操作，会终止相关进程。",
+          description: "强制结束当前服务端进程树或该服务端目录关联的后台残留进程。仅在 stop + wait_for_server_stopped 超时并诊断后，或已确认 orphaned 残留时考虑。普通重启不使用，不因需要切换启动指令就强杀。高风险操作，必须确认，会终止相关进程并可能丢失未保存数据。",
           parameters: objectSchema({})
         }
       },
@@ -1682,13 +1704,28 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "send_current_server_command",
-          description: "向当前正在运行的服务端控制台发送一条命令，例如 stop、list、spark profiler 等。只有服务端已由后端跟踪为 running 时可用。",
-          parameters: objectSchema({ command: stringProperty }, ["command"])
+          description: "向当前受跟踪的服务端发送一条控制台命令。list 默认订阅并等待玩家列表响应（无需 sleep/grep）；其他命令可选 responseContains 字面量等待，或 responseType=players（仅 list）。waitForResponse=false 可只发送。只匹配本次发送后当前启动代次的输出，超时/取消不代表命令失败，不自动重发。控制台无请求ID，匹配不保证因果关联。",
+          parameters: objectSchema({ command: stringProperty,
+            waitForResponse: { type: "boolean", description: "list 默认 true，其他命令默认 false；启用时必须有受支持的响应匹配" },
+            responseType: { type: "string", enum: ["players"], description: "list 命令的精确玩家数量响应" },
+            responseContains: { type: "string", maxLength: 200, description: "其他命令的字面量响应片段（不是正则），与 responseType 二选一" },
+            timeoutSeconds: { type: "number", description: "等待响应秒数，默认 10，范围 1-60" }
+          }, ["command"])
         }
       },
       execute: async (input) => {
         const command = stringInput(input, "command").trim();
-        if (!command) throw new Error("command 不能为空");
+        if (!command || /[\r\n\0]/.test(command)) throw new Error("command 必须是单条非空命令");
+        const waits = booleanInput(input, "waitForResponse", command === "list" || Boolean(input.responseType || input.responseContains));
+        if (waits) {
+          if (input.responseType !== undefined && input.responseType !== "players") throw new Error("不支持的 responseType");
+          const timeout = typeof input.timeoutSeconds === "number" && Number.isFinite(input.timeoutSeconds) ? input.timeoutSeconds : 10;
+          return JSON.stringify(await ctx.processManager.sendCommandAndWait(ctx.getServerId(), command, {
+            responseType: input.responseType === "players" || (command === "list" && !input.responseContains) ? "players" : undefined,
+            responseContains: stringInput(input, "responseContains") || undefined,
+            timeoutMs: Math.min(Math.max(timeout, 1), 60) * 1000, signal: ctx.signal
+          }));
+        }
         ctx.processManager.sendCommand(ctx.getServerId(), command);
         return JSON.stringify({ ok: true, command });
       }

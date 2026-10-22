@@ -3,6 +3,8 @@ import type { AgentEvent, ConsoleLogEntry, ServerErrorState, ServerRecord } from
 
 export interface AppEvents {
   console: [ConsoleLogEntry];
+  /** Only ProcessManager's owned stdout/stderr, never Agent/Shell mirroring. */
+  managedConsole: [{ launchId: string; entry: ConsoleLogEntry }];
   consoleClear: [{ serverId: string }];
   serverStatus: [{ serverId: string; status: ServerRecord["status"] }];
   serverError: [ServerErrorState];

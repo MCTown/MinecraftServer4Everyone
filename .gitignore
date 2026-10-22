@@ -24,3 +24,6 @@ __pycache__/
 templates/reference/config/chathub/
 # Benchmark server packs are large local downloads used for evaluation only.
 benchmark/
+
+# Local experiment: OpenCode custom-tool port. Never committed.
+/opencode-tool-test/

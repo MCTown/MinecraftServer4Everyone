@@ -253,6 +253,7 @@ export interface AgentWorkflowStep {
 }
 
 export interface AgentWorkflowProgress {
+  run?: { executionId: string; mode: "continuous"; waitingForJobs?: boolean };
   turn?: { runId: string; turnId: string; index: number; total: number; stepIds: string[]; waitingForJobs?: boolean };
   title: string;
   currentStepId: string;
@@ -297,9 +298,11 @@ export interface AgentActivity {
 }
 
 export interface AgentEvent {
+  /** Durable per-job output is read by cursor; this live event is only an invalidation. */
+  jobId?: string;
   turnId?: string;
   stepId?: string;
-  type: "status" | "message" | "message_delta" | "activity" | "activity_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared" | "tool_config_required" | "focus_instance" | "model" | "inbox_updated";
+  type: "status" | "message" | "message_delta" | "activity" | "activity_delta" | "log" | "error" | "done" | "confirmation_required" | "confirmation_resolved" | "download_progress" | "workflow_progress" | "server_slot" | "retry_scheduled" | "retry_cleared" | "tool_config_required" | "focus_instance" | "model" | "inbox_updated" | "tool_output";
   status?: AgentStatus;
   content?: string;
   messageId?: string;

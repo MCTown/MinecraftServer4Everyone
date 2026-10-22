@@ -119,8 +119,10 @@ test("browser socket disconnect does not cancel work and reconnect restores work
   });
   release();
   await done;
-  assert.equal(h.service.getStatus(h.id), "failed"); // Early final reply cannot skip the active workflow node.
+  assert.equal(h.service.getStatus(h.id), "completed"); // Progress no longer imposes a runtime gate.
   assert.equal(h.service.listExecutions(h.id).length, 1);
+  assert.equal(h.service.listExecutions(h.id)[0]!.workflowScheduling, 2);
+  assert.equal(h.service.getPresentation(h.id).workflow!.run!.mode, "continuous");
   second.close();
 });
 
@@ -378,18 +380,23 @@ test("failed model step resumes with structured tool history and without another
   assert.equal(h.service.getExecution(h.id, turn!.id).toolCalls.length, 1);
 });
 
-test("restart marks running executions interrupted and refuses uncertain tool replay", async (t) => {
-  const h = harness(async () => result("不应该执行"));
+test("restart terminalizes orphan calls as uncertain outcomes without replaying side effects", async (t) => {
+  const h = harness(async (input) => {
+    assert.match(input.messages.find((message) => message.tool_call_id === "write")!.content!, /外部副作用结果不确定/);
+    return result("先核对实际状态");
+  });
   t.after(h.dispose);
   const store = new ExecutionStore();
   const turn = store.create(h.id, "修改配置", "high", "test-model", null);
-  turn.checkpoint = { messages: [{ role: "user", content: "修改配置" }], step: 0 };
+  const stepId = `${turn.id}:step:0`;
+  turn.checkpoint = { messages: [{ role: "user", content: "修改配置" }], step: 0, result: result("", [call("write", "write_server_text_file")]) };
   store.save(turn);
-  store.saveCall({ id: "uncertain", turnId: turn.id, stepId: "step", toolCallId: "write", name: "write", arguments: "{}", status: "running", startedAt: new Date().toISOString() });
+  store.saveCall({ id: `${stepId}:tool:write`, turnId: turn.id, stepId, toolCallId: "write", name: "write_server_text_file", arguments: "{}", status: "running", startedAt: new Date().toISOString() });
   ExecutionStore.recoverInterrupted();
   assert.equal(store.get(h.id, turn.id).status, "interrupted");
-  assert.equal(h.service.getExecution(h.id, turn.id).resumable, false);
-  await assert.rejects(h.service.resumeExecution(h.id, turn.id), /禁止自动重放/);
+  assert.equal(h.service.getExecution(h.id, turn.id).resumable, true);
+  assert.equal(await h.service.resumeExecution(h.id, turn.id), "先核对实际状态");
+  assert.equal(store.calls(turn.id)[0]!.outcome, "interrupted");
 });
 
 test("resume reuses a persisted model decision and completed calls in a partial tool batch", async (t) => {
@@ -500,7 +507,7 @@ test("completion of a detached tool wakes an idle scope through synthetic inbox 
   assert.equal(h.service.listInbox(h.id).length, 0);
 });
 
-test("queue waits for a new turn while steer is injected before the next model step", async (t) => {
+test("resume=false queue waits for a new turn while steer is injected before the next model step", async (t) => {
   let requests = 0;
   const h = harness(async (input) => {
     requests++;
@@ -513,7 +520,7 @@ test("queue waits for a new turn while steer is injected before the next model s
     return result("合并补充信息");
   });
   t.after(h.dispose);
-  h.service.steer(h.id, "queued-note", "queue");
+  h.service.steer(h.id, "queued-note", "queue", undefined, "synthetic", false);
   await Promise.resolve();
   assert.equal(requests, 0);
   assert.equal(await h.service.sendMessage(h.id, "开始"), "合并补充信息");
@@ -565,4 +572,197 @@ test("background Java approval can arrive after the original turn ends without r
   await Promise.resolve();
   assert.equal(installs, 0);
   assert.equal(h.service.getStatus(h.id), "completed");
+});
+
+test("durable request admission reconciles retries after a new service instance", async (t) => {
+  const finished = deferred<void>();
+  const h = harness(async () => result("done")); t.after(h.dispose);
+  const listener = (payload: { serverId: string; event: AgentEvent }) => {
+    if (payload.serverId === h.id && payload.event.type === "done") finished.resolve();
+  };
+  eventBus.on("agent", listener); t.after(() => eventBus.off("agent", listener));
+  const accepted = await h.service.acceptMessage(h.id, "durable-id", "one request", "high");
+  await finished.promise;
+  const restarted = harness(async () => { throw new Error("must not rerun"); }, undefined, undefined, h.id); t.after(restarted.dispose);
+  assert.deepEqual(await restarted.service.acceptMessage(h.id, "durable-id", "one request", "high"), accepted);
+  assert.equal(restarted.service.listExecutions(h.id).length, 1);
+  await assert.rejects(restarted.service.acceptMessage(h.id, "durable-id", "different", "high"), /其他内容/);
+});
+
+test("idle queue wakes once; active queue stays pending until idle and delivers one at a time", async (t) => {
+  const finished = deferred<void>(); let round = 0;
+  const h = harness(async (input) => {
+    round++;
+    if (round === 1) {
+      assert.ok(input.messages.some((message) => message.content?.includes("first-queue")));
+      h.service.steer(h.id, "later-queue", "queue");
+      return result("", [call("read", "list_server_files")]);
+    }
+    if (round === 2) {
+      assert.ok(!input.messages.some((message) => message.content?.includes("later-queue")));
+      return result("current work done");
+    }
+    assert.ok(input.messages.some((message) => message.content?.includes("later-queue")));
+    return result("queued work done");
+  }); t.after(h.dispose);
+  const listener = (payload: { serverId: string; event: AgentEvent }) => {
+    if (payload.serverId === h.id && payload.event.type === "done") finished.resolve();
+  };
+  eventBus.on("agent", listener); t.after(() => eventBus.off("agent", listener));
+  h.service.steer(h.id, "first-queue", "queue");
+  await finished.promise;
+  assert.equal(round, 3);
+  assert.equal(h.service.listExecutions(h.id).length, 1);
+  assert.equal(h.service.listInbox(h.id).length, 0);
+});
+
+test("bounded restart recovery resumes an owner once and never duplicates completed tool effects", async (t) => {
+  const finished = deferred<void>(); let requests = 0, effects = 0;
+  const h = harness(async (input) => {
+    requests++;
+    assert.match(input.messages.find((message) => message.tool_call_id === "once")!.content!, /saved-output/);
+    assert.ok(input.messages.some((message) => message.content?.includes("服务重启后继续")));
+    return result("recovered");
+  }, async () => { effects++; return []; }); t.after(h.dispose);
+  const store = new ExecutionStore(), turn = store.create(h.id, "recover", "high", "test-model", null);
+  const stepId = `${turn.id}:step:0`;
+  turn.checkpoint = { step: 0, messages: [{ role: "system", content: "Test" }], result: result("", [call("once", "list_server_files")]) };
+  store.save(turn);
+  store.saveCall({ id: `${stepId}:tool:once`, turnId: turn.id, stepId, toolCallId: "once", name: "list_server_files", arguments: "{}", status: "completed", output: "saved-output", startedAt: new Date().toISOString() });
+  ExecutionStore.recoverInterrupted();
+  const listener = (payload: { serverId: string; event: AgentEvent }) => {
+    if (payload.serverId === h.id && payload.event.type === "done") finished.resolve();
+  };
+  eventBus.on("agent", listener); t.after(() => eventBus.off("agent", listener));
+  h.service.startInbox(); h.service.startInbox(); await finished.promise;
+  assert.equal(requests, 1);
+  assert.equal(effects, 2, "only initial and step runtime-context snapshots list files; the saved tool is not re-executed");
+  assert.equal(store.get(h.id, turn.id).restartResumes, 1);
+  const exhausted = store.create(h.id, "exhausted", "high", "test-model", null);
+  exhausted.status = "interrupted"; exhausted.restartResumes = 3;
+  exhausted.checkpoint = { step: 0, messages: [{ role: "system", content: "Test" }] }; store.save(exhausted);
+  h.service.startInbox();
+  assert.equal(store.get(h.id, exhausted.id).status, "failed");
+  assert.match(store.get(h.id, exhausted.id).error!, /3 次上限/);
+  assert.equal(requests, 1);
+});
+
+test("multiple observational tool calls overlap but model history preserves call order", async (t) => {
+  const bothStarted = deferred<void>(), release = deferred<void>(); let started = 0, round = 0;
+  const h = harness(async (input) => {
+    if (round++ === 0) return result("", [call("first", "list_server_files"), call("second", "list_server_files")]);
+    assert.deepEqual(input.messages.filter((message) => message.role === "tool").map((message) => message.tool_call_id), ["first", "second"]);
+    return result("parallel done");
+  }, async () => {
+    if (round === 0) return []; // Runtime-context snapshots precede the first model response.
+    if (++started === 2) bothStarted.resolve(); await release.promise; return [];
+  }); t.after(h.dispose);
+  const running = h.service.sendMessage(h.id, "read twice");
+  await bothStarted.promise; assert.equal(started, 2); release.resolve();
+  assert.equal(await running, "parallel done");
+});
+
+test("active compaction is an inbox control boundary and never becomes a fake user prompt", async (t) => {
+  const entered = deferred<void>(), release = deferred<void>(); let round = 0, compacted = 0;
+  const h = harness(async (input) => {
+    round++;
+    if (round === 1) {
+      entered.resolve(); await release.promise;
+      return result("", [call("read", "list_server_files")]);
+    }
+    assert.equal(compacted, 1);
+    assert.ok(input.messages.some((message) => message.content?.includes("after-control")));
+    assert.ok(!input.messages.some((message) => message.content?.includes("Inbox synthetic input") && message.content.includes("压缩上下文")));
+    return result("done");
+  }); t.after(h.dispose);
+  // Isolate inbox ordering from the auxiliary model's summary quality.
+  (h.service as unknown as { compactSession: () => Promise<{ ok: boolean; compressed: number }> }).compactSession = async () => {
+    compacted++;
+    assert.ok(!new SessionStore().messages(h.id).some((message) => message.content?.includes("after-control")));
+    return { ok: true, compressed: 1 };
+  };
+  const running = h.service.sendMessage(h.id, "long task"); await entered.promise;
+  const accepted = await h.service.compressContext(h.id);
+  assert.equal("accepted" in accepted && accepted.accepted, true);
+  h.service.steer(h.id, "after-control"); release.resolve();
+  assert.equal(await running, "done");
+  assert.equal(h.service.listInbox(h.id).length, 0);
+});
+
+test("one process owns a scope across service instances and different scopes remain independent", async (t) => {
+  const entered = deferred<void>(), release = deferred<void>();
+  const first = harness(async () => { entered.resolve(); await release.promise; return result("first"); }); t.after(first.dispose);
+  const second = harness(async () => result("second"), undefined, undefined, first.id); t.after(second.dispose);
+  const independent = harness(async () => result("independent")); t.after(independent.dispose);
+  const running = first.service.sendMessage(first.id, "hold"); await entered.promise;
+  await assert.rejects(second.service.sendMessage(second.id, "conflict"), /正在处理/);
+  assert.equal(await independent.service.sendMessage(independent.id, "other"), "independent");
+  release.resolve(); await running;
+  assert.equal(await second.service.sendMessage(second.id, "after release"), "second");
+});
+
+test("background Shell polling is rejected before resource waiting, ordinary loops remain available", (t) => {
+  const h = harness(async () => result()); t.after(h.dispose);
+  const check = (h.service as unknown as { backgroundPollingError(scopeId: string, name: string, args: Record<string, unknown>): string | undefined }).backgroundPollingError.bind(h.service);
+  const job = { id: "poll-guard", scopeId: h.id, turnId: "test", stepId: "test", toolCallId: "test", name: "setup_neoforge_server", arguments: {}, background: true, status: "running", startedAt: new Date().toISOString() };
+  getSqlite().prepare("INSERT INTO agent_tool_jobs VALUES (?,?,?,?)").run(job.id, h.id, "running", JSON.stringify(job));
+  for (const command of ["sleep 300", "while pgrep -f installer; do sleep 3; done", "ps aux | grep neoforge", "tail -f install.log"]) assert.match(check(h.id, "run_shell_command", { command })!, /wait_for_background_job/);
+  assert.equal(check(h.id, "run_shell_command", { command: "for f in *.cfg; do cat \"$f\"; done" }), undefined);
+  getSqlite().prepare("DELETE FROM agent_tool_jobs WHERE id=?").run(job.id);
+  assert.equal(check(h.id, "run_shell_command", { command: "sleep 1" }), undefined);
+});
+
+test("global handoff is queued durably while the target is busy and completion returns through parent inbox", async (t) => {
+  const h = harness(async () => result("unused")); t.after(h.dispose);
+  const store = new ExecutionStore();
+  const parent = store.create("global", "deploy", "high", "test-model", null);
+  parent.status = "completed"; parent.handoff = { status: "pending" }; store.save(parent);
+  const service = h.service as unknown as {
+    dispatchFocusHandoff(focus: { focusServerId: string; focusTask: string; focusReason: string }, turnId: string): Promise<void>;
+    completeFocusHandoff(child: ReturnType<ExecutionStore["create"]>): void;
+    scheduleInbox(scopeId: string): void;
+  };
+  service.scheduleInbox = () => undefined; // Inspect admission without starting either model.
+  const focus = { focusServerId: h.id, focusTask: "deploy", focusReason: "target instance" };
+  await service.dispatchFocusHandoff(focus, parent.id);
+  await service.dispatchFocusHandoff(focus, parent.id);
+  assert.equal(h.service.listInbox(h.id).length, 1);
+  const [item] = h.service.listInbox(h.id);
+  assert.equal(item!.kind, "user"); assert.equal(item!.delivery, "queue");
+  assert.equal(item!.handoffParentTurnId, parent.id);
+  const child = store.create(h.id, "deploy", "high", "test-model", parent.id);
+  child.status = "completed"; store.save(child);
+  service.completeFocusHandoff(child); service.completeFocusHandoff(child);
+  const notifications = h.service.listInbox("global").filter((item) => item.id === `handoff-result:${parent.id}`);
+  assert.equal(notifications.length, 1); assert.match(notifications[0]!.text, /status: completed/);
+  assert.equal(store.get("global", parent.id).handoff!.status, "completed");
+});
+
+test("global-to-instance handoff executes the child once and wakes the parent with one completion", { timeout: 10000 }, async (t) => {
+  const complete = deferred<void>(); let globalCalls = 0, childCalls = 0;
+  let h: ReturnType<typeof harness>;
+  h = harness(async (input) => {
+    if (input.messages.some((message) => message.content?.includes("实例交接结果"))) {
+      globalCalls++; return result("父任务收到完成结果");
+    }
+    if (input.messages.some((message) => message.content?.includes("来自全局 Agent 的任务交接"))) {
+      childCalls++; return result("子任务完成");
+    }
+    if (++globalCalls === 1) return result("", [call("focus", "focus_instance", JSON.stringify({ serverId: h.id, task: "检查实例", reason: "test" }))]);
+    return result("已交接");
+  }); t.after(h.dispose);
+  // Other tests intentionally leave durable global notifications pending.
+  for (const item of h.service.listInbox("global")) h.service.cancelInbox("global", item.id);
+  await h.service.clearGlobalContext();
+  (h.service as unknown as { buildGlobalRuntimeContext: () => Promise<string> }).buildGlobalRuntimeContext = async () => "global-runtime";
+  const listener = (payload: { serverId: string; event: AgentEvent }) => {
+    if (payload.serverId === "global" && payload.event.type === "done" && globalCalls === 3) complete.resolve();
+  };
+  eventBus.on("agent", listener); t.after(() => eventBus.off("agent", listener));
+  await h.service.sendGlobalMessage("把检查任务交接给实例"); await complete.promise;
+  assert.equal(childCalls, 1); assert.equal(globalCalls, 3);
+  const child = h.service.listExecutions(h.id)[0]!;
+  assert.ok(child.parentTurnId);
+  assert.equal(h.service.getExecution("global", child.parentTurnId!).handoff!.status, "completed");
+  assert.equal(h.service.listInbox(h.id).length, 0);
 });

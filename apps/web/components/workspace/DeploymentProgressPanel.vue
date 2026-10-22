@@ -37,7 +37,7 @@ const presentations: Record<DeploymentProgressState, { label: string; icon: Icon
   waiting_confirmation: { label: "等待确认", icon: "clock", tone: "waiting", hint: "请先处理 Agent 的确认请求，确认后继续部署。" },
   retrying: { label: "等待重试", icon: "clock", tone: "waiting", hint: "模型连接暂时异常，Agent 将自动重试。" },
   progress: { label: "部署尚未完成", icon: "clock", tone: "waiting", hint: "当前流程尚未完成，可在 Agent 对话中查看结果并继续。" },
-  completed: { label: "部署完成", icon: "check", tone: "success", hint: "部署流程已完成，服务端运行状态请查看控制台。" },
+  completed: { label: "流程步骤已完成", icon: "check", tone: "success", hint: "流程步骤已完成；验收结果与未解决项请查看 Agent 报告，运行状态请查看控制台。" },
   failed: { label: "部署失败", icon: "warning", tone: "error", hint: "在 Agent 对话中查看失败原因并继续处理。" },
   cancelled: { label: "部署已中断", icon: "stop", tone: "waiting", hint: "任务已停止，可在 Agent 对话中说明下一步操作。" }
 };
@@ -55,8 +55,8 @@ const compactLabel = computed(() => props.slotUpload.active ? uploadLabel.value 
 const compactPercent = computed(() => props.slotUpload.active ? uploadPercent.value : props.workflow ? normalizedPercent.value : null);
 const stage = computed(() => resolveDeploymentStage(props.workflow, props.state));
 const currentTurn = computed(() => props.workflow?.turn);
-const activeBranches = computed(() => props.workflow?.steps.filter((step) => currentTurn.value?.stepIds.includes(step.id)) ?? []);
-function isCurrent(id: string) { return currentTurn.value ? currentTurn.value.stepIds.includes(id) && !workflowFinished.value : stage.value.current?.id === id; }
+const activeBranches = computed(() => props.workflow?.steps.filter((step) => currentTurn.value ? currentTurn.value.stepIds.includes(step.id) : step.status === "running") ?? []);
+function isCurrent(id: string) { return !workflowFinished.value && (currentTurn.value ? currentTurn.value.stepIds.includes(id) : activeBranches.value.some((step) => step.id === id) || stage.value.current?.id === id); }
 const stageTitle = computed(() => props.loading ? "正在读取部署记录…" : props.slotUpload.active ? uploadLabel.value
   : props.state === "completed" ? "所有部署阶段已完成"
     : stage.value.current?.label ?? (props.state === "not_started" ? "准备部署服务端" : presentation.value.label));
@@ -66,7 +66,7 @@ const stageCaption = computed(() => props.slotUpload.active ? "准备安装包"
     : stage.value.current ? `第 ${stage.value.index + 1} / ${props.workflow?.steps.length} 阶段`
       : props.workflow ? "等待阶段更新" : "部署准备");
 const stageDetail = computed(() => props.slotUpload.active ? "上传仅保存安装包，完成后由 Agent 继续部署。"
-  : currentTurn.value?.waitingForJobs ? "正在等待本轮后台工具结束并核验结果；不会提前启动下一 turn。"
+   : props.workflow?.run?.waitingForJobs || currentTurn.value?.waitingForJobs ? "正在等待后台工具结束并核验结果；不会提前结束部署执行。"
   : props.state === "completed" ? presentation.value.hint
     : stage.value.current?.detail || presentation.value.hint);
 const stageIcon = computed<IconName>(() => props.slotUpload.active ? "upload" : presentation.value.icon);
@@ -158,7 +158,7 @@ function collapsePanel() {
               <span v-if="compactPercent !== null" class="deployment-overall-percent">{{ compactPercent }}<small>%</small><span>{{ props.slotUpload.active ? '上传进度' : '总进度' }}</span></span>
             </div>
             <p class="deployment-description">{{ stageDetail }}</p>
-            <p v-if="activeBranches.length > 1" class="deployment-description">本轮分支：{{ activeBranches.map(step => `${step.label}（${stepStatusText(step)}）`).join(' ∥ ') }}。全部完成后收束。</p>
+            <p v-if="activeBranches.length > 1" class="deployment-description">当前分支：{{ activeBranches.map(step => `${step.label}（${stepStatusText(step)}）`).join(' ∥ ') }}。依赖结果就绪后继续后续步骤。</p>
             <div class="deployment-next-stage"><span>{{ props.state === 'completed' ? '接下来' : ['waiting_confirmation', 'retrying', 'failed', 'cancelled'].includes(props.state) ? '如何继续' : '下一步' }}</span><AppIcon name="arrowRight" :size="12" /><strong>{{ nextStageLabel }}</strong></div>
           </div>
 
@@ -184,7 +184,7 @@ function collapsePanel() {
                 <span v-else>{{ String(index + 1).padStart(2, '0') }}</span>
               </span>
               <div class="deployment-step-copy">
-                <div class="deployment-step-heading"><strong>{{ step.label }}<small v-if="step.roundIndex !== undefined"> · T{{ step.roundIndex + 1 }}{{ step.parallelGroup ? ' 并行' : '' }}</small></strong><span>{{ stepStatusText(step) }}</span></div>
+                <div class="deployment-step-heading"><strong>{{ step.label }}<small v-if="currentTurn && step.roundIndex !== undefined"> · T{{ step.roundIndex + 1 }}</small><small v-if="step.parallelGroup"> · 可并行</small></strong><span>{{ stepStatusText(step) }}</span></div>
               </div>
             </li>
           </ol>

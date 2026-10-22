@@ -6,7 +6,7 @@ const emit = defineEmits<{ select: [id: string]; selectEdge: [id: string]; posit
 const canvas = ref<SVGSVGElement | null>(null);
 const camera = reactive({ x: 180, y: 65, scale: 1 });
 const width = 304, height = 76;
-const stageIds = ["identify_modpack", "prepare_server_slot", "check_java_dependencies", "extract_to_workspace", "configure_python", "configure_mcdr", "final_mcdr_test"];
+const stageIds = ["identify_modpack", "prepare_server_slot", "check_java_dependencies", "extract_to_workspace", "install_modloader", "configure_python", "configure_mcdr", "final_mcdr_test"];
 const marker = `workflow-arrow-${useId().replaceAll(":", "")}`;
 const dragging = ref("");
 const floating = reactive({ x: 0, y: 0 });
@@ -36,7 +36,7 @@ const groups = computed(() => props.valid ? rounds.value.filter((round) => round
 function nodeDetail(id: string) {
   const round = rounds.value.findIndex((item) => item.steps.some((step) => step.id === id));
   if (!props.workflow.steps.find((step) => step.id === id)?.enabled) return "已停用 · 不参与执行";
-  return props.valid ? `Turn ${round + 1} · ${rounds.value[round]?.steps.length! > 1 ? '并行分支 · 必须汇合' : '串行节点'}` : "待校验 · 请修正连线";
+  return props.valid ? `依赖层 ${round + 1} · ${rounds.value[round]?.steps.length! > 1 ? '并行分支 · 必须汇合' : '独立步骤'}` : "待校验 · 请修正连线";
 }
 function nodeLabel(label: string) {
   let used = 0, result = "";
@@ -178,7 +178,7 @@ defineExpose({ fit });
       <g :transform="transform">
         <g v-for="group in groups" :key="group.id" :data-parallel-group="group.id" class="workflow-group-decoration">
           <rect class="workflow-group-surface" :x="group.x" :y="group.y" :width="group.width" :height="group.height" rx="18" />
-          <text class="workflow-join-label" :x="group.x + 14" :y="group.y + 17">Turn {{ group.index + 1 }} · 并行 · 全部分支完成后汇合</text>
+          <text class="workflow-join-label" :x="group.x + 14" :y="group.y + 17">依赖层 {{ group.index + 1 }} · 可并行 · 等待分支结果后汇合</text>
         </g>
         <g v-for="edge in graph.canvas.edges" :key="edge.id" :data-workflow-edge="edge.id" class="workflow-edge-group" :class="{ selected: props.selectedEdge === edge.id, invalid: props.invalidEdges.includes(edge.id) }" tabindex="0" role="button" :aria-label="`连线：${props.workflow.steps.find(s => s.id === edge.from)?.label ?? edge.from} → ${props.workflow.steps.find(s => s.id === edge.to)?.label ?? edge.to}`" @click="emit('selectEdge', edge.id)" @keydown.enter.prevent="emit('selectEdge', edge.id)">
           <path class="workflow-edge-hit" :d="edgePath(edge.from, edge.to)" /><path class="workflow-edge" :d="edgePath(edge.from, edge.to)" :marker-end="`url(#${marker})`" />

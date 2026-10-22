@@ -93,8 +93,10 @@ test("nonzero exits preserve stdout, stderr and exit code as a tool error", asyn
   });
 });
 
-test("large output is bounded while retaining the final UTF-8 output", async (t) => {
-  const { tool, script, logs } = await harness(t);
+test("large output is bounded in presentation while the durable job stream retains all text", async (t) => {
+  const { tool, script, logs, ctx } = await harness(t);
+  const chunks = { stdout: "", stderr: "" };
+  ctx.jobOutput = (text, stream) => { chunks[stream] += text; };
   const command = await script("output", `
     process.stdout.write('x'.repeat(200000) + '最后输出');
     process.stderr.write('y'.repeat(200000) + '最后错误');
@@ -106,6 +108,8 @@ test("large output is bounded while retaining the final UTF-8 output", async (t)
   assert.ok(result.stdout.endsWith("最后输出"));
   assert.ok(result.stderr.endsWith("最后错误"));
   assert.ok(logs.filter((log) => log.stream !== "system").reduce((sum, log) => sum + log.text.length, 0) <= 16000);
+  assert.equal(chunks.stdout, "x".repeat(200000) + "最后输出");
+  assert.equal(chunks.stderr, "y".repeat(200000) + "最后错误");
 });
 
 test("invalid command, timeout and cwd inputs never request execution", async (t) => {

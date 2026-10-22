@@ -71,5 +71,6 @@ test("tool validates model input and is available in both conversation scopes", 
   assert.equal(called, true);
   assert.deepEqual(JSON.parse(output), { status: "answered", selected: ["Fabric"] });
   assert.ok(createAgentTools(context).some((tool) => tool.definition.function.name === "ask_user"));
+  assert.ok(!createAgentTools({ ...context, allowAskUser: false }).some((tool) => tool.definition.function.name === "ask_user"));
   assert.ok(createGlobalAgentTools(context.serverService, context.processManager, {} as never, context).some((tool) => tool.definition.function.name === "ask_user"));
 });

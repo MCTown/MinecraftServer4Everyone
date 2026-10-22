@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentWorkflowProgress } from "../types/app";
-import { resolveDeploymentStage } from "../utils/deploymentProgress";
+import { resolveDeploymentProgressState, resolveDeploymentStage } from "../utils/deploymentProgress";
 
 function workflow(): AgentWorkflowProgress {
   return {
@@ -57,4 +57,30 @@ test("parallel branches remain in the active turn until joined and never label a
   source.steps[2]!.status = "completed";
   assert.equal(resolveDeploymentStage(source, "running").current?.id, "python");
   assert.equal(resolveDeploymentStage(source, "running").next?.id, "start");
+});
+
+test("continuous deployment follows unfinished steps without a turn boundary and retains wait metadata", () => {
+  const source = workflow();
+  source.run = { executionId: "one-execution", mode: "continuous", waitingForJobs: true };
+  assert.equal(source.turn, undefined);
+  assert.equal(resolveDeploymentStage(source, "running").current?.id, "install");
+  source.steps[1]!.status = "completed";
+  assert.equal(resolveDeploymentStage(source, "running").current?.id, "start");
+  assert.equal(source.run.waitingForJobs, true, "display resolution must not discard backend wait state");
+});
+
+test("continuous progress at 100% cannot hide active jobs, confirmation, cancellation or failure", () => {
+  const source = workflow();
+  source.run = { executionId: "one-execution", mode: "continuous", waitingForJobs: true };
+  source.steps.forEach((step) => { step.status = "completed"; step.progress = 100; });
+  source.overallProgress = 100; source.status = "completed";
+  assert.equal(resolveDeploymentProgressState(source, "completed", false, false), "running");
+  source.run.waitingForJobs = false;
+  assert.equal(resolveDeploymentProgressState(source, "running", true, false), "running");
+  assert.equal(resolveDeploymentProgressState(source, "waiting_confirmation", true, false), "waiting_confirmation");
+  assert.equal(resolveDeploymentProgressState(source, "cancelled", false, false), "cancelled");
+  assert.equal(resolveDeploymentProgressState(source, "failed", false, false), "failed");
+  assert.equal(resolveDeploymentProgressState(source, "completed", false, false), "completed");
+  source.steps[2]!.status = "pending";
+  assert.equal(resolveDeploymentProgressState(source, "completed", false, false), "progress");
 });

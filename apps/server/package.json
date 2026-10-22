@@ -24,11 +24,14 @@
     "fastify": "latest",
     "tar": "latest",
     "undici": "^7.25.0",
+    "yaml": "^2.9.1",
+    "yauzl": "^2.10.0",
     "zod": "latest"
   },
   "devDependencies": {
     "@types/better-sqlite3": "latest",
     "@types/node": "latest",
+    "@types/yauzl": "^2.10.3",
     "tsx": "latest",
     "typescript": "latest"
   }

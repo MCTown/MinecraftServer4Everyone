@@ -24,11 +24,28 @@ export function registerGlobalAgentRoutes(app: FastifyInstance, services: RouteS
   });
   const inboxParams = z.object({ inboxId: z.string().min(1) });
   app.get("/api/agent/tools/jobs", async () => services.agentService.listToolJobs("global"));
+  app.get("/api/agent/tools/jobs/:jobId/output", async (request) => {
+    const { jobId } = z.object({ jobId: z.string().min(1) }).parse(request.params);
+    const { cursor } = z.object({ cursor: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return services.agentService.getToolOutput("global", jobId, cursor);
+  });
+  app.delete("/api/agent/tools/jobs/:jobId", async (request) => {
+    const { jobId } = z.object({ jobId: z.string().min(1) }).parse(request.params);
+    return services.agentService.cancelToolJob("global", jobId);
+  });
   app.post("/api/agent/background", async () => services.agentService.backgroundTools("global"));
   app.get("/api/agent/inbox", async () => services.agentService.listInbox("global"));
+  app.get("/api/agent/inbox/events", async (request) => {
+    const { after } = z.object({ after: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return services.agentService.listInboxEvents("global", after);
+  });
+  app.post("/api/agent/tools/output/prune", async (request) => {
+    const { before } = parseBody(z.object({ before: z.iso.datetime() }), request.body);
+    return services.agentService.pruneToolOutput("global", before);
+  });
   app.post("/api/agent/inbox", async (request) => {
-    const body = parseBody(z.object({ text: z.string().min(1), delivery: z.enum(["steer", "queue"]).default("steer") }), request.body);
-    return services.agentService.steer("global", body.text, body.delivery);
+    const body = parseBody(z.object({ text: z.string().min(1), id: z.string().min(1).max(256).optional(), kind: z.enum(["user", "synthetic"]).default("synthetic"), resume: z.boolean().default(true), delivery: z.enum(["steer", "queue"]).default("steer") }), request.body);
+    return services.agentService.steer("global", body.text, body.delivery, body.id, body.kind, body.resume);
   });
   app.patch("/api/agent/inbox/:inboxId", async (request) => {
     const { inboxId } = inboxParams.parse(request.params);

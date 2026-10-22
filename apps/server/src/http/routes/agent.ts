@@ -18,13 +18,30 @@ export function registerAgentRoutes(app: FastifyInstance, services: RouteService
   });
   const inboxParams = z.object({ id: z.string().min(1), inboxId: z.string().min(1) });
   app.get("/api/servers/:id/agent/tools/jobs", async (request) => services.agentService.listToolJobs(idParams.parse(request.params).id));
+  app.get("/api/servers/:id/agent/tools/jobs/:jobId/output", async (request) => {
+    const { id, jobId } = z.object({ id: z.string().min(1), jobId: z.string().min(1) }).parse(request.params);
+    const { cursor } = z.object({ cursor: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return services.agentService.getToolOutput(id, jobId, cursor);
+  });
+  app.delete("/api/servers/:id/agent/tools/jobs/:jobId", async (request) => {
+    const { id, jobId } = z.object({ id: z.string().min(1), jobId: z.string().min(1) }).parse(request.params);
+    return services.agentService.cancelToolJob(id, jobId);
+  });
   app.post("/api/servers/:id/agent/background", async (request) => services.agentService.backgroundTools(idParams.parse(request.params).id));
   app.get("/api/servers/:id/agent/inbox", async (request) => services.agentService.listInbox(idParams.parse(request.params).id));
+  app.get("/api/servers/:id/agent/inbox/events", async (request) => {
+    const { after } = z.object({ after: z.coerce.number().int().min(0).default(0) }).parse(request.query);
+    return services.agentService.listInboxEvents(idParams.parse(request.params).id, after);
+  });
+  app.post("/api/servers/:id/agent/tools/output/prune", async (request) => {
+    const { before } = parseBody(z.object({ before: z.iso.datetime() }), request.body);
+    return services.agentService.pruneToolOutput(idParams.parse(request.params).id, before);
+  });
   app.post("/api/servers/:id/agent/inbox", async (request) => {
     const { id } = idParams.parse(request.params);
     await services.serverService.requireServer(id);
-    const body = parseBody(z.object({ text: z.string().min(1), delivery: z.enum(["steer", "queue"]).default("steer") }), request.body);
-    return services.agentService.steer(id, body.text, body.delivery);
+    const body = parseBody(z.object({ text: z.string().min(1), id: z.string().min(1).max(256).optional(), kind: z.enum(["user", "synthetic"]).default("synthetic"), resume: z.boolean().default(true), delivery: z.enum(["steer", "queue"]).default("steer") }), request.body);
+    return services.agentService.steer(id, body.text, body.delivery, body.id, body.kind, body.resume);
   });
   app.patch("/api/servers/:id/agent/inbox/:inboxId", async (request) => {
     const { id, inboxId } = inboxParams.parse(request.params);

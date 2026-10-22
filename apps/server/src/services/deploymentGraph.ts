@@ -47,7 +47,7 @@ export function analyzeWorkflowGraph(workflow: GraphWorkflow) {
   const edgeOrder = [...new Set(edges.flatMap((edge) => [edge.from, edge.to]))];
   while (remaining.size) {
     const layer = [...remaining].filter((id) => incoming.get(id)!.every((from) => visited.has(from))).sort((a, b) => edgeOrder.indexOf(a) - edgeOrder.indexOf(b));
-    if (!layer.length) { report("流程存在闭环，不能安排 turn；请删除反向或循环连线", [...remaining], edges.filter((edge) => remaining.has(edge.from) && remaining.has(edge.to)).map((edge) => edge.id)); break; }
+    if (!layer.length) { report("流程存在闭环，不能安排执行顺序；请删除反向或循环连线", [...remaining], edges.filter((edge) => remaining.has(edge.from) && remaining.has(edge.to)).map((edge) => edge.id)); break; }
     rounds.push(layer);
     layer.forEach((id) => { remaining.delete(id); visited.add(id); });
   }
@@ -58,7 +58,7 @@ export function analyzeWorkflowGraph(workflow: GraphWorkflow) {
   rounds.forEach((layer) => {
     if (layer.length > 4) report("每个并行组最多包含 4 个节点", layer);
     const gates = layer.filter((id) => ["identify_modpack", "final_mcdr_test"].includes(id));
-    if (gates.length && layer.length > 1) report("确认整合包与最终验证必须独占一个 turn", layer);
+    if (gates.length && layer.length > 1) report("确认整合包与最终验证必须是独立关口，不与其他步骤并行", layer);
   });
   return { rounds, issues };
 }

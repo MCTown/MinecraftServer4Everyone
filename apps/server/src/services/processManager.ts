@@ -1,7 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from "node:child_process";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import type { ServerRecord } from "../types.js";
+import type { ConsoleLogEntry, ServerRecord } from "../types.js";
 import { appConfig } from "../config.js";
 import { ConsoleLogService } from "./consoleLogService.js";
 import { eventBus } from "./eventBus.js";
@@ -16,6 +17,11 @@ interface RunningProcess {
   serverId: string;
   child: ChildProcessWithoutNullStreams;
   rootPid: number | null;
+  launchId: string;
+  startedAt: string;
+  logs: ConsoleLogEntry[];
+  logCharacters: number;
+  logsTruncated: boolean;
 }
 
 interface SystemProcess {
@@ -142,6 +148,7 @@ function spawnErrorDetails(error: Error, command: string, args: string[], cwd: s
 export class ProcessManager {
   private running: RunningProcess | null = null;
   private busy = false;
+  private commandWaiters = new Set<string>();
 
   constructor(
     private readonly serverService: ServerService,
@@ -152,6 +159,111 @@ export class ProcessManager {
 
   getActiveServerId() {
     return this.running?.serverId ?? null;
+  }
+
+  getLaunchIdentity(serverId: string) {
+    const running = this.running?.serverId === serverId ? this.running : null;
+    return running ? { launchId: running.launchId, startedAt: running.startedAt, rootPid: running.rootPid } : null;
+  }
+
+  /** Observational only; ancestry comes from the in-memory owned child, not
+   * global pgrep or an unverified persisted PID that may have been reused. */
+  async inspectRuntime(serverId: string) {
+    const launch = this.getLaunchIdentity(serverId);
+    if (!launch?.rootPid) return { launch, processes: [], owned: false, reason: "没有当前后端跟踪的启动进程，不能确认进程归属" };
+    const processes = await this.collectSystemProcesses(true);
+    if (this.getLaunchIdentity(serverId)?.launchId !== launch.launchId) throw new Error("检查期间服务端启动代次改变，请使用新快照");
+    const root = processes.find((item) => item.pid === launch.rootPid);
+    const descendants = this.descendantPids(launch.rootPid, processes);
+    return { launch, owned: Boolean(root), processes: root ? processes.filter((item) => item.pid === root.pid || descendants.has(item.pid)) : [],
+      reason: root ? null : "跟踪进程已不在系统进程列表中" };
+  }
+
+  getConsoleSnapshot(serverId: string) {
+    // Presentation console also contains Shell output; it is not process evidence.
+    const running = this.running?.serverId === serverId ? this.running : null;
+    const entries = [...(running?.logs ?? [])];
+    return { launch: this.getLaunchIdentity(serverId), cursor: entries.at(-1)?.id ?? null, entries, truncated: running?.logsTruncated ?? false };
+  }
+
+  private appendManagedOutput(running: RunningProcess, text: string, stream: "stdout" | "stderr") {
+    const entry = this.consoleLogService.append(running.serverId, stream, text);
+    if (!entry || this.running !== running) return;
+    const retained = text.length > 128_000 ? { ...entry, text: entry.text.slice(-128_000) } : entry;
+    running.logsTruncated ||= retained !== entry;
+    running.logs.push(retained); running.logCharacters += retained.text.length;
+    while (running.logs.length > 4000 || running.logCharacters > 2_000_000) {
+      running.logCharacters -= running.logs.shift()!.text.length; running.logsTruncated = true;
+    }
+    eventBus.emit("managedConsole", { launchId: running.launchId, entry });
+  }
+
+  /** Subscribe before writing. Never re-send on timeout; matching output proves
+   * an observation, not a protocol request-id correlation with this command. */
+  async sendCommandAndWait(serverId: string, command: string, options: {
+    responseType?: "players"; responseContains?: string; timeoutMs?: number; signal?: AbortSignal;
+  }) {
+    if (options.signal?.aborted) throw new Error("命令已取消，未发送");
+    if (/[\r\n\0]/.test(command) || !command.trim()) throw new Error("只允许发送一条非空控制台命令");
+    if (options.responseType === "players" && command.trim() !== "list") throw new Error("players 响应等待只用于 list 命令");
+    const contains = options.responseContains?.trim();
+    if (!options.responseType && (!contains || contains.length > 200)) throw new Error("等待响应需要 responseType=players 或 1-200 字符的 responseContains");
+    if (options.responseType && contains) throw new Error("responseType 和 responseContains 不能同时设置");
+    if (this.commandWaiters.has(serverId)) throw new Error("当前实例已有命令正在等待响应；本条命令未发送");
+    const running = this.running;
+    if (!running || running.serverId !== serverId) throw new Error("Server is not running; command not sent");
+    const cursor = running.logs?.at(-1)?.id ?? null;
+    const timeoutMs = Number.isFinite(options.timeoutMs) ? Math.min(Math.max(options.timeoutMs!, 100), 60_000) : 10_000;
+    const startedAt = Date.now();
+    this.commandWaiters.add(serverId);
+    return new Promise<{
+      serverId: string; command: string; launchId: string; cursor: string | null; sent: boolean;
+      status: "matched" | "timed_out" | "cancelled" | "interrupted" | "send_failed";
+      elapsedMs: number; evidence?: { logId: string; text: string }; detail: string;
+    }>((resolve) => {
+      let settled = false;
+      let sent = false;
+      const buffers = new Map<string, string>();
+      const finish = (status: "matched" | "timed_out" | "cancelled" | "interrupted" | "send_failed", detail: string,
+        evidence?: { logId: string; text: string }) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        eventBus.off("managedConsole", onConsole);
+        eventBus.off("consoleClear", onClear);
+        eventBus.off("serverStatus", onStatus);
+        options.signal?.removeEventListener("abort", onAbort);
+        this.commandWaiters.delete(serverId);
+        resolve({ serverId, command, launchId: running.launchId, cursor, sent, status, elapsedMs: Date.now() - startedAt, evidence, detail });
+      };
+      const onConsole = ({ entry, launchId }: { entry: ConsoleLogEntry; launchId: string }) => {
+        if (!sent || entry.serverId !== serverId || entry.stream === "system") return;
+        if (this.running !== running || launchId !== running.launchId) { finish("interrupted", "启动代次改变；不要自动重发命令"); return; }
+        const text = ((buffers.get(entry.stream) ?? "") + entry.text).replace(/\x1b\[[0-9;]*m/g, "");
+        const line = text.split(/\r?\n/).find((value) => options.responseType === "players"
+          ? /(?:^|\]:?\s*|\[Server\]\s*)There are \d+ of a max of \d+ players online\s*:/.test(value)
+          : value.includes(contains!));
+        if (line) finish("matched", "匹配到发送后当前实例的输出；控制台协议无请求 ID，不保证因果关联", { logId: entry.id, text: line.slice(0, 2000) });
+        buffers.set(entry.stream, (text.split(/\r?\n/).at(-1) ?? "").slice(-8192));
+      };
+      const onClear = (event: { serverId: string }) => { if (event.serverId === serverId) finish("interrupted", "控制台已清空/重新启动；不要自动重发命令"); };
+      const onStatus = (event: { serverId: string; status: ServerRecord["status"] }) => {
+        if (event.serverId === serverId && (this.running !== running || event.status !== "running")) finish("interrupted", "服务端已退出或进入停止/重启状态；不要自动重发命令");
+      };
+      const onAbort = () => finish("cancelled", "已取消等待；已发送的命令不会撤销，不自动重发");
+      const timeout = setTimeout(() => finish("timed_out", "等待响应超时不代表命令执行失败或服务端未运行；不要自动重发"), timeoutMs);
+      eventBus.on("managedConsole", onConsole);
+      eventBus.on("consoleClear", onClear);
+      eventBus.on("serverStatus", onStatus);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options.signal?.aborted) { onAbort(); return; }
+      try {
+        sent = true;
+        this.sendCommand(serverId, command);
+      } catch (error) {
+        finish("send_failed", `发送未能确认（可能已部分写入），不要自动重发：${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
   }
 
   /**
@@ -208,6 +320,76 @@ export class ProcessManager {
     });
   }
 
+  /** Observe shutdown; never stop/kill a process or treat orphaned as success. */
+  async waitForStopped(serverId: string, options: { timeoutMs?: number; signal?: AbortSignal } = {}) {
+    const rawTimeout = options.timeoutMs ?? 180_000;
+    const timeoutMs = Number.isFinite(rawTimeout) ? Math.min(Math.max(Math.floor(rawTimeout), 1_000), 600_000) : 180_000;
+    const startedAt = Date.now();
+    return new Promise<{ serverId: string; stopped: true; status: "stopped" | "crashed"; elapsedMs: number }>((resolve, reject) => {
+      let settled = false;
+      let revision = 0;
+      let lastStatus: ServerRecord["status"] | undefined;
+      const diagnostic = () => {
+        const rootPid = this.running?.serverId === serverId ? this.running.rootPid : null;
+        const recentLogs = this.consoleLogService.listAll(serverId).slice(-5).map((entry) => entry.text.slice(-400)).join("\n");
+        return `状态：${lastStatus ?? "未知"}；受跟踪根 PID：${rootPid ?? "无"}。不会自动强杀；检查停服日志及残留进程后再决定是否经高风险确认清理。${recentLogs ? `\n最近日志：\n${recentLogs}` : ""}`;
+      };
+      const finish = (error: Error | null, status?: "stopped" | "crashed") => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        eventBus.off("serverStatus", onStatus);
+        options.signal?.removeEventListener("abort", onAbort);
+        if (error) reject(error);
+        else resolve({ serverId, stopped: true, status: status!, elapsedMs: Date.now() - startedAt });
+      };
+      const check = async (server: ServerRecord, observedRevision: number) => {
+        if (settled || revision !== observedRevision) return;
+        lastStatus = server.status;
+        if (server.status === "orphaned") {
+          finish(new Error(`服务端存在后台残留进程，不能确认停服完成。${diagnostic()}`));
+          return;
+        }
+        if (server.status !== "stopped" && server.status !== "crashed") return;
+        // A database status or exited shell alone is insufficient: the existing
+        // process-tree/metadata matcher must also find no associated processes.
+        const remaining = await this.findActiveServerProcesses(server, null, true);
+        if (settled || revision !== observedRevision) return;
+        if (this.running?.serverId === serverId || remaining.length) {
+          finish(new Error(`服务端仍有受跟踪或残留进程${remaining.length ? `：${processSummary(remaining)}` : ""}，不能确认停服完成。${diagnostic()}`));
+          return;
+        }
+        finish(null, server.status);
+      };
+      const inspect = async (observedRevision: number, status?: ServerRecord["status"]) => {
+        try {
+          const server = await this.serverService.requireServer(serverId);
+          await check(status ? { ...server, status } : server, observedRevision);
+        } catch (error) {
+          if (revision === observedRevision) finish(error instanceof Error ? error : new Error(String(error)));
+        }
+      };
+      const onStatus = (event: { serverId: string; status: ServerRecord["status"] }) => {
+        if (event.serverId !== serverId || settled) return;
+        const observedRevision = ++revision;
+        lastStatus = event.status;
+        if (event.status === "starting" || event.status === "running") {
+          finish(new Error(`等待停服期间服务端重新启动，不能确认原进程已停止。${diagnostic()}`));
+          return;
+        }
+        void inspect(observedRevision, event.status);
+      };
+      const onAbort = () => finish(new Error("等待服务端停止已取消（仅取消等待，不改变进程状态）"));
+      const timeout = setTimeout(() => finish(new Error(`等待服务端停止超时（${timeoutMs}ms）。${diagnostic()}`)), timeoutMs);
+      // Subscribe before the initial async snapshot, avoiding an exit/subscribe
+      // race. Revisions fence stale snapshots and in-flight process inspections.
+      eventBus.on("serverStatus", onStatus);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options.signal?.aborted) onAbort();
+      else void inspect(revision);
+    });
+  }
+
   /**
    * Serializes maintenance work (map mutations, rollbacks) against start/stop so a
    * server cannot boot while region files are being rewritten.
@@ -242,11 +424,14 @@ export class ProcessManager {
     });
   }
 
-  private async collectSystemProcesses(): Promise<SystemProcess[]> {
+  private async collectSystemProcesses(requireInspection = false): Promise<SystemProcess[]> {
     if (process.platform === "win32") {
       const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress";
       const result = await this.runBufferedProcess(windowsPowerShell(), ["-NoProfile", "-Command", script]).catch(() => null);
-      if (!result?.stdout.trim()) return [];
+      if (!result?.stdout.trim() || (requireInspection && result.code !== 0)) {
+        if (requireInspection) throw new Error("无法读取系统进程列表，不能确认停服完成");
+        return [];
+      }
       try {
         const parsed = JSON.parse(result.stdout) as unknown;
         return normalizeJsonRows(parsed).map((row) => {
@@ -259,12 +444,16 @@ export class ProcessManager {
           };
         }).filter((item) => item.pid > 0);
       } catch {
+        if (requireInspection) throw new Error("无法解析系统进程列表，不能确认停服完成");
         return [];
       }
     }
 
     const result = await this.runBufferedProcess("ps", ["-eo", "pid=,ppid=,comm=,args="]).catch(() => null);
-    if (!result?.stdout.trim()) return [];
+    if (!result?.stdout.trim() || (requireInspection && result.code !== 0)) {
+      if (requireInspection) throw new Error("无法读取系统进程列表，不能确认停服完成");
+      return [];
+    }
     return result.stdout.split(/\r?\n/).map((line) => {
       const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\S+)\s*(.*)$/);
       if (!match) return null;
@@ -350,8 +539,8 @@ export class ProcessManager {
     return (await this.findActiveServerProcesses(server)).length > 0;
   }
 
-  private async findActiveServerProcesses(server: ServerRecord, trustedRootPid: number | null = null) {
-    const processes = await this.collectSystemProcesses();
+  private async findActiveServerProcesses(server: ServerRecord, trustedRootPid: number | null = null, requireInspection = false) {
+    const processes = await this.collectSystemProcesses(requireInspection);
     const byPid = new Map(processes.map((item) => [item.pid, item]));
     const metadata = await this.readProcessMetadata(server);
     const candidatePids = new Set<number>();
@@ -734,7 +923,8 @@ export class ProcessManager {
         });
         const rootPid = child.pid ?? null;
 
-        this.running = { serverId, child, rootPid };
+        const owned: RunningProcess = { serverId, child, rootPid, launchId: randomUUID(), startedAt: new Date().toISOString(), logs: [], logCharacters: 0, logsTruncated: false };
+        this.running = owned;
         void this.writeProcessMetadata(server, {
           rootPid,
           pids: rootPid ? [rootPid] : [],
@@ -744,8 +934,9 @@ export class ProcessManager {
           scriptName: name,
           startedAt: new Date().toISOString()
         });
-         child.stdout.on("data", (chunk: Buffer) => this.consoleLogService.append(serverId, "stdout", chunk.toString("utf8")));
-         child.stderr.on("data", (chunk: Buffer) => this.consoleLogService.append(serverId, "stderr", chunk.toString("utf8")));
+         child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+         child.stdout.on("data", (text: string) => this.appendManagedOutput(owned, text, "stdout"));
+         child.stderr.on("data", (text: string) => this.appendManagedOutput(owned, text, "stderr"));
          child.stdin.on("error", (error) => {
            this.consoleLogService.append(serverId, "system", `服务端输入通道错误：${error.message}\n`);
          });

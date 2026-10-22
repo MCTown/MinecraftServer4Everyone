@@ -123,7 +123,7 @@ function group(id: string, targetId: string | null) {
   if (!draft.value || !state.value || saving.value) return;
   const next = groupWorkflowStep(draft.value, id, targetId);
   change(next);
-  notice.value = targetId ? "已加入并行组：同一 turn 分叉执行，所有分支完成后汇合。" : "已拆为独立 turn。";
+  notice.value = targetId ? "已加入并行组：无冲突工作可并行，等待分支结果后汇合。" : "已拆为独立步骤。";
 }
 function select(id: string) { selectedId.value = id; selectedEdgeId.value = ""; }
 function remove() {
@@ -170,9 +170,9 @@ defineExpose({ refresh: load });
     <AsyncPlaceholder v-if="loading && !state" variant="form" label="正在加载部署流程" :rows="4" />
     <div v-if="error" class="settings-warning-note workflow-error" role="alert"><AppIcon name="warning" /><span>{{ error }}</span><button v-if="!state" type="button" @click="load">重试</button></div>
     <template v-if="state && draft">
-       <div class="workflow-toolbar"><div><span class="settings-badge">全局流程</span><strong>{{ draft.steps.filter(s => s.enabled).length }} 个执行步骤 · {{ issues.length ? '待修正' : `${rounds.length} 个 turn` }}</strong><span class="workflow-draft-state" :class="{ dirty }">{{ dirty ? '未保存的更改' : '已与配置同步' }}</span></div><div><button type="button" :disabled="saving || !undoStack.length" aria-label="撤销上次编排操作" @click="history('undo')"><AppIcon name="arrowLeft" />撤销</button><button type="button" :disabled="saving || !redoStack.length" aria-label="重做编排操作" @click="history('redo')"><AppIcon name="arrowRight" />重做</button><button type="button" :disabled="saving || draft.steps.length >= 40" @click="add"><AppIcon name="plus" />添加步骤</button><button type="button" :disabled="saving" @click="defaults"><AppIcon name="history" />默认编排</button></div></div>
+       <div class="workflow-toolbar"><div><span class="settings-badge">全局流程</span><strong>{{ draft.steps.filter(s => s.enabled).length }} 个执行步骤 · {{ issues.length ? '待修正' : `${rounds.length} 个依赖层 · 单次执行` }}</strong><span class="workflow-draft-state" :class="{ dirty }">{{ dirty ? '未保存的更改' : '已与配置同步' }}</span></div><div><button type="button" :disabled="saving || !undoStack.length" aria-label="撤销上次编排操作" @click="history('undo')"><AppIcon name="arrowLeft" />撤销</button><button type="button" :disabled="saving || !redoStack.length" aria-label="重做编排操作" @click="history('redo')"><AppIcon name="arrowRight" />重做</button><button type="button" :disabled="saving || draft.steps.length >= 40" @click="add"><AppIcon name="plus" />添加步骤</button><button type="button" :disabled="saving" @click="defaults"><AppIcon name="history" />默认编排</button></div></div>
        <p class="settings-info-note"><AppIcon name="info" />新建服务端会自动套用 MCDReforged 模板，不占用流程步骤；Java 版本依赖在安装 Loader 前单独检查。</p>
-      <p class="settings-info-note"><AppIcon name="workflow" />每个节点独占一个 turn，并行组共用一个 turn。所有分支与后台任务完成并汇合后，系统才自动进入下一轮；失败或中断不会跳过。</p>
+      <p class="settings-info-note"><AppIcon name="workflow" />完整部署在同一次执行内按步骤依赖持续推进，不按阶段切换对话轮次。无冲突工作可后台并行，依赖实际结果就绪后继续；失败或未知结果须先诊断或报告，不能冒充完成。</p>
         <div class="workflow-validation" :class="{ invalid: issues.length }" aria-live="polite" data-workflow-validation>
           <div><AppIcon :name="issues.length ? 'warning' : 'check'" /><strong>{{ issues.length ? `${issues.length} 项问题 · 草稿已保留` : '检查通过' }}</strong><button type="button" :disabled="saving" @click="checkWorkflow">检查流程</button></div>
         <ul v-if="issues.length"><li v-for="(issue, index) in issues" :key="`${index}-${issue}`">{{ issue }}</li></ul>
@@ -182,7 +182,7 @@ defineExpose({ refresh: load });
         <aside v-if="selectedEdge" class="workflow-inspector">
           <div class="workflow-inspector-heading"><span class="settings-category-icon"><AppIcon name="workflow" /></span><div><small>有向连接</small><h2>连线设置</h2></div></div>
           <p class="workflow-edge-description">{{ draft.steps.find(step => step.id === selectedEdge!.from)?.label }}<span>↓</span>{{ draft.steps.find(step => step.id === selectedEdge!.to)?.label }}</p>
-          <p class="settings-info-note">连线表示前置依赖，可跨轮连接；按依赖分层并发，每轮全部完成后进入下一轮，所有分支最终汇合到唯一出口。</p>
+          <p class="settings-info-note">连线表示前置依赖，可跨层连接；同一次执行内按依赖推进，无冲突工作可并行，依赖结果就绪后继续，所有分支最终汇合到唯一出口。</p>
           <button type="button" class="danger" :disabled="saving" @click="deleteEdge(selectedEdge.id)"><AppIcon name="trash" />删除连线</button>
           <button type="button" @click="selectedEdgeId = ''">返回节点设置</button>
         </aside>
@@ -192,17 +192,17 @@ defineExpose({ refresh: load });
             <label class="settings-field"><span>步骤名称</span><input v-model="selected.label" maxlength="60" aria-label="步骤名称" /></label>
             <div class="workflow-step-id"><code>{{ selected.id }}</code><span>进度上报 ID</span></div>
             <div class="workflow-round-settings">
-               <strong>{{ issues.length ? '连线校验未通过 · 暂不分配 turn' : selectedRound < 0 ? '已停用 · 不参与 turn' : `Turn ${selectedRound + 1} · ${selected.parallelGroup ? '并行组 · 全部汇合' : '串行节点'}` }}</strong>
+               <strong>{{ issues.length ? '连线校验未通过 · 暂不安排执行' : selectedRound < 0 ? '已停用 · 不参与执行' : `依赖层 ${selectedRound + 1} · ${selected.parallelGroup ? '并行组 · 等待结果汇合' : '独立步骤'}` }}</strong>
               <small>自由拖动节点；从下方输出点连到上方输入点。也可以依次点选两个连接点，手机同样可用。</small>
               <template v-if="!['identify_modpack', 'final_mcdr_test'].includes(selected.id)">
-                 <details v-if="!graphCheck.issues.length" class="workflow-shortcuts"><summary>快捷编排（重建连接关系）</summary><label class="settings-field"><span>与其他节点并行</span><select aria-label="并行目标节点" value="" @change="group(selectedId, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"><option value="" disabled>选择节点 / 并行组…</option><option v-for="round in parallelTargets" :key="round.id" :value="round.steps[0]!.id">{{ round.steps.map(step => step.label).join(' ∥ ') }}</option></select></label><button v-if="selected.parallelGroup" type="button" @click="group(selectedId, null)">拆为独立 turn</button></details>
+                 <details v-if="!graphCheck.issues.length" class="workflow-shortcuts"><summary>快捷编排（重建连接关系）</summary><label class="settings-field"><span>与其他节点并行</span><select aria-label="并行目标节点" value="" @change="group(selectedId, ($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"><option value="" disabled>选择节点 / 并行组…</option><option v-for="round in parallelTargets" :key="round.id" :value="round.steps[0]!.id">{{ round.steps.map(step => step.label).join(' ∥ ') }}</option></select></label><button v-if="selected.parallelGroup" type="button" @click="group(selectedId, null)">拆为独立步骤</button></details>
               </template>
               <small>最多 4 个无依赖节点；仅 background 工具可重叠运行，不允许并发修改同一文件或配置。</small>
             </div>
             <label class="settings-field"><span>Agent 执行指令</span><textarea v-model="selected.prompt" rows="10" maxlength="12000" aria-label="Agent 执行指令" placeholder="告诉 Agent 这一步要做什么、使用哪些工具、如何判断完成…" /><small>这里是给 Agent 的提示词，不会直接执行代码。内置步骤的必要技术检查始终保留。</small></label>
             <label v-if="!builtIn" class="workflow-enable"><input v-model="selected.enabled" type="checkbox" role="switch" />启用此步骤<small>禁用后不组装进 Prompt</small></label>
-            <div v-if="builtIn" class="workflow-dependencies"><AppIcon name="shield" /><span>内置必要技术检查始终保留；前置连线与执行轮次可自由调整。</span></div>
-            <div class="workflow-step-actions"><button type="button" :disabled="editingRoundIndex <= 0 || !!graphCheck.issues.length" aria-label="上移当前步骤" @click="reorder(selectedId, -1)"><AppIcon name="arrowUp" />提前一轮</button><button type="button" :disabled="editingRoundIndex >= editingRounds.length - 1 || !!graphCheck.issues.length" aria-label="下移当前步骤" @click="reorder(selectedId, 1)"><AppIcon name="arrowDown" />延后一轮</button><button v-if="!builtIn" type="button" class="danger" @click="remove"><AppIcon name="trash" />删除</button></div>
+            <div v-if="builtIn" class="workflow-dependencies"><AppIcon name="shield" /><span>内置必要技术检查始终保留；前置连线与步骤依赖可自由调整。</span></div>
+            <div class="workflow-step-actions"><button type="button" :disabled="editingRoundIndex <= 0 || !!graphCheck.issues.length" aria-label="上移当前步骤" @click="reorder(selectedId, -1)"><AppIcon name="arrowUp" />提前一层</button><button type="button" :disabled="editingRoundIndex >= editingRounds.length - 1 || !!graphCheck.issues.length" aria-label="下移当前步骤" @click="reorder(selectedId, 1)"><AppIcon name="arrowDown" />延后一层</button><button v-if="!builtIn" type="button" class="danger" @click="remove"><AppIcon name="trash" />删除</button></div>
           </fieldset>
         </aside>
       </div>

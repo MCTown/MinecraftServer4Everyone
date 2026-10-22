@@ -17,6 +17,7 @@ export interface AgentExecution {
   id: string;
   scopeId: string;
   parentTurnId: string | null;
+  handoffParentTurnIds?: string[];
   input: string;
   reasoningEffort: ReasoningEffort;
   modelName: string | null;
@@ -28,10 +29,13 @@ export interface AgentExecution {
   capabilities?: string[];
   deploymentWorkflow?: DeploymentWorkflow;
   workflowProgress?: AgentWorkflowProgress;
-  /** Absent on legacy turns, whose saved model/tool protocol stays unchanged. */
-  workflowScheduling?: 1;
+  /** 2 uses one execution; absent/1 retain the saved legacy turn protocol. */
+  workflowScheduling?: 1 | 2;
+  deploymentRun?: { version: 1; task: string };
   /** CLI benchmark runs cannot pause for interactive user questions. */
   benchmark?: { mode: "full" | "basic"; askUser: false };
+  inputInboxId?: string;
+  restartResumes?: number;
   workflowRun?: {
     id: string;
     roundIndex: number;
@@ -41,7 +45,7 @@ export interface AgentExecution {
     scheduled?: boolean;
   };
   focus?: { focusServerId: string; focusTask: string; focusReason: string };
-  handoff?: { status: "pending" | "started" | "blocked" | "failed"; childTurnId?: string; error?: string };
+  handoff?: { status: "pending" | "started" | "blocked" | "failed" | "completed" | "cancelled"; childTurnId?: string; error?: string; notificationId?: string };
 }
 
 export interface ExecutionStep {
@@ -65,6 +69,7 @@ export interface ExecutionToolCall {
   startedAt: string;
   finishedAt?: string;
   output?: string;
+  outcome?: "interrupted" | "failed" | "cancelled";
 }
 
 /** Synchronous SQLite writes are the durability boundary, before any side effect. */
@@ -127,6 +132,14 @@ export class ExecutionStore {
           step.status = "interrupted";
           store.saveStep(step);
         }
+      }
+      // Terminalize orphan calls as unknown outcomes, never re-execute their
+      // persisted arguments. A resumed model sees the uncertainty and can inspect
+      // actual external state rather than being permanently blocked from recovery.
+      for (const call of store.calls(turn.id)) {
+        if (call.status !== "running") continue;
+        store.saveCall({ ...call, status: "completed", outcome: "interrupted", finishedAt: nowIso(),
+          output: `TOOL_ERROR\n工具：${call.name}\n错误：服务重启时工具仍在执行，外部副作用结果不确定；未自动重放。\n恢复策略：先检查实际文件、配置或进程状态，禁止直接重复安装或重放同一操作。` });
       }
     }
   }

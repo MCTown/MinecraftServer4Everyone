@@ -8,6 +8,7 @@ import type { AgentSettings, AgentToolSettings } from "../types.js";
 import { nowIso } from "../utils/time.js";
 import { ServerService } from "./serverService.js";
 import { SkillService } from "./skillService.js";
+import { migrateBuiltInSystemPrompt } from "./systemPromptMigration.js";
 import { compileDeploymentWorkflow, defaultDeploymentWorkflow, deploymentStageCatalog, deploymentWorkflowSchema, migrateDeploymentWorkflow, normalizeGraphWorkflow, workflowIssues, type DeploymentWorkflow } from "./deploymentWorkflow.js";
 
 const agentAutoConfirmKey = "agent_auto_confirm";
@@ -164,7 +165,7 @@ export class PromptService {
   }
 
   getGlobalPrompt() {
-    return this.getSetting("global_system_prompt") ?? defaultSystemPrompt;
+    return migrateBuiltInSystemPrompt(this.getSetting("global_system_prompt") ?? defaultSystemPrompt);
   }
 
   setGlobalPrompt(value: string) {
@@ -200,10 +201,10 @@ export class PromptService {
     return this.getDeploymentWorkflowState();
   }
 
-  async getEffectivePrompt(serverId?: string, workflow = this.getDeploymentWorkflow()) {
+  async getEffectivePrompt(serverId?: string, workflow = this.getDeploymentWorkflow(), mode: "continuous" | "rounds" = "continuous") {
     const server = serverId ? await this.serverService.requireServer(serverId) : null;
     const basePrompt = server && !server.useGlobalPrompt && server.promptOverride ? server.promptOverride : this.getGlobalPrompt();
     const skillContents = await this.skillService.getEnabledSkillContents();
-    return [basePrompt, skillContents.length ? `# Enabled Skills\n\n${skillContents.join("\n\n")}` : "", compileDeploymentWorkflow(workflow)].filter(Boolean).join("\n\n");
+    return [basePrompt, skillContents.length ? `# Enabled Skills\n\n${skillContents.join("\n\n")}` : "", compileDeploymentWorkflow(workflow, mode)].filter(Boolean).join("\n\n");
   }
 }

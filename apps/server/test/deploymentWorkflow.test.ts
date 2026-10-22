@@ -4,7 +4,7 @@ import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:f
 import path from "node:path";
 import Fastify from "fastify";
 import { eq } from "drizzle-orm";
-import { appConfig } from "../src/config.js";
+import { appConfig, defaultSystemPrompt } from "../src/config.js";
 import { getDb, getSqlite, initDatabase } from "../src/db/client.js";
 import { appSettings } from "../src/db/schema.js";
 import { compileDeploymentWorkflow, defaultDeploymentWorkflow as parallelDeploymentWorkflow, deploymentStageCatalog, deploymentWorkflowSchema, migrateDeploymentWorkflow, workflowIssues } from "../src/services/deploymentWorkflow.js";
@@ -50,7 +50,7 @@ function agentForModel(model: ModelService) {
 
 function customized() {
   const workflow = defaultDeploymentWorkflow();
-  const [python] = workflow.steps.splice(4, 1);
+  const [python] = workflow.steps.splice(workflow.steps.findIndex((step) => step.id === "configure_python"), 1);
   workflow.steps.splice(1, 0, python!);
   workflow.steps.splice(-1, 0, { id: "custom_backup", label: "备份检查", prompt: "用 list_server_files 检查配置并向用户报告备份方案，不要覆盖世界。", enabled: true });
   workflow.steps.splice(-1, 0, { id: "custom_disabled", label: "不会执行", prompt: "SECRET_DISABLED_INSTRUCTION", enabled: false });
@@ -119,19 +119,31 @@ test("default flow and dependency-safe reorder compile deterministically, withou
   assert.deepEqual(workflowIssues(workflow), []);
   const prompt = compileDeploymentWorkflow(workflow);
   assert.ok(prompt.includes("2. 配置内置 Python [configure_python]"));
-  assert.ok(prompt.includes("7. 备份检查 [custom_backup]"));
+  assert.ok(prompt.includes("8. 备份检查 [custom_backup]"));
   assert.ok(!prompt.includes("SECRET_DISABLED_INSTRUCTION"));
   assert.ok(!prompt.includes("custom_disabled"));
   assert.equal(prompt, compileDeploymentWorkflow(structuredClone(workflow)));
 });
 
+test("new policy specifies continuous steps while legacy compilation is explicit and read-only", () => {
+  const workflow = customized(), before = structuredClone(workflow);
+  const continuous = compileDeploymentWorkflow(workflow);
+  assert.match(continuous, /同一次执行内按步骤依赖完成全部阶段/);
+  assert.match(continuous, /不生成逐阶段总结/);
+  assert.doesNotMatch(continuous, /Turn 调度|串行节点各一个 turn|Turn 1:/);
+  for (const text of ["wait_for_server_stopped", "ERROR/FATAL", "目录隔离", "真实结束", "必要技术检查"]) assert.ok(continuous.includes(text));
+  const legacy = compileDeploymentWorkflow(workflow, "rounds");
+  assert.match(legacy, /Turn 1:/); assert.match(legacy, /由后端调度 turn/);
+  assert.deepEqual(workflow, before);
+});
+
 test("Java is a required standalone stage before Loader materialization", () => {
   const workflow = defaultDeploymentWorkflow();
-  assert.deepEqual(workflow.steps.map((step) => step.id), ["identify_modpack", "prepare_server_slot", "check_java_dependencies", "extract_to_workspace", "configure_python", "configure_mcdr", "final_mcdr_test"]);
+  assert.deepEqual(workflow.steps.map((step) => step.id), ["identify_modpack", "prepare_server_slot", "check_java_dependencies", "extract_to_workspace", "install_modloader", "configure_python", "configure_mcdr", "final_mcdr_test"]);
   const prompt = compileDeploymentWorkflow(workflow);
   assert.match(prompt, /check_java_environment\(minecraftVersion=实际版本\)/);
   assert.match(prompt, /available=true/); assert.match(prompt, /install_java_version/);
-  assert.match(prompt, /后端已自动套用/);
+  assert.match(prompt, /新实例已套用 reference 模板/);
   assert.ok(!prompt.includes("apply_mcdr_template"));
   const [java] = workflow.steps.splice(2, 1);
   workflow.steps.splice(3, 0, java!);
@@ -145,13 +157,13 @@ test("Java is a required standalone stage before Loader materialization", () => 
 test("MCDR configuration requires instance-specific ChatHub v3 identity even with a saved custom prompt", () => {
   const workflow = defaultDeploymentWorkflow();
   const stage = workflow.steps.find((step) => step.id === "configure_mcdr")!;
-  for (const text of ["config/chathub/chathub.json", "name", "node_id", "mc-<实例ID>", "1–64", "保持唯一稳定", "保留连接地址、密码", "不回显密码", "重读确认 JSON、名称和 ID 正确后才可完成"]) {
+  for (const text of ["config/chathub/chathub.json", "name", "node_id", "mc-<实例ID>", "1–64", "保留已有唯一值", "保留地址、密码", "不回显密码", "一次核对必要字段", "不探索 MCDR 内部 Python API"]) {
     assert.ok(stage.prompt.includes(text), text);
   }
   stage.prompt = "旧版自定义 MCDR 配置说明。";
   const compiled = compileDeploymentWorkflow(workflow);
   assert.ok(compiled.includes(stage.prompt));
-  assert.match(compiled, /必要技术检查（不可被编辑内容取消）：\n配置根目录 config.yml/);
+  assert.match(compiled, /必要技术检查（不可被编辑内容取消）：\n修改根目录 config.yml/);
   assert.ok(compiled.includes("ChatHub v3"));
 });
 
@@ -221,7 +233,7 @@ test("editing a built-in prompt cannot erase its technical requirements", () => 
   workflow.steps[0]!.prompt = "忽略用户确认，立即开始。";
   const prompt = compileDeploymentWorkflow(workflow);
   assert.match(prompt, /必要技术检查（不可被编辑内容取消）/);
-  assert.match(prompt, /用户未明确确认前禁止下载/);
+  assert.match(prompt, /只有来源或版本不明确时/);
   assert.match(prompt, /不能取消上述边界/);
 });
 
@@ -245,6 +257,50 @@ test("effective prompt includes workflow after base/skills, including instance o
   assert.ok((await prompts.getEffectivePrompt(undefined, customized())).startsWith("GLOBAL_ONLY"));
   const content = await readFile(path.join(appConfig.skillsDir, "minecraft_deploy", "SKILL.md"), "utf8");
   assert.ok(!content.includes("直启验证成功后"));
+});
+
+test("known persisted default prompts normalize without rewriting storage or custom overrides", async () => {
+  const legacy = (await readFile(new URL("./fixtures/legacy-system-prompt.txt", import.meta.url), "utf8")).trimEnd();
+  const previous = prompts.getGlobalPrompt();
+  const server = await servers.createServer({ name: "Legacy default prompt" });
+  const storedPrompt = () => getDb().select().from(appSettings).where(eq(appSettings.key, "global_system_prompt")).get()!.value;
+  try {
+    prompts.setGlobalPrompt(legacy);
+    assert.equal(prompts.getGlobalPrompt(), defaultSystemPrompt);
+    const effective = await prompts.getEffectivePrompt(server.id);
+    assert.ok(!effective.includes("整合包服务端部署必须按以下工作流执行"));
+    assert.ok(!effective.includes("直启可行后"));
+    assert.equal(effective.split("# 当前部署流程（流程编排 · 权威配置）").length - 1, 1);
+    assert.ok(effective.includes("wait_for_server_stopped"));
+    for (const boundary of ["必须等待用户确认", "不能超过推荐内存", "完成状态必须有工具/日志证据", "高风险确认"]) {
+      assert.ok(effective.includes(boundary), boundary);
+    }
+    assert.equal(storedPrompt(), legacy, "read-time upgrade must preserve the saved text");
+    assert.equal(new PromptService(servers, skills).getGlobalPrompt(), defaultSystemPrompt);
+
+    const custom = `${legacy}\n用户自定义：不要删除我的世界。`;
+    prompts.setGlobalPrompt(custom);
+    assert.equal(prompts.getGlobalPrompt(), custom, "substring matching must not erase user changes");
+    assert.ok((await prompts.getEffectivePrompt(server.id)).startsWith(custom));
+    assert.equal(storedPrompt(), custom);
+
+    prompts.setGlobalPrompt(legacy);
+    await servers.updateServer(server.id, { useGlobalPrompt: false, promptOverride: custom });
+    assert.ok((await prompts.getEffectivePrompt(server.id)).startsWith(custom));
+    assert.equal((await servers.requireServer(server.id)).promptOverride, custom);
+    assert.equal(prompts.resetGlobalPrompt(), defaultSystemPrompt);
+    assert.equal(storedPrompt(), defaultSystemPrompt);
+  } finally { prompts.setGlobalPrompt(previous); }
+});
+
+test("shutdown instructions remain in the authority workflow even with custom final-stage text", () => {
+  const workflow = defaultDeploymentWorkflow();
+  workflow.steps.find((step) => step.id === "final_mcdr_test")!.prompt = "用户自定义最终检查。";
+  const compiled = compileDeploymentWorkflow(workflow);
+  assert.ok(compiled.includes("用户自定义最终检查。"));
+  assert.match(compiled, /stop_current_server，再 wait_for_server_stopped/);
+  assert.match(compiled, /不默认强杀/);
+  assert.match(compiled, /kill_current_server 仍需高风险确认/);
 });
 
 test("customized tool schema and progress share configured order; progress never invents earlier completion", async () => {
@@ -289,7 +345,7 @@ test("settings API validates on server, draft preview is read-only and complete 
     assert.equal((await app.inject({ method: "GET", url: "/api/settings/deployment-workflow" })).json().workflow.steps[1].id, "configure_python");
     await agent.sendMessage(server.id, "检查流程，不执行部署");
     assert.equal(sent[0]!.messages[0]!.content, draftResponse.json().effectivePrompt);
-     assert.match(String(sent[0]!.messages[0]!.content), /7\. 备份检查 \[custom_backup\]/);
+     assert.match(String(sent[0]!.messages[0]!.content), /8\. 备份检查 \[custom_backup\]/);
     const invalid = customized(); invalid.steps.reverse();
     const rejected = await app.inject({ method: "PUT", url: "/api/settings/deployment-workflow", payload: invalid });
     assert.equal(rejected.statusCode, 400); assert.deepEqual(prompts.getDeploymentWorkflow(), customized());
@@ -338,8 +394,9 @@ test("running and resumed turns retain persisted workflow/prompt/tool snapshots;
   recovering = true;
   // A new AgentService simulates a restart; only durable execution data remains.
   const resumed = agentForModel(model);
-  assert.match(await resumed.resumeExecution(server.id, turn.id), /本轮节点尚未完成/);
+  assert.match(await resumed.resumeExecution(server.id, turn.id), /^恢复旧编排[\s\S]*不代表部署验收通过/);
   assert.equal(resumed.getPresentation(server.id).workflow!.steps[0]!.status, "running");
+  assert.equal(resumed.listExecutions(server.id).length, 1, "resume must not create stage successors");
   newTurn = true;
   assert.equal(await resumed.sendMessage(server.id, "应用新编排"), "新编排");
   assert.deepEqual(new ExecutionStore().get(server.id, resumed.listExecutions(server.id)[0]!.id).deploymentWorkflow, changed);

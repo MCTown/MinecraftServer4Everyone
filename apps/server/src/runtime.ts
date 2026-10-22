@@ -1,6 +1,32 @@
-import { access, cp, mkdir, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { appConfig } from "./config.js";
+
+/** Replace the runtime snapshot, never merge obsolete bundled files into it. */
+export async function syncReferenceTemplate(source: string, destination: string) {
+  await mkdir(path.dirname(destination), { recursive: true });
+  const staging = await mkdtemp(`${destination}.staging-`);
+  const backup = `${staging}.previous`;
+  let movedPrevious = false;
+  try {
+    await cp(source, staging, { recursive: true, force: true });
+    try {
+      await rename(destination, backup);
+      movedPrevious = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    try {
+      await rename(staging, destination);
+    } catch (error) {
+      if (movedPrevious) await rename(backup, destination);
+      throw error;
+    }
+    // Keep the previous snapshot for recovery; it is not used for new instances.
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
 
 export async function ensureRuntimeDirectories() {
   await Promise.all([
@@ -34,7 +60,6 @@ export async function ensureRuntimeDirectories() {
   const bundledReferenceTemplate = path.join(appConfig.projectRoot, "templates", "reference");
   const referenceTemplate = path.join(appConfig.templatesDir, "reference");
   if (await access(bundledReferenceTemplate).then(() => true).catch(() => false)) {
-    await mkdir(referenceTemplate, { recursive: true });
-    await cp(bundledReferenceTemplate, referenceTemplate, { recursive: true, force: true, errorOnExist: false }).catch(() => undefined);
+    await syncReferenceTemplate(bundledReferenceTemplate, referenceTemplate);
   }
 }

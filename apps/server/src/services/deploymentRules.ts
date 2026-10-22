@@ -28,7 +28,7 @@ export function workflowIssues(workflow: WorkflowRuleWorkflow, catalog: readonly
     }
     previous = step.parallelGroup;
     if (step.parallelGroup && ids.has(step.parallelGroup)) issues.push("并行组 ID 不能与步骤 ID 相同");
-    if (step.parallelGroup && ["identify_modpack", "final_mcdr_test"].includes(step.id)) issues.push("确认整合包与最终验证必须独占一个 turn");
+    if (step.parallelGroup && ["identify_modpack", "final_mcdr_test"].includes(step.id)) issues.push("确认整合包与最终验证必须是独立关口，不与其他步骤并行");
   }
   for (const group of groups) if (workflow.steps.filter((step) => step.parallelGroup === group).length > 4) issues.push("每个并行组最多包含 4 个节点");
   for (const stage of catalog) {

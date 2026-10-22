@@ -37,10 +37,28 @@ function normalizeLines(text: string) {
   return text.replace(/\r/g, "").split("\n").map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
 }
 
-function classifyLine(line: string) {
+export function classifyServerLogLine(line: string) {
   if (ignorePatterns.some((pattern) => pattern.test(line))) return null;
   const match = errorPatterns.find((candidate) => candidate.pattern.test(line));
   return match ? match.level : null;
+}
+
+/** Share the console detector without constructing another event subscriber.
+ * Severity describes log text, never server health. */
+export function summarizeServerLogErrors(text: string) {
+  const lines = normalizeLines(text);
+  const matches = lines.flatMap((line, index) => {
+    const severity = classifyServerLogLine(line);
+    return severity ? [{ index, severity, text: line.slice(0, 1000) }] : [];
+  });
+  const keep = new Set<number>();
+  for (const match of matches.slice(-20)) {
+    for (let i = Math.max(0, match.index - 2); i <= Math.min(lines.length - 1, match.index + 6); i++) keep.add(i);
+  }
+  return { count: matches.length, samples: matches.slice(-20),
+    excerpt: [...keep].sort((a, b) => a - b).map((i) => lines[i]).join("\n").slice(-12000),
+    truncated: matches.length > 20,
+    interpretation: "日志严重级别不是运行状态；大型整合包可在有 ERROR/FATAL 时正常运行，需结合就绪、进程、响应及具体功能影响判断。" };
 }
 
 function isHigherLevel(next: ServerErrorState["level"], current: ServerErrorState["level"]) {
@@ -100,7 +118,7 @@ export class ServerErrorService {
     const lines: Array<{ text: string; level: ServerErrorState["level"] }> = [];
     for (const entry of entries) {
       for (const line of normalizeLines(entry.text)) {
-        lines.push({ text: line, level: classifyLine(line) });
+        lines.push({ text: line, level: classifyServerLogLine(line) });
       }
     }
 
@@ -155,6 +173,7 @@ export class ServerErrorService {
       state.level ? `当前检测到的最高严重级别：${state.level === "fatal" ? "致命" : "错误"}。` : null,
       "",
       "要求：",
+      "日志报错不等于服务端无法正常运行，大型整合包出现 ERROR/FATAL 并不少见。先核对就绪、进程和命令响应，再区分实际故障与非阻断告警；MCDR 插件一般不会影响游戏运行，插件问题单独报告，不因报错就默认停服、删模组或重启。",
       "1. 先用一句话说明根本原因；",
       "2. 再列出具体的修复步骤（涉及文件、配置项、Java 版本、内存或依赖时请写清楚）；",
       "3. 如果信息不足，说明还需要查看哪个文件，并直接用工具去读取确认；",
@@ -199,7 +218,7 @@ export class ServerErrorService {
     const current = this.states.get(entry.serverId) ?? idleState(entry.serverId);
     let next = current;
     for (const line of normalizeLines(entry.text)) {
-      const level = classifyLine(line);
+      const level = classifyServerLogLine(line);
       if (!level) continue;
       next = {
         serverId: entry.serverId,
