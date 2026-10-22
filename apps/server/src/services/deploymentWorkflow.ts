@@ -146,7 +146,9 @@ export function compileDeploymentWorkflow(workflow: DeploymentWorkflow, mode: "c
     active.map((step, index) => `${index + 1}. ${step.label} [${step.id}]`).join("\n"),
     mode === "rounds" ? "## Turn 调度（分叉必须汇合）" : "## 步骤依赖（同一次执行内推进，分叉必须汇合）",
     rounds.map((round, index) => `${mode === "rounds" ? "Turn" : "依赖层"} ${index + 1}: ${round.steps.length > 1 ? "分叉 → " : ""}${round.steps.map((step) => `${step.label} [${step.id}]`).join(" ∥ ")}${round.steps.length > 1 ? " → 汇合（全部完成）" : ""}`).join("\n"),
-    "按上述顺序执行；每阶段开始、完成或失败都调用 update_agent_workflow_progress(stepId, status, progress, detail)。仅可使用下列已启用的 stepId；禁用步骤不执行。遇到失败先修复或等待用户，不得将未执行阶段标记 completed。",
+    mode === "rounds"
+      ? "按上述顺序执行；每阶段开始、完成或失败都调用 update_agent_workflow_progress(stepId, status, progress, detail)。仅可使用下列已启用的 stepId；禁用步骤不执行。遇到失败先修复或等待用户，不得将未执行阶段标记 completed。"
+      : "按上述顺序执行；实际工具携带本轮 workflowStepId 自动标记运行/失败。此前已由工具结果/日志验证的本轮阶段状态，优先用下一次实际操作的 workflowUpdates 数组合并提交（stepId、status、detail），不要预测本次调用成功或把后台回执当完成。不要为开始或细碎百分比单独汇报；无后续实际操作时用 update_agent_workflow_progress 收尾。仅使用已启用 stepId，保留本轮门禁、用户确认与后台结果检查；不得将未执行阶段标记 completed。",
     ...active.map((step, index) => {
       const builtIn = deploymentStageCatalog.find((stage) => stage.id === step.id);
       return [`## ${index + 1}. ${step.label}\nstepId: ${step.id}`, step.prompt,

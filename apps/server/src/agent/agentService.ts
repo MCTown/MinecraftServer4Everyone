@@ -30,6 +30,7 @@ const compactingScopes = new Set<string>();
 import { installableCapabilities } from "./toolKit.js";
 import { defaultDeploymentWorkflow, deploymentRounds, type DeploymentWorkflow } from "../services/deploymentWorkflow.js";
 import { buildWorkflowProgress } from "./workflowProgress.js";
+import { parseWorkflowToolProgress, workflowUpdatesSchema } from "./workflowToolProgress.js";
 
 /** Conversation id for the dashboard-level agent that spans all instances. */
 const GLOBAL_SCOPE_ID = "global";
@@ -1356,7 +1357,8 @@ export class AgentService {
           parameters: { ...tool.definition.function.parameters, properties: { ...(tool.definition.function.parameters.properties as Record<string, unknown>),
              workflowStepId: { type: "string", description: this.activeRuns.get(scopeId)?.execution.workflowScheduling === 2
                ? "部署期间填写工具所属步骤 ID，用于进度、后台任务与资源归属；非部署任务省略"
-               : "流程执行期间必须填写本轮所属节点 ID；非流程任务省略" } }
+               : "流程执行期间填写本轮所属节点 ID，自动标记运行/失败；非流程任务省略" },
+             workflowUpdates: workflowUpdatesSchema }
           }
         } } };
       }
@@ -1560,8 +1562,33 @@ export class AgentService {
     try {
       const toolArgs = { ...args };
       delete toolArgs.workflowStepId;
-      const content = await tool.execute(toolArgs);
-      this.throwIfAborted(signal);
+      delete toolArgs.workflowUpdates;
+      const execution = this.activeRuns.get(serverId)?.execution;
+      const merged = execution?.deploymentWorkflow && (args.workflowStepId !== undefined || args.workflowUpdates !== undefined)
+        ? parseWorkflowToolProgress(args, execution.deploymentWorkflow) : undefined;
+      if (args.workflowUpdates !== undefined && !merged) throw new Error("workflowUpdates requires an active deployment workflow");
+      const update = (stepId: string, status: "pending" | "running" | "completed" | "failed", detail: string) => {
+        if (!execution?.deploymentWorkflow || this.activeRuns.get(serverId)?.execution !== execution) return;
+        const previous = execution.workflowProgress;
+        const old = previous?.steps.find((step) => step.id === stepId);
+        const next = buildWorkflowProgress(execution.deploymentWorkflow, previous,
+          { stepId, status, detail, progress: status === "completed" ? 100 : status === "pending" ? 0 : Math.min(99, old?.progress ?? 0), title: previous?.title ?? "整合包服务端部署流程" });
+        execution.workflowProgress = next;
+        this.executions.save(execution);
+        this.emit(serverId, { type: "workflow_progress", workflow: next });
+      };
+      for (const item of merged?.updates ?? []) update(item.stepId, item.status, item.detail);
+      const old = execution?.workflowProgress?.steps.find((step) => step.id === merged?.stepId);
+      if (merged?.stepId && old?.status !== "completed") update(merged.stepId, "running", `正在执行 ${toolName}`);
+      let content: string;
+      try {
+        content = await tool.execute(toolArgs);
+        this.throwIfAborted(signal);
+      } catch (error) {
+        if (merged?.stepId && !signal.aborted && !this.isAbortError(error) && !this.isConfirmationRejection(error)) update(merged.stepId, "failed", `${toolName} 执行失败；需诊断后继续`);
+        throw error;
+      }
+      if (merged?.stepId && content.startsWith("TOOL_ERROR")) update(merged.stepId, "failed", `${toolName} 返回失败；需诊断后继续`);
       return this.truncateToolResultForModel(toolName, content);
     } catch (error) {
       if (this.isAbortError(error) || this.isConfirmationRejection(error)) throw error;
@@ -1654,7 +1681,9 @@ export class AgentService {
       "- 如果当前工具缺少完成任务所需能力，先调用 install_agent_capability 安装可用内置能力包。",
       "- 整合包部署顺序只遵循系统中的「当前部署流程（流程编排 · 权威配置）」。下列工具恢复建议是技术参考，不定义阶段先后顺序；禁止恢复旧的固定阶段顺序。",
       "- 已确认的上传包以包内信息为准；仅在来源不明确时搜索平台或询问，不重复确认。",
-      "- 每个部署阶段开始、完成或失败时都要调用 update_agent_workflow_progress。服务端包必须先进入当前服务端的独立槽位，且仅在用户确认整合包后：优先使用 save_upload_to_server_slot；没有上传时优先使用 download_modrinth_server_pack_to_server_slot 和 download_curseforge_server_pack_to_server_slot 通过平台 API 获取；最后才使用 download_https_file_to_server_slot。不要抓取 CurseForge 网页 Files 页面，不要直接把原始服务端包散落到根目录。",
+      "- 确认整合包来源时必须同时考虑 Modrinth 和 CurseForge。只查询了其中一个平台、或其中一个平台结果不唯一/不匹配时，不得把 identify_modpack 标记为 failed；必须继续尝试另一个平台的官方 API 工具。只有两个平台都已查询且没有匹配项，或 CurseForge 因缺少/鉴权失败 API Key 需要用户配置，或用户没有提供足够名称/版本信息时，才可以失败并明确说明还缺少什么。",
+      "- 确认整合包硬门禁：检索到候选后必须向用户列出名称、平台、slug/projectId、版本/MC 版本/Loader（及链接），并请求用户确认选哪一个；用户未明确确认前，禁止将 identify_modpack 标为 completed，禁止下载服务端包、解压、安装 Forge/NeoForge、改启动配置或启动服务端。不得因搜索结果看似唯一或下载量最高就自行认定并继续部署。",
+      "- 进度优先随实际工具提交：workflowStepId 自动标记运行/失败，workflowUpdates 合并此前已验证的本轮状态；不要为开始或细碎百分比单独汇报，无后续操作时才用独立进度工具收尾。服务端包必须先进入当前服务端的独立槽位，且仅在用户确认整合包后：优先使用 save_upload_to_server_slot；没有上传时优先使用 download_modrinth_server_pack_to_server_slot 和 download_curseforge_server_pack_to_server_slot 通过平台 API 获取；最后才使用 download_https_file_to_server_slot。不要抓取 CurseForge 网页 Files 页面，不要直接把原始服务端包散落到根目录。",
       "- 服务端槽位若是 Modrinth .mrpack，禁止 extract_server_slot_to_workspace / extract_server_zip。必须先 inspect_mrpack_server_slot，再 deploy_mrpack_server_from_server_slot：只下载 server required 文件并校验哈希、合并 overrides，并安装 Vanilla/Fabric/Quilt/Forge/NeoForge 启动文件。完整 server pack zip 仍优先于 .mrpack。",
       "- CurseForge 槽位 ZIP 若根目录只有 manifest.json、overrides/、modlist.html 等清单内容，不是可直启服务端。禁止直接 extract_server_slot_to_workspace 后启动；必须调用 materialize_curseforge_manifest_pack_from_server_slot。该工具会精确按 manifest 的 projectID/fileID 下载 required 模组并复制 overrides 内容，但不会安装 Loader。若返回 Forge/NeoForge installer URL，下载该官方 installer 到 server/；Forge 启用 forge_server_setup 并调用 setup_forge_server，NeoForge 启用 neoforge_server_setup 并调用 setup_neoforge_server（minecraftVersion、neoforgeVersion、installerPath、javaPath）；若是当前未支持的 Loader，明确说明需要对应受控安装能力，禁止伪造启动成功。",
       "- CurseForge API 工具如果提示缺少或鉴权失败，或前端收到 tool_config_required，必须停止部署并让用户点击 Tools 卡片/设置中的配置按钮填写 CurseForge API Key，告知申请/管理地址 https://console.curseforge.com/?#/api-keys。Modrinth 工具如果提示需要 PAT，必须停止部署并让用户点击配置按钮填写 Modrinth PAT，告知申请/管理地址 https://modrinth.com/settings/pats。",

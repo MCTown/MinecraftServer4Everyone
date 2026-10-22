@@ -435,7 +435,39 @@ test("workflow does not reject future-stage tools or out-of-round progress", asy
   assert.ok(h.service.listToolJobs(h.id).length > 0);
 });
 
-test("background failure remains recorded but does not gate workflow progress", async (t) => {
+test("workflow metadata is merged with a real operation and does not need a report-only call", async (t) => {
+  let phase = 0;
+  const h = harness(async (input) => {
+    if (phase++ === 0) return result([call("begin_deployment_workflow")]);
+    if (phase === 2) return result([call("get_current_server_config", {
+      workflowStepId: "identify_modpack",
+      workflowUpdates: [{ stepId: "identify_modpack", status: "running", detail: "正在读取已确认的整合包配置" }]
+    })]);
+    const progress = h.service.getPresentation(h.id).workflow!;
+    assert.equal(progress.steps.find((step) => step.id === "identify_modpack")!.status, "running");
+    assert.ok(input.messages.some((message) => message.role === "tool"));
+    return result([], "配置已读取，后续步骤尚未完成");
+  });
+  t.after(h.dispose);
+  await h.service.sendMessage(h.id, "检查部署配置");
+  assert.equal(phase, 3);
+  assert.equal(new ExecutionStore().calls(h.service.listExecutions(h.id)[0]!.id).filter((item) => item.name === "update_agent_workflow_progress").length, 0);
+});
+
+test("invalid merged metadata is rejected before a real tool executes", async (t) => {
+  let phase = 0, installed = false;
+  const h = harness(async (input) => {
+    if (phase++ === 0) return result([call("begin_deployment_workflow")]);
+    if (phase === 2) return result([call("install_java_version", { version: "21", workflowStepId: "not_enabled" })]);
+    assert.ok(input.messages.some((message) => message.content?.startsWith("TOOL_ERROR") && message.content.includes("not_enabled")));
+    return result([], "参数无效，未执行安装");
+  }, defaultDeploymentWorkflow(), async () => { installed = true; return { path: "java" }; });
+  t.after(h.dispose);
+  await h.service.sendMessage(h.id, "安装依赖");
+  assert.equal(installed, false);
+});
+
+test("background failure blocks node completion and late inbox cannot bypass the turn", async (t) => {
   let phase = 0;
   const h = harness(async () => phase++ === 0
     ? result([call("install_java_version", { workflowStepId: "check_java_dependencies", version: "21", background: true })])
