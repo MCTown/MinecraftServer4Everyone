@@ -1163,7 +1163,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
         type: "function",
         function: {
           name: "update_agent_workflow_progress",
-          description: "更新前端展示的整合包部署工作流进度。开始、完成或失败每个阶段时必须调用。",
+          description: "部署进度兼容/收尾工具。优先随实际工具携带 workflowStepId 自动标记运行/失败，用 workflowUpdates 合并此前已验证的本轮阶段状态；无后续实际操作或需纠正时才独立调用。完成须有工具/日志证据。",
           parameters: objectSchema({
             stepId: { type: "string", enum: workflowSteps.map((step) => step.id) },
             status: { type: "string", enum: ["pending", "running", "completed", "failed"] },

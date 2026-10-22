@@ -52,8 +52,10 @@ System 消息按以下顺序组装：
 7. 备份检查 [custom_...]
 8. 最终验证 [final_mcdr_test]
 
-按上述顺序执行；每阶段开始、完成或失败都调用
-update_agent_workflow_progress(stepId, status, progress, detail)。
+按上述顺序执行；实际工具携带本轮 `workflowStepId` 自动标记运行/失败。
+此前已由工具结果或日志验证的阶段状态，优先通过下一次实际调用的
+`workflowUpdates` 合并提交；无后续实际操作时才调用
+`update_agent_workflow_progress` 收尾或纠正。
 
 ## 8. 备份检查
 stepId: custom_...
@@ -68,7 +70,7 @@ stepId: custom_...
 - 完整部署由实例 Agent 调用 `begin_deployment_workflow` 启动。查询、排错、安装单个模组仍是普通对话，不强制启动完整部署。全局 Agent 先交接给实例。
 - 一个串行节点对应一个完整模型/工具对话 turn；同一并行组的全部节点共用一个 turn，不启动多个模型会话。所有轮次共享同一配置快照与追加式会话历史，System/tools 前缀稳定；每轮的节点清单以追加调度消息提供。
 - 并行来自已有 `run_shell_command` / `install_java_version` 的 `background=true`。其他工具仍阻塞、串行，不能因为处于并行组就任意后台化。Agent 仍负责选择安全、不冲突的具体操作。
-- 流程内工具必须携带 `workflowStepId`，进度工具使用 `stepId`；服务端拒绝跨轮 ID。槽位获取、Java 安装、Loader 安装、Python 配置等专用部署工具还有固定节点归属校验。确认轮只允许只读与用户交互，必须有真实 `ask_user` 回答才能完成。
+- 流程内工具必须携带 `workflowStepId`，进度工具使用 `stepId`；实际工具可用 `workflowUpdates: [{stepId, status, detail}]` 合并此前已验证的阶段状态，服务端拒绝跨轮 ID。工具成功、后台回执和自然语言完成回复都不自动构成阶段完成。槽位获取、Java 安装、Loader 安装、Python 配置等专用部署工具还有固定节点归属校验。确认轮只允许只读与用户交互，必须有真实 `ask_user` 回答才能完成。
 - 仅后台回执、自然语言完成回复不构成成功：调度器等待本轮全部工具结束（事件驱动，无轮询）、将结果送回同一个 turn，并检查本轮每个启用节点均为 completed。后台失败/取消/中断、未读取结果或节点未完成会阻止下一轮；相同操作的成功重试可替代其失败记录。
 - 独立分支可以先完成，无需等待同组其他分支；但分支自身的工具和后台结果必须完成核验。任何一个分支或后台任务未完成，整组都不能推进。
 - 本轮真正完成后，后端持久化独立的下一 turn 并自动启动；前端在轮次间保持忙状态，只在最终完成/失败/取消时收到整体 done。并行轮的分支与当前 turn 会显示在部署进度中。
