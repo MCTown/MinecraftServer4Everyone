@@ -27,3 +27,7 @@ benchmark/
 
 # Local experiment: OpenCode custom-tool port. Never committed.
 /opencode-tool-test/
+
+# LaTeX build products and rendered page previews.
+/output/
+/tmp/
