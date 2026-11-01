@@ -1,6 +1,6 @@
 import type { AgentDownloadProgress } from "~/types/app";
 
-export type SettingsTab = "overview" | "model" | "workflow" | "skills" | "tools" | "agent" | "java";
+export type SettingsTab = "overview" | "model" | "workflow" | "skills" | "tools" | "agent" | "java" | "template";
 
 export type StatusBubbleType = "idle" | "loading" | "success" | "error";
 

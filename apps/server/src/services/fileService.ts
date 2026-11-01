@@ -79,7 +79,7 @@ export interface MrpackSlotInfo {
   overrideDirectories: string[];
 }
 
-const textExtensions = new Set([
+export const textExtensions = new Set([
   ".bat",
   ".cfg",
   ".conf",

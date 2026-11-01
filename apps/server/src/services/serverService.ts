@@ -1,4 +1,4 @@
-import { access, cp, mkdir, rename, rm } from "node:fs/promises";
+import { cp, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import { desc, eq } from "drizzle-orm";
 import { appConfig } from "../config.js";
@@ -7,6 +7,7 @@ import { agentMessages, consoleLogs, servers, uploads } from "../db/schema.js";
 import type { ServerRecord, ServerStatus } from "../types.js";
 import { createId } from "../utils/id.js";
 import { nowIso } from "../utils/time.js";
+import { resolveReferenceTemplateDir } from "./templateService.js";
 
 export interface CreateServerInput {
   name: string;
@@ -106,13 +107,7 @@ export class ServerService {
     const now = nowIso();
     const id = createId("server");
     const directory = path.join(appConfig.serversDir, id);
-    let templateDirectory = path.join(appConfig.templatesDir, "reference");
-    try {
-      await access(templateDirectory);
-    } catch (error) {
-      if (!isMissingPathError(error)) throw error;
-      templateDirectory = path.join(appConfig.projectRoot, "templates", "reference");
-    }
+    const templateDirectory = await resolveReferenceTemplateDir();
     await mkdir(appConfig.serversDir, { recursive: true });
     // Own a fresh directory before copying, so failures cannot leave a usable
     // database record or remove a directory that belonged to another instance.

@@ -9,6 +9,7 @@ import type { PromptService } from "../services/promptService.js";
 import type { ServerErrorService } from "../services/serverErrorService.js";
 import type { ServerService } from "../services/serverService.js";
 import type { SkillService } from "../services/skillService.js";
+import type { TemplateService } from "../services/templateService.js";
 import type { UploadService } from "../services/uploadService.js";
 
 export interface RouteServices {
@@ -21,6 +22,7 @@ export interface RouteServices {
   modelService: ModelService;
   promptService: PromptService;
   skillService: SkillService;
+  templateService: TemplateService;
   uploadService: UploadService;
   javaService: JavaService;
   agentService: AgentService;

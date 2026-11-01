@@ -107,6 +107,7 @@ const showAgentScrollToBottom = ref(false);
 const settingsOpen = ref(false);
 const settingsTab = ref<SettingsTab>("overview");
 const deploymentWorkflowDirty = useState<boolean>("deployment-workflow-dirty", () => false);
+const mcdrTemplateDirty = useState<boolean>("mcdr-template-dirty", () => false);
 const settingsNavItems: SettingsNavItem[] = [
   { id: "overview", label: "设置总览", desc: "工作空间配置概况" },
   { id: "model", label: "模型接入", desc: "连接你的 AI 模型" },
@@ -114,7 +115,8 @@ const settingsNavItems: SettingsNavItem[] = [
   { id: "skills", label: "技能管理", desc: "Agent 工作流与能力" },
   { id: "tools", label: "工具与凭据", desc: "工具目录与平台密钥" },
   { id: "agent", label: "Agent 行为", desc: "执行偏好与网络设置" },
-  { id: "java", label: "Java 运行时", desc: "受管版本与安装任务" }
+  { id: "java", label: "Java 运行时", desc: "受管版本与安装任务" },
+  { id: "template", label: "MCDR 模板", desc: "新建实例套用的 MCDReforged 文件" }
 ];
 const loggingOut = ref(false);
 const instanceMenuOpen = ref(false);
@@ -2389,7 +2391,7 @@ watch([dashboardInput, dashboardAttachments, agentInput, pendingAgentAttachments
 
 function beforePageExit(event: BeforeUnloadEvent) {
   saveWorkspaceState();
-  if (deploymentWorkflowDirty.value || [serverUpload, serverSlotUpload, agentUpload, dashboardAgentUpload].some((item) => item.active && !item.done)) {
+  if (deploymentWorkflowDirty.value || mcdrTemplateDirty.value || [serverUpload, serverSlotUpload, agentUpload, dashboardAgentUpload].some((item) => item.active && !item.done)) {
     event.preventDefault();
     event.returnValue = "";
   }

@@ -21,6 +21,7 @@ import type { AgentDownloadProgress } from "../types.js";
 import type { CurseForgeManifestSlotInfo } from "../services/fileService.js";
 import { fetchDispatcher, isJavaExecutable, javaProxyArgs, proxyEnv } from "../services/proxySupport.js";
 import { defaultDeploymentWorkflow } from "../services/deploymentWorkflow.js";
+import { resolveReferenceTemplateDir } from "../services/templateService.js";
 import { buildWorkflowProgress } from "./workflowProgress.js";
 
 export type { AgentCapabilityId, AgentTool } from "./toolKit.js";
@@ -1556,7 +1557,7 @@ export function createAgentTools(ctx: AgentToolContext): AgentTool[] {
             : `Agent 准备把内置 default 模板复制到当前服务端目录。${overwrite ? "已有同名文件会被覆盖。" : "已有同名文件会保留。"}`,
           risk: "medium"
         });
-        const templateDir = path.join(appConfig.templatesDir, template);
+        const templateDir = template === "reference" ? await resolveReferenceTemplateDir() : path.join(appConfig.templatesDir, template);
         const destinationPath = await ctx.fileService.copyDirectoryIntoServer(ctx.getServerId(), templateDir, ".", overwrite);
         if (template === "reference") await mkdir(path.join((await ctx.serverService.requireServer(ctx.getServerId())).directory, "server"), { recursive: true });
         return JSON.stringify({ template, destinationPath, overwrite, minecraftServerDirectory: template === "reference" ? "server" : "." }, null, 2);

@@ -19,6 +19,7 @@ import { ServerErrorService } from "./services/serverErrorService.js";
 import { ServerService } from "./services/serverService.js";
 import { SkillService } from "./services/skillService.js";
 import { UploadService } from "./services/uploadService.js";
+import { TemplateService } from "./services/templateService.js";
 
 async function bootstrap() {
   await ensureRuntimeDirectories();
@@ -35,6 +36,7 @@ async function bootstrap() {
   const processManager = new ProcessManager(serverService, consoleLogService, promptService, javaService);
   const mapService = new MapService(serverService, processManager);
   const uploadService = new UploadService();
+  const templateService = new TemplateService();
   const agentService = new AgentService(
     serverService,
     consoleLogService,
@@ -66,6 +68,7 @@ async function bootstrap() {
     modelService,
     promptService,
     skillService,
+    templateService,
     uploadService,
     javaService,
     agentService

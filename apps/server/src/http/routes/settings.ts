@@ -236,6 +236,37 @@ export function registerSettingsRoutes(app: FastifyInstance, services: RouteServ
     return services.promptService.setAgentToolSettings(body);
   });
 
+  // MCDReforged template edits only affect instances created afterwards.
+  const templatePathQuery = z.object({ path: z.string().min(1) });
+  app.get("/api/settings/mcdr-template", async () => services.templateService.getState());
+  app.get("/api/settings/mcdr-template/text", async (request) => {
+    const query = templatePathQuery.parse(request.query);
+    return { content: await services.templateService.readText(query.path) };
+  });
+  app.put("/api/settings/mcdr-template/text", async (request) => {
+    const body = parseBody(z.object({ path: z.string().min(1), content: z.string() }), request.body);
+    await services.templateService.writeText(body.path, body.content);
+    return services.templateService.getState();
+  });
+  app.post("/api/settings/mcdr-template/folder", async (request) => {
+    const body = parseBody(templatePathQuery, request.body);
+    await services.templateService.createFolder(body.path);
+    return services.templateService.getState();
+  });
+  app.post("/api/settings/mcdr-template/upload", async (request) => {
+    const file = await request.file();
+    if (!file) throw new Error("No file uploaded");
+    const directory = String((file.fields.path as { value?: string } | undefined)?.value ?? ".");
+    const savedPath = await services.templateService.saveStream(directory, file.filename, file.file);
+    return { path: savedPath, ...(await services.templateService.getState()) };
+  });
+  app.delete("/api/settings/mcdr-template", async (request) => {
+    const query = templatePathQuery.parse(request.query);
+    await services.templateService.remove(query.path);
+    return services.templateService.getState();
+  });
+  app.post("/api/settings/mcdr-template/reset", async () => services.templateService.reset());
+
   app.get("/api/skills", async () => services.skillService.list());
 
   app.get("/api/tools", async () => listAgentToolInfos(services.promptService.getAgentToolSettings()));

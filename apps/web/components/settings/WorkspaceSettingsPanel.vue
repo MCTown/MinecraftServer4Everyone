@@ -3,9 +3,10 @@ import type { AgentToolRecord, AgentToolSettings, JavaDownloadSource, JavaDownlo
 import type { SettingsNavItem, SettingsTab } from "~/types/ui";
 import type { IconName } from "~/utils/icons";
 import DeploymentWorkflowEditor from "~/components/settings/DeploymentWorkflowEditor.vue";
+import McdrTemplateEditor from "~/components/settings/McdrTemplateEditor.vue";
 
 const navIcons: Record<SettingsTab, IconName> = {
-  overview: "sliders", model: "cpu", workflow: "workflow", skills: "sparkles", tools: "tools", agent: "agent", java: "coffee"
+  overview: "sliders", model: "cpu", workflow: "workflow", skills: "sparkles", tools: "tools", agent: "agent", java: "coffee", template: "archive"
 };
 
 interface ModelForm {
@@ -98,9 +99,11 @@ const search = ref("");
 const { theme, setTheme } = useTheme();
 const content = ref<HTMLElement | null>(null);
 const workflowEditor = ref<InstanceType<typeof DeploymentWorkflowEditor> | null>(null);
+const templateEditor = ref<InstanceType<typeof McdrTemplateEditor> | null>(null);
 function refreshSettings() {
   emit("refresh");
   if (props.settingsTab === "workflow") void workflowEditor.value?.refresh();
+  if (props.settingsTab === "template") void templateEditor.value?.refresh();
 }
 const skillFilter = ref<"all" | "enabled" | "disabled">("all");
 const currentPage = computed(() => props.settingsNavItems.find((item) => item.id === props.settingsTab));
@@ -119,7 +122,8 @@ const pageDescriptions: Record<SettingsTab, string> = {
   skills: "选择 Agent 遵循的工作流，让每次部署更可靠。",
   tools: "了解 Agent 可用的工具，管理它们需要的访问凭据。",
   agent: "调整执行方式、资源偏好与网络连接。",
-  java: "在一个地方管理 Minecraft 服务端需要的 Java 版本。"
+  java: "在一个地方管理 Minecraft 服务端需要的 Java 版本。",
+  template: "编辑新建实例自动套用的 MCDReforged 配置、插件与目录。"
 };
 const javaTaskLabels: Record<JavaInstallTaskStatus, string> = {
   pending: "等待安装", resolving: "解析下载源", downloading: "正在下载", extracting: "正在解压", installing: "正在安装", installed: "安装完成", failed: "安装失败", cancelled: "已取消", cancelling: "正在取消"
@@ -182,7 +186,7 @@ watch(() => props.settingsTab, async () => {
         <div class="settings-overview-grid">
           <button v-for="item in props.settingsNavItems.filter((item) => item.id !== 'overview')" :key="item.id" type="button" class="settings-overview-link" @click="emit('update:settings-tab', item.id)">
             <span class="settings-category-icon"><AppIcon :name="navIcons[item.id]" :size="22" /></span>
-            <span class="settings-overview-copy"><strong>{{ item.label }}</strong><small>{{ item.desc }}</small><span class="settings-link-detail">{{ item.id === 'model' ? (props.modelForm.baseUrl ? '已填写连接地址' : '等待配置连接') : item.id === 'workflow' ? '可视化编排 · 实时 Prompt 预览' : item.id === 'skills' ? `${enabledSkills} 个技能已启用` : item.id === 'tools' ? (missingCredentials ? `${missingCredentials} 个工具需要凭据` : `${props.agentTools.length} 个工具可用`) : item.id === 'agent' ? (props.autoConfirm ? '自动确认已开启' : '写操作需手动确认') : `${installedJava} 个版本已安装` }}</span></span>
+            <span class="settings-overview-copy"><strong>{{ item.label }}</strong><small>{{ item.desc }}</small><span class="settings-link-detail">{{ item.id === 'model' ? (props.modelForm.baseUrl ? '已填写连接地址' : '等待配置连接') : item.id === 'workflow' ? '可视化编排 · 实时 Prompt 预览' : item.id === 'skills' ? `${enabledSkills} 个技能已启用` : item.id === 'tools' ? (missingCredentials ? `${missingCredentials} 个工具需要凭据` : `${props.agentTools.length} 个工具可用`) : item.id === 'agent' ? (props.autoConfirm ? '自动确认已开启' : '写操作需手动确认') : item.id === 'template' ? '配置 · 插件 · 依赖' : `${installedJava} 个版本已安装` }}</span></span>
             <AppIcon name="arrowRight" class="settings-link-arrow" />
           </button>
         </div>
@@ -215,6 +219,8 @@ watch(() => props.settingsTab, async () => {
       </div>
 
       <DeploymentWorkflowEditor v-else-if="props.settingsTab === 'workflow'" ref="workflowEditor" />
+
+      <McdrTemplateEditor v-else-if="props.settingsTab === 'template'" ref="templateEditor" />
 
       <div v-else-if="props.settingsTab === 'skills'" class="settings-catalog">
         <div class="settings-catalog-toolbar"><div class="settings-filter-group" aria-label="筛选技能"><button v-for="filter in (['all', 'enabled', 'disabled'] as const)" :key="filter" type="button" :aria-pressed="skillFilter === filter" @click="skillFilter = filter">{{ filter === 'all' ? '全部技能' : filter === 'enabled' ? '已启用' : '已禁用' }}<span>{{ filter === 'all' ? props.skills.length : filter === 'enabled' ? enabledSkills : props.skills.length - enabledSkills }}</span></button></div><label class="settings-search"><AppIcon name="search" /><input v-model="search" type="search" placeholder="搜索技能…" aria-label="搜索技能" /></label></div>
