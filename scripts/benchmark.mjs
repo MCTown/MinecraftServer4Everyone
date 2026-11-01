@@ -52,12 +52,27 @@ let cookie = "";
 async function request(path, init = {}) {
   const headers = { ...(init.body ? { "content-type": "application/json" } : {}), ...(init.headers ?? {}) };
   if (cookie) headers.cookie = cookie;
-  const response = await fetch(`${baseUrl}${path}`, { ...init, headers });
-  const text = await response.text();
-  let body;
-  try { body = text ? JSON.parse(text) : null; } catch { body = text; }
-  if (!response.ok) throw new Error(`${init.method ?? "GET"} ${path} failed (${response.status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
-  return body;
+  const method = init.method ?? "GET";
+  // Observation polling must not fail a whole deployment on one transient
+  // transport error. Retry only reads; mutations stay single-shot so a lost
+  // response can never replay a stop/cancel/request.
+  const attempts = method === "GET" ? 4 : 1;
+  for (let attempt = 1; ; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(`${baseUrl}${path}`, { ...init, headers });
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      log(`retry ${method} ${path} after transport error (${attempt}/${attempts - 1}): ${error.message}`);
+      await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      continue;
+    }
+    const text = await response.text();
+    let body;
+    try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+    if (!response.ok) throw new Error(`${method} ${path} failed (${response.status}): ${typeof body === "string" ? body : JSON.stringify(body)}`);
+    return body;
+  }
 }
 
 function log(message) { console.error(`[benchmark] ${message}`); }

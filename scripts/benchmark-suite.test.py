@@ -66,6 +66,16 @@ class BenchmarkMetricsTest(unittest.TestCase):
         self.assertFalse(suite.is_java({'command': '/bin/sh java @args'}))
         self.assertTrue(suite.is_mcdr({'command': '/path/python3 -m mcdreforged'}))
 
+    def test_mcdr_console_entry_point_is_a_real_mcdr(self):
+        # Observed in a real trial: the agent launched MCDR through its
+        # console script. Missing this made the API stop a no-op and left the
+        # game alive until the cleanup gate failed the whole condition.
+        self.assertTrue(suite.is_mcdr({'command': '/workspace/python/bin/mcdreforged start'}))
+        self.assertTrue(suite.is_mcdr({'command': '/workspace/python/bin/python /workspace/python/bin/mcdreforged start'}))
+        self.assertTrue(suite.is_mcdr({'command': 'mcdreforged start'}))
+        self.assertFalse(suite.is_mcdr({'command': 'grep mcdreforged logs/MCDR.log'}))
+        self.assertFalse(suite.is_mcdr({'command': '/path/python3 -m pip install mcdreforged'}))
+
     def test_modloader_phase_is_separate(self):
         self.assertEqual(suite.classify('setup_neoforge_server', {}), 'install_modloader')
         self.assertEqual(suite.classify('shell', {'command': 'java -jar loader-installer.jar --installServer'}), 'install_modloader')
@@ -100,6 +110,15 @@ class BenchmarkMetricsTest(unittest.TestCase):
     def test_cleanup_fails_when_port_remains(self):
         with patch.object(suite, 'processes', return_value=[]), patch.object(suite, 'occupied', return_value=True):
             self.assertFalse(suite.stop_server(pathlib.Path('/tmp/opencode/test'), 25700)['passed'])
+
+    def test_loopback_listener_accepts_ipv6_mapped_address_only(self):
+        jvm = 'LISTEN 0 4096 [::ffff:127.0.0.1]:25708 *:* users:(("java",pid=1,fd=1))'
+        self.assertTrue(suite.loopback_bind_ok([jvm], 25708))
+        self.assertTrue(suite.loopback_bind_ok(['LISTEN 0 4096 127.0.0.1:25708 0.0.0.0:*'], 25708))
+        self.assertFalse(suite.loopback_bind_ok(['LISTEN 0 4096 0.0.0.0:25708 0.0.0.0:*'], 25708))
+        self.assertFalse(suite.loopback_bind_ok(['LISTEN 0 4096 [::]:25708 *:*'], 25708))
+        self.assertFalse(suite.loopback_bind_ok(['LISTEN 0 4096 127.0.0.1:25709 0.0.0.0:*'], 25708))
+        self.assertFalse(suite.loopback_bind_ok([jvm, 'LISTEN 0 4096 0.0.0.0:25708 0.0.0.0:*'], 25708))
 
     def test_opencode_shell_exit_metadata_is_retained(self):
         with tempfile.TemporaryDirectory(dir='/tmp/opencode') as temp:

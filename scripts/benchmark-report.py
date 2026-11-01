@@ -11,7 +11,8 @@ PROJECT = pathlib.Path(__file__).resolve().parent.parent
 CONDITIONS = ('MCT-full', 'MCT-minimal', 'Opencode-minimal')
 REQUIRED = ('setup.json', 'task.txt', 'result.json', 'runner-result.json',
             'timings.json', 'usage.json', 'evidence.json', 'cleanup.json',
-            'llm-grade.json', 'workspace-artifact.json', 'workspace.tar.gz')
+            'llm-grade.json', 'workspace-artifact.json')
+ARCHIVE = 'workspace.tar.gz'
 CHECKS = ('mcdrConfigured', 'mcdrLoadedAtStartup', 'pluginsLoaded', 'serverStarted')
 PHASES = ('identify_modpack', 'prepare_server_slot', 'check_java_dependencies', 'configure_python',
           'extract_to_workspace', 'install_modloader', 'configure_mcdr', 'final_mcdr_test', 'unclassified')
@@ -51,9 +52,19 @@ def audit(root, entries, verify_hash=False):
                 issues.append('cleanup_not_proven')
             if not artifact.get('verifiedReadable'):
                 issues.append('archive_not_proven')
-            archive = folder / 'workspace.tar.gz'
-            if verify_hash and archive.is_file() and digest(archive) != artifact.get('sha256'):
-                issues.append('archive_hash_mismatch')
+            archive = folder / ARCHIVE
+            pruned = artifact.get('pruned') if isinstance(artifact.get('pruned'), dict) else None
+            if archive.is_file():
+                if verify_hash and digest(archive) != artifact.get('sha256'):
+                    issues.append('archive_hash_mismatch')
+            elif pruned:
+                # The archive was verified, then deliberately removed to reclaim
+                # disk space. The recorded digest is the retained evidence; never
+                # treat an unverified claim of pruning as acceptable.
+                if pruned.get('sha256') != artifact.get('sha256') or pruned.get('verifiedReadableBeforePrune') is not True:
+                    issues.append('archive_pruned_without_verification')
+            else:
+                issues.append('missing:' + ARCHIVE)
             if grade.get('status') != 'scored' or type(grade.get('score')) is not int or not 0 <= grade['score'] <= 100:
                 issues.append('llm_score_unavailable')
             if not set(PHASES).issubset({p.get('id') for p in timings.get('phases', [])}):

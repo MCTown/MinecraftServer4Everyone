@@ -39,6 +39,7 @@ class ReportAuditTest(unittest.TestCase):
             trial.mkdir(parents=True)
             for filename in report.REQUIRED:
                 (trial / filename).write_text('{}')
+            (trial / report.ARCHIVE).write_text('archive-bytes')
             data = {
                 'summary.json': {'server': 'example', 'condition': 'MCT-full', 'status': 'failed', 'wallTimeMs': 2000},
                 'setup.json': {'archiveSha256': 'test-hash', 'templateFiles': {'config.yml': 'test-template-hash'}},
@@ -55,6 +56,52 @@ class ReportAuditTest(unittest.TestCase):
             self.assertTrue(result['rows'][0]['artifactsComplete'])
             self.assertFalse(result['rows'][0]['checksPassed'])
             self.assertEqual(result['deploymentChecksPassed'], 0)
+
+    def _complete_trial(self, trial, artifact, archive=True):
+        trial.mkdir(parents=True)
+        for filename in report.REQUIRED:
+            (trial / filename).write_text('{}')
+        if archive:
+            (trial / report.ARCHIVE).write_text('archive-bytes')
+        data = {
+            'summary.json': {'server': 'example', 'condition': 'MCT-full', 'status': 'completed', 'wallTimeMs': 2000},
+            'setup.json': {'archiveSha256': 'test-hash', 'templateFiles': {'config.yml': 'test-template-hash'}},
+            'timings.json': {'phases': [{'id': phase, 'status': 'not_observed'} for phase in report.PHASES]},
+            'evidence.json': {'checks': {key: {'passed': True} for key in report.CHECKS}},
+            'usage.json': {'coverageComplete': True},
+            'cleanup.json': {'passed': True},
+            'workspace-artifact.json': artifact,
+            'llm-grade.json': {'status': 'scored', 'score': 90},
+        }
+        for filename, value in data.items():
+            (trial / filename).write_text(json.dumps(value))
+
+    def test_verified_pruned_archive_keeps_its_measurements_auditable(self):
+        with tempfile.TemporaryDirectory(dir='/tmp/opencode') as temp:
+            root = pathlib.Path(temp)
+            trial = root / 'example/MCT-full'
+            self._complete_trial(trial, {'verifiedReadable': True, 'sha256': 'recorded-digest',
+                'pruned': {'sha256': 'recorded-digest', 'verifiedReadableBeforePrune': True}}, archive=False)
+            result = report.audit(root, [{'project': {'slug': 'example'}}])
+            self.assertTrue(result['rows'][0]['artifactsComplete'], result['rows'][0]['auditIssues'])
+            self.assertTrue(result['rows'][0]['checksPassed'])
+
+    def test_missing_archive_without_prune_record_stays_an_issue(self):
+        with tempfile.TemporaryDirectory(dir='/tmp/opencode') as temp:
+            root = pathlib.Path(temp)
+            trial = root / 'example/MCT-full'
+            self._complete_trial(trial, {'verifiedReadable': True, 'sha256': 'recorded-digest'}, archive=False)
+            result = report.audit(root, [{'project': {'slug': 'example'}}])
+            self.assertIn('missing:workspace.tar.gz', result['rows'][0]['auditIssues'])
+
+    def test_unverified_prune_claim_is_rejected(self):
+        with tempfile.TemporaryDirectory(dir='/tmp/opencode') as temp:
+            root = pathlib.Path(temp)
+            trial = root / 'example/MCT-full'
+            self._complete_trial(trial, {'verifiedReadable': True, 'sha256': 'recorded-digest',
+                'pruned': {'sha256': 'different-digest'}}, archive=False)
+            result = report.audit(root, [{'project': {'slug': 'example'}}])
+            self.assertIn('archive_pruned_without_verification', result['rows'][0]['auditIssues'])
 
 
 if __name__ == '__main__':

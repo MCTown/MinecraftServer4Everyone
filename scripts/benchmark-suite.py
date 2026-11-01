@@ -156,7 +156,20 @@ def is_java(proc):
 
 
 def is_mcdr(proc):
-    return bool(re.search(r'-m\s+mcdreforged(?:\s|$)', proc['command']))
+    tokens = proc['command'].split()
+    if not tokens:
+        return False
+    # Both the console-script entry point and `python .../bin/mcdreforged start`
+    # are real MCDR processes; missing them caused a false negative and an
+    # ineffective API stop in earlier trials.
+    executable = pathlib.Path(tokens[0]).name
+    if executable in ('mcdreforged', 'mcdreforged.exe'):
+        return True
+    if re.fullmatch(r'python[\d.]*', executable) and len(tokens) > 1 \
+            and pathlib.Path(tokens[1]).name in ('mcdreforged', 'mcdreforged.exe'):
+        return True
+    return any(token == '-m' and index + 1 < len(tokens) and tokens[index + 1] == 'mcdreforged'
+               for index, token in enumerate(tokens))
 
 
 def descendant(pid, parent):
@@ -215,6 +228,23 @@ def stop_server(ws, port, api=None, sid=None):
                 result['actions'].append({'apiStop': api(f'/api/servers/{sid}/stop', 'POST')})
             except Exception as error:
                 result['actions'].append({'apiStopError': str(error)})
+            # A shell-launched MCDR is not the managed process the API owns, so
+            # the stop request can succeed while the game keeps running. Fall
+            # back to a graceful stdin stop of the traced MCDR once it is clear
+            # the API path did not take effect. Never escalate to a force kill.
+            wait_gone(game, 60)
+            if [p for p in processes(ws) if is_java(p) or is_mcdr(p)]:
+                for proc in [p for p in processes(ws) if is_mcdr(p)]:
+                    try:
+                        fd = os.open(f'/proc/{proc["pid"]}/fd/0', os.O_WRONLY | os.O_NONBLOCK)
+                        try:
+                            os.write(fd, b'stop\n')
+                            result['actions'].append({'stdinStopPid': proc['pid'], 'reason': 'API stop did not cover an unmanaged MCDR'})
+                        finally:
+                            os.close(fd)
+                    except OSError as error:
+                        result['actions'].append({'stdinStopError': str(error)})
+                wait_gone(game, 120)
         else:
             mcdr = [p for p in game if is_mcdr(p)]
             if not mcdr:
@@ -226,7 +256,7 @@ def stop_server(ws, port, api=None, sid=None):
                     result['actions'].append({'stdinStopPid': proc['pid']})
                 finally:
                     os.close(fd)
-        wait_gone(game, 180)
+            wait_gone(game, 180)
     remaining = [p for p in processes(ws) if is_java(p) or is_mcdr(p)]
     if remaining:
         result['remaining'] = remaining
@@ -336,6 +366,18 @@ def owned_output(run, mcdr):
     return {'launch': launch, 'streams': streams, 'entries': len(rows)}
 
 
+def loopback_bind_ok(listener_lines, port):
+    """True only for a loopback-only bind of the trial port.
+
+    A dual-stack JVM may print `[::ffff:127.0.0.1]:port` rather than the plain
+    IPv4 spelling; both are loopback-only. A wildcard bind on the same port is
+    never acceptable.
+    """
+    loopback = re.compile(r'(?:^|\s)(?:\[::ffff:)?127\.0\.0\.1(?:\]|):' + str(port) + r'\s')
+    wildcard = re.compile(r'(?:^|\s)(?:\*|0\.0\.0\.0|\[::\]):' + str(port) + r'\s')
+    return any(loopback.search(line) for line in listener_lines) and not any(wildcard.search(line) for line in listener_lines)
+
+
 def evaluate(run, setup):
     root = pathlib.Path(setup['server']['directory'])
     ws = pathlib.Path(setup['workspace'])
@@ -373,7 +415,7 @@ def evaluate(run, setup):
     status = status_probe(setup['minecraftPort']) if owned else {'passed': False, 'error': 'No owned MCDR Java; did not probe another instance'}
     listener_lines = subprocess.run(['ss', '-H', '-ltnp'], capture_output=True, text=True, check=True).stdout.splitlines()
     listeners = [line for line in listener_lines if any(f'pid={p["pid"]},' in line for p in java)]
-    bind_ok = any(f'127.0.0.1:{setup["minecraftPort"]}' in line for line in listeners)
+    bind_ok = loopback_bind_ok(listeners, setup['minecraftPort'])
     mcdr_ok = config.get('working_directory') == 'server' and isinstance(config.get('start_command'), str) and 'mcdreforged' not in config.get('start_command', '')
     memory = []
     for proc in owned:
@@ -679,8 +721,15 @@ def execute_run(entry, condition, index, outroot, tmproot, model_row, secrets, h
         if not old.get('cleanup', {}).get('passed'):
             raise RuntimeError(f'Previous run needs cleanup: {run}')
         artifact = read_json(run / 'workspace-artifact.json', {})
-        if not artifact.get('verifiedReadable') or not (run / 'workspace.tar.gz').is_file():
+        if not artifact.get('verifiedReadable'):
             raise RuntimeError(f'Previous run archive is not proven: {run}')
+        if not (run / 'workspace.tar.gz').is_file():
+            # An archive removed after verification is deliberate disk
+            # reclamation, not an incomplete trial; the digest is retained.
+            pruned = artifact.get('pruned')
+            if not isinstance(pruned, dict) or pruned.get('sha256') != artifact.get('sha256') \
+                    or pruned.get('verifiedReadableBeforePrune') is not True:
+                raise RuntimeError(f'Previous run archive is missing without verified pruning: {run}')
         print('SKIP existing', slug, condition, flush=True)
         return old
     if run.exists() and any(run.iterdir()):
