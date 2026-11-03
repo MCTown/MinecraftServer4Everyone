@@ -13,7 +13,6 @@ import MapEditorDialog from "~/components/dialogs/MapEditorDialog.vue";
 import ProviderKeyDialog from "~/components/dialogs/ProviderKeyDialog.vue";
 import ProxyTestDialog from "~/components/dialogs/ProxyTestDialog.vue";
 import ServerConfigDialog from "~/components/dialogs/ServerConfigDialog.vue";
-import TextFileEditorDialog from "~/components/dialogs/TextFileEditorDialog.vue";
 import WorkspaceSettingsPanel from "~/components/settings/WorkspaceSettingsPanel.vue";
 import AgentPanel from "~/components/workspace/AgentPanel.vue";
 import ConsolePanel from "~/components/workspace/ConsolePanel.vue";
@@ -22,7 +21,7 @@ import DeploymentProgressPanel from "~/components/workspace/DeploymentProgressPa
 import EmptyWorkspaceLanding from "~/components/workspace/EmptyWorkspaceLanding.vue";
 import InstanceTopbar from "~/components/workspace/InstanceTopbar.vue";
 import ServerSidebar from "~/components/workspace/ServerSidebar.vue";
-import type { AgentConfirmationRequest, AgentContextUsage, AgentDownloadProgress, AgentMessage, AgentRetryState, AgentSettings, AgentStatus, AgentToolConfigRequired, AgentToolConfigRequirement, AgentToolRecord, AgentToolSettings, AgentWorkflowProgress, ConsoleLogEntry, FileEntry, JavaDownloadSource, JavaDownloadSourceOption, JavaInstall, JavaInstallTask, JavaInstallTaskStatus, JavaManagementState, JavaVersionRecord, ModelApiType, ModelConfig, ProxyTestResult, ServerErrorDigest, ServerErrorState, ServerRecord, ServerSlotStatus, SkillRecord, ToolConfigKey } from "~/types/app";
+import type { AgentConfirmationRequest, AgentContextUsage, AgentDownloadProgress, AgentMessage, AgentRetryState, AgentSettings, AgentStatus, AgentToolConfigRequired, AgentToolConfigRequirement, AgentToolRecord, AgentToolSettings, AgentWorkflowProgress, ConsoleLogEntry, JavaDownloadSource, JavaDownloadSourceOption, JavaInstall, JavaInstallTask, JavaInstallTaskStatus, JavaManagementState, JavaVersionRecord, ModelApiType, ModelConfig, ProxyTestResult, ServerErrorDigest, ServerErrorState, ServerRecord, ServerSlotStatus, SkillRecord, ToolConfigKey } from "~/types/app";
 import { createIncrementalConsoleRenderer } from "~/utils/consoleRendering";
 import type { RenderedConsoleLogEntry } from "~/utils/consoleRendering";
 import { formatBytes, formatMemoryConfig, formatMemoryMb, parseMemoryToMb } from "~/utils/formatters";
@@ -32,7 +31,7 @@ import type { DeploymentProgressState, PendingAgentAttachment, ServerConfigForm,
 
 definePageMeta({ middleware: "auth" });
 
-const { api, upload, downloadUrl } = useApi();
+const { api, upload } = useApi();
 const runtime = useRuntimeConfig();
 const clock = useClock();
 const router = useRouter();
@@ -62,15 +61,11 @@ const historyLoad = useResourceLoadState();
 const contextLoad = useResourceLoadState();
 const settingsLoad = useResourceLoadState();
 const javaLoad = useResourceLoadState();
-const fileLoad = useResourceLoadState();
-const textLoad = useResourceLoadState(false);
-const fileDataPath = ref("");
 const selectedServerId = ref("");
 const logs = ref<ConsoleLogEntry[]>([]);
 const consoleRefreshing = ref(false);
 const serverErrorStates = ref<Record<string, ServerErrorState>>({});
 const errorAnalysisSending = ref(false);
-const files = ref<FileEntry[]>([]);
 const currentPath = ref(".");
 const agentMessages = ref<AgentMessage[]>([]);
 const pendingConfirmation = ref<AgentConfirmationRequest | null>(null);
@@ -134,7 +129,6 @@ const configDialogOpen = ref(false);
 const mapEditorDialogOpen = ref(false);
 const restoreMapEditorFocus = ref(false);
 const fileDialogFocusTarget = ref<"files" | "map" | null>(null);
-const textEditor = reactive({ open: false, path: "", content: "" });
 const promptEditor = reactive({ open: false, draft: "", saving: false });
 const createDialogOpen = ref(false);
 const creatingServer = ref(false);
@@ -142,10 +136,6 @@ const createServerError = ref("");
 const deleteDialog = reactive<{ open: boolean; server: ServerRecord | null; confirmName: string; deleting: boolean; error: string }>({ open: false, server: null, confirmName: "", deleting: false, error: "" });
 const newServerName = ref("我的 Minecraft 服务端");
 
-const selectedFilePaths = ref<string[]>([]);
-const fileSelectionAnchorPath = ref("");
-const fileDragSelecting = ref(false);
-const filesLoading = fileLoad.loading;
 const fixedModelDisplayName = "OpenAI Compatible";
 const modelForm = reactive<{ displayName: string; baseUrl: string; modelName: string; apiKey: string; apiType: ModelApiType; availableModels: string[]; isDefault: boolean; contextSizeK: number }>({ displayName: fixedModelDisplayName, baseUrl: "https://api.openai.com/v1", modelName: "gpt-4o-mini", apiKey: "", apiType: "chat_completions", availableModels: [], isDefault: true, contextSizeK: 120 });
 const agentContextUsage = ref<AgentContextUsage>({
@@ -164,7 +154,6 @@ const javaVersionToInstall = ref("21");
 const javaDownloadSource = ref<JavaDownloadSource>("auto-cn");
 
 const pendingAgentAttachments = ref<PendingAgentAttachment[]>([]);
-const serverUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
 const serverSlotUpload = reactive<UploadState>({ active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false });
 const serverSlotUploadServerId = ref("");
 const inactiveServerSlotUpload: UploadState = { active: false, fileName: "", loaded: 0, total: 0, percent: 0, done: false };
@@ -197,7 +186,6 @@ const agentDownloadStatusBubbleIds = new Map<string, number>();
 let socketReconnectAttempt = 0;
 let socketReconnectGeneration = 0;
 let socketsClosedIntentionally = false;
-let fileDragSelectedPaths = new Set<string>();
 let consoleScrollFrame: number | undefined;
 let agentScrollFrame: number | undefined;
 
@@ -207,18 +195,6 @@ const socketReconnectMaxDelayMs = 10000;
 const selectedServer = computed(() => servers.value.find((server) => server.id === selectedServerId.value) ?? null);
 const hasServers = computed(() => servers.value.length > 0);
 const showEmptyLanding = computed(() => serversLoaded.value && !hasServers.value);
-const sortedFiles = computed(() => [...files.value].sort((first, second) => {
-  if (first.type !== second.type) return first.type === "directory" ? -1 : 1;
-  return first.name.localeCompare(second.name, "zh-Hans-CN", { numeric: true, sensitivity: "base" });
-}));
-const parentDirectoryPath = computed(() => {
-  if (currentPath.value === ".") return "";
-  const parts = currentPath.value.split("/").filter(Boolean);
-  parts.pop();
-  return parts.join("/") || ".";
-});
-const selectedFiles = computed(() => sortedFiles.value.filter((file) => selectedFilePaths.value.includes(file.path)));
-const selectedFile = computed(() => selectedFiles.value.length === 1 ? selectedFiles.value[0] : null);
 const savedApiKeyHint = computed(() => models.value[0]?.apiKeyHint || "");
 const apiKeyPlaceholder = computed(() => savedApiKeyHint.value && savedApiKeyHint.value !== "未配置" ? savedApiKeyHint.value : "API Key（只覆盖，不回显）");
 const hasUnsavedApiKey = computed(() => modelForm.apiKey.length > 0);
@@ -355,7 +331,7 @@ const proxyTestModeLabel = computed(() => agentDownloadProxyEnabled.value
 watch(settingsOpen, (open) => {
   if (!open) {
     scrollConsoleHistoryToBottom();
-    scrollAgentHistoryToBottom();
+    scrollAgentHistoryToBottom(true);
   }
 });
 
@@ -459,11 +435,10 @@ function openFileDialog(path?: string) {
   restoreMapEditorFocus.value = false;
   fileDialogFocusTarget.value = openedFromMapEditor ? "map" : "files";
   void nextTick(() => fileManagerDialog.value?.focusInitialAction());
-  void loadFiles().catch(() => undefined);
 }
 
 function closeFileDialog() {
-  fileDialogOpen.value = false;
+  fileManagerDialog.value?.requestClose();
 }
 
 function handleFileDialogAfterLeave() {
@@ -655,13 +630,12 @@ function isNearListBottom(list: HTMLElement, threshold = 72) {
 
 function updateAgentScrollState() {
   const list = agentPanel.value?.getMessageList();
-  showAgentScrollToBottom.value = Boolean(list && !isNearListBottom(list));
+  showAgentScrollToBottom.value = Boolean(list && !isNearListBottom(list, 2));
 }
 
 function shouldStickAgentToBottom(role?: AgentMessage["role"]) {
   if (role === "user") return true;
-  const list = agentPanel.value?.getMessageList();
-  return !list || isNearListBottom(list);
+  return agentPanel.value?.shouldStickToBottom() ?? true;
 }
 
 function shouldStickConsoleToBottom() {
@@ -673,8 +647,8 @@ function scrollConsoleHistoryToBottom() {
   scrollHistoryListToBottom(() => consolePanel.value?.getLogList() ?? null);
 }
 
-function scrollAgentHistoryToBottom() {
-  scrollHistoryListToBottom(() => agentPanel.value?.getMessageList() ?? null);
+function scrollAgentHistoryToBottom(force = false) {
+  agentPanel.value?.scrollToBottom(force);
   showAgentScrollToBottom.value = false;
 }
 
@@ -693,7 +667,7 @@ function appendAgentMessage(role: AgentMessage["role"], content: string, status:
   agentMessageRevision += 1;
   const shouldScroll = shouldStickAgentToBottom(role);
   agentMessages.value.push({ id: localMessageId(), serverId, role, content, status, createdAt: new Date().toISOString() });
-  if (shouldScroll) scrollAgentHistoryToBottom();
+  if (shouldScroll) scrollAgentHistoryToBottom(role === "user");
   else updateAgentScrollState();
 }
 
@@ -714,7 +688,7 @@ function upsertAgentMessage(id: string, role: AgentMessage["role"], content: str
   } else {
     agentMessages.value.push({ id, serverId, role, content, status, createdAt: new Date().toISOString() });
   }
-  if (shouldScroll) scrollAgentHistoryToBottom();
+  if (shouldScroll) scrollAgentHistoryToBottom(role === "user");
   else updateAgentScrollState();
 }
 
@@ -788,12 +762,7 @@ async function selectServer(id: string, options: { open?: boolean } = {}) {
   consoleLoad.reset();
   historyLoad.reset();
   contextLoad.reset();
-  fileLoad.reset();
-  textLoad.reset();
   logs.value = [];
-  files.value = [];
-  fileDataPath.value = "";
-  textEditor.open = false;
   if (options.open !== false) dashboardOpen.value = false;
   selectedServerId.value = id;
   consoleCommand.value = "";
@@ -885,25 +854,14 @@ function dashboardRetryMessage() {
   return `模型连接短暂波动，${Math.max(0, Math.ceil((new Date(retry.nextRetryAt).getTime() - Date.now()) / 1000))} 秒后自动重试（第 ${retry.attempt} 次）`;
 }
 
-function dashboardShouldStickToBottom(role?: AgentMessage["role"]) {
-  if (role === "user") return true;
-  const list = dashboardView.value?.getMessageList();
-  if (!list) return true;
-  return list.scrollHeight - list.scrollTop - list.clientHeight <= 72;
-}
-
 function scrollDashboardToBottom() {
-  if (!process.client) return;
-  void nextTick(() => requestAnimationFrame(() => {
-    const list = dashboardView.value?.getMessageList();
-    if (list) list.scrollTop = list.scrollHeight;
-  }));
+  dashboardView.value?.scrollToBottom(true);
   dashboardScrollToBottom.value = false;
 }
 
 function updateDashboardScrollState() {
   const list = dashboardView.value?.getMessageList();
-  dashboardScrollToBottom.value = Boolean(list && list.scrollHeight - list.scrollTop - list.clientHeight > 72);
+  dashboardScrollToBottom.value = Boolean(list && !isNearListBottom(list, 2));
 }
 
 async function sendDashboardMessage() {
@@ -1059,7 +1017,6 @@ async function deleteServer() {
       closeSockets();
       selectedServerId.value = "";
       logs.value = [];
-      files.value = [];
       agentMessages.value = [];
       pendingConfirmation.value = null;
       agentDownloads.value = [];
@@ -1071,7 +1028,6 @@ async function deleteServer() {
       agentStatus.value = "idle";
       fileDialogOpen.value = false;
       configDialogOpen.value = false;
-      textEditor.open = false;
     }
     await loadServers();
     if (deletingSelectedServer && selectedServerId.value) await selectServer(selectedServerId.value);
@@ -1212,201 +1168,7 @@ async function sendCommand() {
 }
 
 async function loadFiles() {
-  if (!selectedServerId.value) return;
-  const serverId = selectedServerId.value;
-  const path = currentPath.value;
-  if (fileDataPath.value !== path) {
-    fileLoad.reset();
-    files.value = [];
-  }
-  await fileLoad.run(() => api<FileEntry[]>(`/api/servers/${serverId}/files?path=${encodeURIComponent(path)}`), (nextFiles) => {
-    files.value = nextFiles;
-    fileDataPath.value = path;
-    const visiblePaths = new Set(nextFiles.map((file) => file.path));
-    selectedFilePaths.value = selectedFilePaths.value.filter((path) => visiblePaths.has(path));
-    if (fileSelectionAnchorPath.value && !visiblePaths.has(fileSelectionAnchorPath.value)) fileSelectionAnchorPath.value = selectedFilePaths.value.at(-1) ?? "";
-  });
-}
-
-async function openFolder(path: string) {
-  selectedFilePaths.value = [];
-  fileSelectionAnchorPath.value = "";
-  endFileDragSelection();
-  currentPath.value = path;
-  await loadFiles();
-}
-
-async function goUp() {
-  if (currentPath.value === ".") return;
-  const parts = currentPath.value.split("/").filter(Boolean);
-  parts.pop();
-  currentPath.value = parts.join("/") || ".";
-  await loadFiles();
-}
-
-async function createFolder(name: string) {
-  if (!selectedServerId.value || !name.trim()) return;
-  const path = currentPath.value === "." ? name : `${currentPath.value}/${name}`;
-  await safe(() => api(`/api/servers/${selectedServerId.value}/files/folder`, { method: "POST", body: { path } }));
-  await loadFiles();
-}
-
-async function createFile(name: string) {
-  if (!selectedServerId.value || !name.trim()) return;
-  const path = currentPath.value === "." ? name : `${currentPath.value}/${name}`;
-  await safe(() => api(`/api/servers/${selectedServerId.value}/files`, { method: "POST", body: { path, content: "" } }));
-  await loadFiles();
-}
-
-async function removeFile(path: string) {
-  if (!selectedServerId.value || !confirm(`删除 ${path}？`)) return;
-  await safe(() => api(`/api/servers/${selectedServerId.value}/files?path=${encodeURIComponent(path)}`, { method: "DELETE" }));
-  selectedFilePaths.value = selectedFilePaths.value.filter((selectedPath) => selectedPath !== path);
-  if (fileSelectionAnchorPath.value === path) fileSelectionAnchorPath.value = selectedFilePaths.value.at(-1) ?? "";
-  await loadFiles();
-}
-
-async function removeSelectedFiles() {
-  if (!selectedServerId.value || selectedFiles.value.length === 0) return;
-  const paths = selectedFiles.value.map((file) => file.path);
-  if (!confirm(`删除选中的 ${paths.length} 项？`)) return;
-  for (const path of paths) {
-    await safe(() => api(`/api/servers/${selectedServerId.value}/files?path=${encodeURIComponent(path)}`, { method: "DELETE" }));
-  }
-  selectedFilePaths.value = [];
-  fileSelectionAnchorPath.value = "";
-  await loadFiles();
-}
-
-async function renameFile(path: string) {
-  if (!selectedServerId.value) return;
-  const newName = prompt("新名称", path.split("/").at(-1));
-  if (!newName) return;
-  await safe(() => api(`/api/servers/${selectedServerId.value}/files/rename`, { method: "POST", body: { path, newName } }));
-  selectedFilePaths.value = [];
-  fileSelectionAnchorPath.value = "";
-  await loadFiles();
-}
-
-function orderedUniqueFilePaths(paths: string[]) {
-  const selected = new Set(paths);
-  return sortedFiles.value.map((file) => file.path).filter((path) => selected.has(path));
-}
-
-function rangeFilePaths(fromPath: string, toPath: string) {
-  const paths = sortedFiles.value.map((file) => file.path);
-  const fromIndex = paths.indexOf(fromPath);
-  const toIndex = paths.indexOf(toPath);
-  if (fromIndex === -1 || toIndex === -1) return [toPath];
-  const start = Math.min(fromIndex, toIndex);
-  const end = Math.max(fromIndex, toIndex);
-  return paths.slice(start, end + 1);
-}
-
-function selectFile(path: string, event?: MouseEvent) {
-  if (event?.shiftKey) {
-    const anchorPath = fileSelectionAnchorPath.value || selectedFilePaths.value.at(-1) || path;
-    const rangePaths = rangeFilePaths(anchorPath, path);
-    selectedFilePaths.value = event.ctrlKey || event.metaKey
-      ? orderedUniqueFilePaths([...selectedFilePaths.value, ...rangePaths])
-      : rangePaths;
-    fileSelectionAnchorPath.value = anchorPath;
-    return;
-  }
-
-  if (event?.ctrlKey || event?.metaKey) {
-    toggleSelectedFile(path);
-    fileSelectionAnchorPath.value = path;
-    return;
-  }
-
-  selectedFilePaths.value = [path];
-  fileSelectionAnchorPath.value = path;
-}
-
-function toggleSelectedFile(path: string) {
-  selectedFilePaths.value = selectedFilePaths.value.includes(path)
-    ? selectedFilePaths.value.filter((selectedPath) => selectedPath !== path)
-    : [...selectedFilePaths.value, path];
-  fileSelectionAnchorPath.value = path;
-}
-
-function beginFileDragSelection(path: string, event: MouseEvent) {
-  if (event.button !== 0) return;
-  selectFile(path, event);
-  fileDragSelecting.value = true;
-  fileDragSelectedPaths = new Set(selectedFilePaths.value);
-}
-
-function dragSelectFile(path: string) {
-  if (!fileDragSelecting.value || fileDragSelectedPaths.has(path)) return;
-  fileDragSelectedPaths.add(path);
-  selectedFilePaths.value = orderedUniqueFilePaths([...selectedFilePaths.value, path]);
-}
-
-function endFileDragSelection() {
-  fileDragSelecting.value = false;
-  fileDragSelectedPaths.clear();
-}
-
-async function openFileEntry(file: FileEntry) {
-  if (file.type === "directory") {
-    await openFolder(file.path);
-    return;
-  }
-  if (file.editable) await editFile(file.path);
-}
-
-function showFileProperties(file: FileEntry) {
-  const details = [
-    `名称：${file.name}`,
-    `路径：${file.path}`,
-    `类型：${file.type === "directory" ? "文件夹" : "文件"}`,
-    file.type === "file" ? `大小：${formatBytes(file.size)}` : "大小：不适用",
-    `修改时间：${new Date(file.modifiedAt).toLocaleString()}`,
-    `可编辑：${file.editable ? "是" : "否"}`
-  ];
-  alert(details.join("\n"));
-}
-
-async function editFile(path: string) {
-  if (!selectedServerId.value) return;
-  const serverId = selectedServerId.value;
-  textLoad.reset();
-  textEditor.path = path;
-  textEditor.content = "";
-  textEditor.open = true;
-  await textLoad.run(() => api<{ content: string }>(`/api/servers/${serverId}/files/text?path=${encodeURIComponent(path)}`), (result) => { textEditor.content = result.content; });
-}
-
-async function saveTextFile() {
-  if (!selectedServerId.value || textLoad.loading.value || !textLoad.loaded.value) return;
-  await safe(() => api(`/api/servers/${selectedServerId.value}/files/text`, { method: "PUT", body: { path: textEditor.path, content: textEditor.content } }));
-  textEditor.open = false;
-  await loadFiles();
-}
-
-async function uploadServerFile(event: Event) {
-  if (!selectedServerId.value) return;
-  const input = event.target as HTMLInputElement;
-  const file = input.files?.[0];
-  if (!file) return;
-  const form = new FormData();
-  form.append("path", currentPath.value);
-  form.append("file", file);
-  beginUpload(serverUpload, file);
-  try {
-    await safe(() => upload(`/api/servers/${selectedServerId.value}/files/upload`, form, {
-      onProgress: (progress) => updateUploadProgress(serverUpload, progress)
-    }));
-    finishUpload(serverUpload);
-    await loadFiles();
-  } catch (error) {
-    failUpload(serverUpload);
-    throw error;
-  } finally {
-    input.value = "";
-  }
+  await fileManagerDialog.value?.refresh();
 }
 
 async function uploadServerSlot(event: Event) {
@@ -2333,7 +2095,6 @@ interface InstanceDraft {
   attachments: PendingAgentAttachment[];
   path: string;
   command: string;
-  editor: typeof textEditor;
   config?: ServerConfigForm;
   configOpen?: boolean;
 }
@@ -2358,7 +2119,7 @@ function saveWorkspaceState() {
   if (!workspaceReady || switchingDraft) return;
   if (selectedServerId.value) instanceDrafts[selectedServerId.value] = {
     input: agentInput.value, attachments: [...pendingAgentAttachments.value], path: currentPath.value,
-    command: consoleCommand.value, editor: { ...textEditor }, config: { ...serverForm }, configOpen: configDialogOpen.value
+    command: consoleCommand.value, config: { ...serverForm }, configOpen: configDialogOpen.value
   };
   writeBrowserState("workspace", {
     selectedServerId: selectedServerId.value, dashboardOpen: dashboardOpen.value, mobileWorkspaceTab: mobileWorkspaceTab.value,
@@ -2373,8 +2134,6 @@ function restoreInstanceDraft(id: string) {
   agentInput.value = draft?.input ?? "";
   pendingAgentAttachments.value = draft?.attachments ?? [];
   consoleCommand.value = draft?.command ?? "";
-  Object.assign(textEditor, draft?.editor ?? { open: false, path: "", content: "" });
-  if (draft?.editor.open) textLoad.acceptSnapshot();
   if (draft?.configOpen && draft.config) {
     Object.assign(serverForm, draft.config);
     configDialogOpen.value = true;
@@ -2386,12 +2145,12 @@ function restoreInstanceDraft(id: string) {
 }
 
 watch([dashboardInput, dashboardAttachments, agentInput, pendingAgentAttachments, currentPath, consoleCommand,
-  () => ({ ...textEditor }), () => ({ ...serverForm }), configDialogOpen, () => ({ ...promptEditor }), consoleCommandHistories,
+  () => ({ ...serverForm }), configDialogOpen, () => ({ ...promptEditor }), consoleCommandHistories,
   dashboardOpen, settingsOpen, settingsTab, mobileWorkspaceTab], saveWorkspaceState, { deep: true, flush: "sync" });
 
 function beforePageExit(event: BeforeUnloadEvent) {
   saveWorkspaceState();
-  if (deploymentWorkflowDirty.value || mcdrTemplateDirty.value || [serverUpload, serverSlotUpload, agentUpload, dashboardAgentUpload].some((item) => item.active && !item.done)) {
+  if (deploymentWorkflowDirty.value || mcdrTemplateDirty.value || [serverSlotUpload, agentUpload, dashboardAgentUpload].some((item) => item.active && !item.done)) {
     event.preventDefault();
     event.returnValue = "";
   }
@@ -2417,7 +2176,6 @@ onMounted(async () => {
   void delivery.flush();
   window.addEventListener("beforeunload", beforePageExit);
   window.addEventListener("pagehide", saveWorkspaceState);
-  window.addEventListener("mouseup", endFileDragSelection);
   globalAgent.connect();
   void globalAgent.loadMessages().catch(() => undefined);
   await Promise.allSettled([
@@ -2440,7 +2198,6 @@ onBeforeUnmount(() => {
   window.removeEventListener("beforeunload", beforePageExit);
   window.removeEventListener("pagehide", saveWorkspaceState);
   if (deliveryTimer) clearInterval(deliveryTimer);
-  window.removeEventListener("mouseup", endFileDragSelection);
   clearStatusBubbles();
   closeSockets();
   globalAgent.close();
@@ -2736,6 +2493,7 @@ onBeforeUnmount(() => {
             </div>
 
             <AgentPanel
+              :key="selectedServerId"
               ref="agentPanel"
               :attachments="pendingAgentAttachments"
               :auto-confirm="agentAutoConfirm"
@@ -2772,7 +2530,7 @@ onBeforeUnmount(() => {
               @message-scroll="updateAgentScrollState"
               @remove-attachment="removePendingAgentAttachment"
               @retry="retryAgentNow"
-              @scroll-to-bottom="scrollAgentHistoryToBottom"
+              @scroll-to-bottom="scrollAgentHistoryToBottom(true)"
               @send="sendAgentMessage"
               @reuse-message="agentInput = $event"
               @update:auto-confirm="agentAutoConfirm = $event; saveAgentSettings()"
@@ -2796,40 +2554,19 @@ onBeforeUnmount(() => {
         </div>
       </Transition>
 
-      <Transition name="modal" @after-leave="handleFileDialogAfterLeave">
-        <div v-if="fileDialogOpen && selectedServer" class="modal-backdrop" @click.self="closeFileDialog">
-          <FileManagerDialog
-            ref="fileManagerDialog"
-            :current-path="currentPath"
-            :download-url="downloadUrl"
-            :files="sortedFiles"
-            :format-bytes="formatBytes"
-            :loading="filesLoading"
-            :load-error="fileLoad.error.value"
-            :parent-directory-path="parentDirectoryPath"
-            :selected-file="selectedFile ?? null"
-            :selected-file-paths="selectedFilePaths"
-            :selected-files="selectedFiles"
-            :server="selectedServer"
-            :upload="serverUpload"
-            :upload-detail="uploadDetail"
-            @begin-selection="beginFileDragSelection"
-            @close="closeFileDialog"
-            @create-file="createFile"
-            @create-folder="createFolder"
-            @drag-select="dragSelectFile"
-            @go-up="goUp"
-            @open-entry="openFileEntry"
-            @open-folder="openFolder"
-            @refresh="loadFiles().catch(() => undefined)"
-            @remove-selected="removeSelectedFiles"
-            @rename-file="renameFile"
-            @show-properties="showFileProperties"
-            @toggle-selected="toggleSelectedFile"
-            @upload="uploadServerFile"
-          />
-        </div>
-      </Transition>
+      <Teleport to="body">
+        <Transition name="modal" @after-leave="handleFileDialogAfterLeave">
+          <div v-if="fileDialogOpen && selectedServer" class="modal-backdrop finder-backdrop" @click.self="closeFileDialog">
+            <FileManagerDialog
+              ref="fileManagerDialog"
+              :current-path="currentPath"
+              :server="selectedServer"
+              @close="fileDialogOpen = false"
+              @path-change="currentPath = $event"
+            />
+          </div>
+        </Transition>
+      </Teleport>
 
       <Transition name="modal">
         <div v-if="configDialogOpen && selectedServer" class="modal-backdrop">
@@ -2853,18 +2590,6 @@ onBeforeUnmount(() => {
           />
         </div>
       </Transition>
-
-      <TextFileEditorDialog
-        :content="textEditor.content"
-        :loading="textLoad.loading.value"
-        :load-error="textLoad.error.value"
-        :open="textEditor.open"
-        :path="textEditor.path"
-        @close="textEditor.open = false"
-        @save="saveTextFile"
-        @retry="editFile(textEditor.path).catch(() => undefined)"
-        @update:content="textEditor.content = $event"
-      />
 
       <GlobalPromptEditorDialog
         :draft="promptEditor.draft"

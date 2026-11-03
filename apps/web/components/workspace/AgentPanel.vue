@@ -75,6 +75,7 @@ const emit = defineEmits<{
 
 const panel = ref<HTMLElement | null>(null);
 const messageList = ref<HTMLElement | null>(null);
+const messageScroll = useFollowScroll(() => messageList.value);
 const uploadInput = ref<HTMLInputElement | null>(null);
 const inputField = ref<HTMLTextAreaElement | null>(null);
 const showReasoning = ref(true);
@@ -103,6 +104,12 @@ function focusPanel() {
 }
 function focusInput() { inputField.value?.focus(); }
 function getMessageList() { return messageList.value; }
+function shouldStickToBottom() { return messageScroll.isFollowing(); }
+function scrollToBottom(force = false) { messageScroll.scrollToBottom(force); }
+function onMessageScroll() {
+  messageScroll.onScroll();
+  emit("message-scroll");
+}
 function openUploadPicker() { uploadInput.value?.click(); }
 function formatMessageTime(value: string) {
   const date = new Date(value);
@@ -151,6 +158,10 @@ async function copyTurn(turn: AgentTurn) {
   } catch { copyError.value = "复制失败，请手动选择内容复制。"; }
 }
 watch(() => props.input, () => { void nextTick(resizeInput); });
+watch([() => props.messages, () => props.busy, () => props.historyLoading], () => {
+  scrollToBottom();
+  void nextTick(() => emit("message-scroll"));
+}, { deep: true });
 watch(showReasoning, (value) => { try { localStorage.setItem("agent-show-reasoning", String(value)); } catch { /* Storage is optional. */ } });
 watch(() => props.busy, (busy) => {
   clearInterval(clock);
@@ -161,9 +172,10 @@ onMounted(() => {
   try { showReasoning.value = localStorage.getItem("agent-show-reasoning") !== "false"; } catch { /* Use the default. */ }
   if (props.busy) clock = setInterval(() => { now.value = Date.now(); }, 1000);
   resizeInput();
+  scrollToBottom();
 });
 onBeforeUnmount(() => { clearInterval(clock); clearTimeout(copyTimer); });
-defineExpose({ focusPanel, focusInput, getMessageList, openUploadPicker });
+defineExpose({ focusPanel, focusInput, getMessageList, openUploadPicker, shouldStickToBottom, scrollToBottom });
 </script>
 
 <template>
@@ -195,7 +207,7 @@ defineExpose({ focusPanel, focusInput, getMessageList, openUploadPicker });
     </header>
 
     <div class="agent-message-shell">
-      <div ref="messageList" class="message-list" aria-label="对话消息与执行记录" :aria-busy="props.historyLoading" @scroll="emit('message-scroll')">
+      <div ref="messageList" class="message-list" tabindex="0" aria-label="对话消息与执行记录" :aria-busy="props.historyLoading" @scroll="onMessageScroll" @wheel.passive="messageScroll.onWheel" @touchstart.passive="messageScroll.onTouchstart" @touchmove.passive="messageScroll.onTouchmove" @keydown="messageScroll.onKeydown">
         <AsyncPlaceholder v-if="props.historyLoading" variant="conversation" label="正在加载对话记录" />
         <AsyncPlaceholder v-else-if="props.historyError" variant="compact" :error="props.historyError" @retry="emit('reload-history')" />
         <div v-else-if="!turns.length" class="agent-empty-state">

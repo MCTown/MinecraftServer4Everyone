@@ -6,6 +6,7 @@ import { appConfig } from "../config.js";
 import { resolveWithin } from "../security/pathSandbox.js";
 import type { FileEntry } from "../types.js";
 import { textExtensions } from "./fileService.js";
+import { FileManagerService } from "./fileManagerService.js";
 
 const maxEditableBytes = 2 * 1024 * 1024;
 
@@ -38,6 +39,10 @@ export async function resolveReferenceTemplateDir(root = appConfig.templatesDir)
 /** Edits the MCDReforged reference template copy-on-write, keeping the default snapshot intact. */
 export class TemplateService {
   constructor(private readonly root = appConfig.templatesDir) {}
+
+  manager() {
+    return new FileManagerService((write) => write ? this.ensureCustom() : resolveReferenceTemplateDir(this.root), textExtensions, this.paths.custom);
+  }
 
   private get paths() {
     return referenceTemplatePaths(this.root);

@@ -11,18 +11,15 @@ const userExpanded = ref<boolean | null>(props.expandAll);
 const running = computed(() => ["running", "waiting_confirmation"].includes(activity.value.status));
 const expanded = computed(() => userExpanded.value ?? (activity.value.status === "failed" || (activity.value.kind === "reasoning" && running.value)));
 const body = ref<HTMLElement | null>(null);
-const follow = ref(true);
+const bodyScroll = useFollowScroll(() => body.value);
 const copied = ref("");
 const copyError = ref("");
 let copyTimer: ReturnType<typeof setTimeout> | undefined;
 watch(() => props.expandAll, (value) => { userExpanded.value = value; });
 watch(() => props.message.content, () => {
-  if (activity.value.kind !== "reasoning" || !running.value || !follow.value) return;
-  void nextTick(() => { if (body.value) body.value.scrollTop = body.value.scrollHeight; });
+  if (activity.value.kind !== "reasoning" || !running.value) return;
+  bodyScroll.scrollToBottom();
 });
-function onScroll() {
-  if (body.value) follow.value = body.value.scrollHeight - body.value.scrollTop - body.value.clientHeight < 24;
-}
 async function copy(section: string, content: string) {
   try {
     await copyAgentText(content);
@@ -58,7 +55,7 @@ onBeforeUnmount(() => clearTimeout(copyTimer));
       </div>
       <div v-if="message.content" class="agent-payload" :class="{ 'agent-reasoning-body': activity.kind === 'reasoning' }">
         <div class="agent-payload-header"><span>{{ activity.kind === 'reasoning' ? '模型返回的思考内容' : activity.kind === 'retry' ? '重试结果' : '输出结果' }}</span><button type="button" class="agent-text-button" @click="copy('output', message.content)"><AgentIcon :name="copied === 'output' ? 'check' : 'copy'" />{{ copied === 'output' ? '已复制' : '复制' }}</button></div>
-        <div v-if="activity.kind === 'reasoning'" ref="body" class="agent-reasoning-scroll markdown-content" @scroll="onScroll" v-html="renderAgentMarkdown(message.content)" />
+        <div v-if="activity.kind === 'reasoning'" ref="body" class="agent-reasoning-scroll markdown-content" tabindex="0" @scroll="bodyScroll.onScroll" @wheel.passive="bodyScroll.onWheel" @touchstart.passive="bodyScroll.onTouchstart" @touchmove.passive="bodyScroll.onTouchmove" @keydown="bodyScroll.onKeydown" v-html="renderAgentMarkdown(message.content)" />
         <pre v-else>{{ formatActivityPayload(message.content) }}</pre>
       </div>
       <p v-else-if="running" class="agent-activity-waiting">{{ activity.status === 'waiting_confirmation' ? '请确认操作，Agent 将在确认后继续。' : activity.kind === 'retry' ? '等待下一次模型请求…' : '正在等待结果…' }}</p>

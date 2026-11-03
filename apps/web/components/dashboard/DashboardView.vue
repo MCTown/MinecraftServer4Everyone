@@ -119,6 +119,7 @@ function focusServerIdFor(message: AgentMessage) {
 defineExpose({
   focusInput: () => agentPanel.value?.focusInput(),
   getMessageList: () => agentPanel.value?.getMessageList(),
+  scrollToBottom: (force = false) => agentPanel.value?.scrollToBottom(force),
   openUploadPicker: () => agentPanel.value?.openUploadPicker()
 });
 </script>

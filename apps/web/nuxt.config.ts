@@ -7,6 +7,7 @@ export default defineNuxtConfig({
   },
   typescript: { strict: true },
   css: [
+    "vuefinder/dist/style.css",
     "~/assets/css/components/settings.css",
     "~/assets/css/components/dialogs.css",
     "~/assets/css/main.css",
@@ -20,7 +21,8 @@ export default defineNuxtConfig({
     "~/assets/css/components/settings-redesign.css",
     // Global appearance is layered last, including all workspace and dialog styles.
     "~/assets/css/theme.css",
-    "~/assets/css/layout/server-workspace-mobile.css"
+    "~/assets/css/layout/server-workspace-mobile.css",
+    "~/assets/css/components/file-workspace.css"
   ],
   runtimeConfig: {
     apiBase: process.env.NUXT_API_BASE ?? process.env.NUXT_PUBLIC_API_BASE ?? `http://127.0.0.1:${process.env.APP_PORT ?? 8787}`,

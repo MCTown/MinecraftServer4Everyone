@@ -12,6 +12,7 @@ import type { FileEntry, MapWorldDirectory, MapWorldDiscovery, McaHeaderChunk, M
 import { resolveWithin } from "../security/pathSandbox.js";
 import { fetchDispatcher } from "./proxySupport.js";
 import { ServerService } from "./serverService.js";
+import { FileManagerService } from "./fileManagerService.js";
 
 interface DownloadProgressUpdate {
   loadedBytes: number;
@@ -372,6 +373,10 @@ async function finishStream(output: NodeJS.WritableStream) {
 
 export class FileService {
   constructor(private readonly serverService: ServerService) {}
+
+  manager(serverId: string) {
+    return new FileManagerService(() => this.getBase(serverId), textExtensions);
+  }
 
   private async getBase(serverId: string) {
     const server = await this.serverService.requireServer(serverId);
