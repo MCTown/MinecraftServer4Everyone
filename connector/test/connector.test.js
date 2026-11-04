@@ -121,7 +121,7 @@ test("connector isolates two live nodes over HTTP, uploads, downloads and WebSoc
   assert.equal((await get("/api/nodes/a/connector/nodes", { headers })).status, 404);
   assert.equal((await get("/api/nodes/dead/servers", { headers })).status, 502);
   assert.equal((await (await get("/api/connector/nodes/dead/status", { headers })).json()).status, "offline");
-  assert.equal((await get("/api/nodes/a/start", { method: "POST", headers: { ...headers, origin: "https://evil.example" } })).status, 403);
+  assert.equal((await get("/api/nodes/a/start", { method: "POST", headers: { ...headers, origin: "https://other.example", "sec-fetch-site": "cross-site" } })).status, 200);
 
   // An upstream must receive data BEFORE the browser finishes its upload.
   let received;

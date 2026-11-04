@@ -23,11 +23,6 @@ async function readJson(req) {
   catch { throw Object.assign(new Error("无效的 JSON"), { status: 400 }); }
 }
 
-function sameOrigin(req) {
-  if (!req.headers.origin) return true;
-  try { return new URL(req.headers.origin).host === req.headers.host; } catch { return false; }
-}
-
 /** Stream requests directly to a fixed registry target. Never retry mutations. */
 export function createConnector(config) {
   const registry = new NodeRegistry(config);
@@ -78,6 +73,10 @@ export function createConnector(config) {
   const loginAttempts = new Map();
   const sockets = new Set();
 
+  function secureCookie(req) {
+    return req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : "";
+  }
+
   function nodeHeaders(node) {
     return node.legacyLocalAuth ? { authorization: `Bearer ${generateAuthToken(config.secretKey)}` } : { "x-app-key": node.accessKey };
   }
@@ -115,7 +114,7 @@ export function createConnector(config) {
       return;
     }
     if (pathname === "/api/auth/logout" && req.method === "POST") {
-      res.setHeader("set-cookie", `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : ""}`);
+      res.setHeader("set-cookie", `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secureCookie(req)}`);
       json(res, 200, { success: true });
       return;
     }
@@ -135,14 +134,13 @@ export function createConnector(config) {
     }
     loginAttempts.delete(address);
     const token = generateAuthToken(config.secretKey);
-    res.setHeader("set-cookie", `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TOKEN_MAX_AGE_MS / 1000}${req.socket.encrypted || req.headers["x-forwarded-proto"] === "https" ? "; Secure" : ""}`);
+    res.setHeader("set-cookie", `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${TOKEN_MAX_AGE_MS / 1000}${secureCookie(req)}`);
     json(res, 200, { success: true, token });
   }
 
   async function handle(req, res) {
     const url = new URL(req.url ?? "/", "http://connector.local");
     const path = url.pathname;
-    if (!["GET", "HEAD", "OPTIONS"].includes(req.method) && !sameOrigin(req)) { json(res, 403, { error: "不允许跨站操作" }); return; }
     if (path === "/health" && req.method === "GET") { json(res, 200, { ok: true, role: "connector", protocolVersion: 1 }); return; }
     if (path.startsWith("/api/auth/")) { await auth(req, res, path); return; }
     const publicPath = /^\/(?:_nuxt|__nuxt_devtools)(?:\/|$)/.test(path) || path === "/login" || path === "/login/" || path === "/favicon.svg";
@@ -202,7 +200,7 @@ export function createConnector(config) {
   server.on("connection", (socket) => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
   server.on("upgrade", (req, socket, head) => {
     socket.on("error", () => socket.destroy());
-    if (!sameOrigin(req) || (config.password && !hasSession(req, config.secretKey))) { socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n"); return; }
+    if (config.password && !hasSession(req, config.secretKey)) { socket.end("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n"); return; }
     const url = new URL(req.url ?? "/", "http://connector.local");
     const route = resolveRoute(url.pathname);
     if (route?.error || (route && !route.path.startsWith("/ws/"))) { socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n"); return; }

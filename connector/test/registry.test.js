@@ -112,11 +112,11 @@ test("authenticated node CRUD is immediate, private and durable, closes removed 
   const connector = createConnector(config);
   const origin = await listen(t, connector);
   const token = generateAuthToken(config.secretKey);
-  const headers = { cookie: `mcsa_token=${token}`, "content-type": "application/json" };
+  const headers = { cookie: `mcsa_token=${token}`, "content-type": "application/json", origin: "https://other.example", "sec-fetch-site": "cross-site" };
   const input = { ...added, url: upstreamUrl };
   const post = (value, custom = headers) => fetch(`${origin}/api/connector/nodes`, { method: "POST", headers: custom, body: JSON.stringify(value) });
   assert.equal((await post(input, { "content-type": "application/json" })).status, 401);
-  assert.equal((await post(input, { ...headers, origin: "https://attacker.example" })).status, 403);
+  assert.equal((await post(input, { "content-type": "application/json", origin: "https://other.example", "sec-fetch-site": "cross-site" })).status, 401);
   assert.equal((await post(input, { ...headers, "content-type": "text/plain" })).status, 415);
   assert.equal((await fetch(`${origin}/api/servers`, { headers })).status, 503);
   const response = await post(input);

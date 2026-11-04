@@ -55,6 +55,27 @@ npm run restart:connector
 
 手动修改预置配置需重启连接器；前端增删则立即生效，不必重启任何服务。组合启动器会管理整个进程组，如要独立重启连接器，请分进程部署。配置格式、重复 ID、缺失密钥、无效 URL / 默认节点均在启动时校验，不会静默忽略。
 
+## 域名与反向代理
+
+浏览器应通过同一个域名访问页面、`/api` 与 `/ws`。Nginx 反代建议保留原始域名（含非默认端口），并需支持 WebSocket，例如在现有 `server` 中：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:1143;
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+}
+```
+
+连接器不检查 HTTP 写请求和 WebSocket 握手的 `Origin`、`Sec-Fetch-Site`，也不把来源地址与 `Host` 比较，因此反代改写 `Host` 不会导致「不允许跨站操作」。无需配置 `CONNECTOR_PUBLIC_ORIGIN`。登录密码、会话认证、节点管理权限和后端独立密钥认证仍然保留；HTTPS 反代应发送 `X-Forwarded-Proto: https`，让登录 Cookie 使用 `Secure`。
+
+**安全取舍：移除了应用层的跨站请求 / WebSocket 来源防护。** 即使 Cookie 仍有 `HttpOnly`、`SameSite=Lax`，也不应把它们视作完整的 CSRF 防护。公网部署建议在反代增加访问认证、IP 白名单或使用 VPN，不要将关闭密码的面板公开暴露。
+
+取消来源检查不等于开放 CORS，浏览器仍有自己的跨域和 Cookie 限制。页面、API 和 WebSocket 仍应经同一反代入口访问；`NUXT_PUBLIC_API_BASE` / `NUXT_PUBLIC_WS_BASE` 继续留空，不要跨域直连后端。
+
 ## 节点管理与持久化
 
 - 左下角「节点」→「添加后端」，填写名称、API 原点地址（如 `http://10.0.0.11:8787`）和目标的 `APP_ACCESS_KEY`。允许先保存离线节点，随后从列表检查在线 / 凭据状态。重复地址拒绝添加，最多 100 个有效节点。
@@ -105,4 +126,4 @@ npm test
 npm run build
 ```
 
-连接器集成测试覆盖独立凭据、路由、双向 WebSocket、流式上传、下载、离线响应、会话与跨站保护，以及节点增删即时生效、重启恢复、私有文件权限、并发写入、重复提交、写入失败不改变路由和移除后断开隧道。前端测试覆盖 URL / 草稿 / 待发送状态隔离及节点表单提交锁定、密钥清理、删除前离开检查；后端测试覆盖仅连接器访问模式。
+连接器集成测试覆盖独立凭据、路由、双向 WebSocket、流式上传、下载、离线响应、会话，以及代理改写 Host 时不依赖来源配置的登录 / 节点增删 / WebSocket；跨站来源不拦截，未认证请求仍拒绝。还覆盖节点增删即时生效、重启恢复、私有文件权限、并发写入、重复提交、写入失败不改变路由和移除后断开隧道。前端测试覆盖 URL / 草稿 / 待发送状态隔离及节点表单提交锁定、密钥清理、删除前离开检查；后端测试覆盖仅连接器访问模式。
