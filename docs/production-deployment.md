@@ -4,6 +4,8 @@
 
 ## 当前拓扑
 
+以下是历史生产检查快照；当前源码新增了多后端连接器，发布前另见 [多后端连接器](multi-backend.md)。未配置节点文件时仍保持本机三进程部署；`/health` 现为连接器自身健康检查。
+
 | 项目 | 生产现状 |
 | --- | --- |
 | 代码目录 | `/home/ubuntu/MinecraftServer4Everyone`；不是 Git 仓库，不能在这里 `git pull` |
@@ -18,6 +20,8 @@
 应用运行时环境变量由 systemd unit 设置；`start_proxy.sh` 负责出站代理，不是应用的 HTTP 入口。生产未发现 `.env` 文件。查看配置用 `systemctl cat minecraftserver4everyone.service`，**不要把可能含密码或密钥的完整配置、进程环境或日志粘贴到公开记录**。修改 unit 后才需要 `sudo systemctl daemon-reload`；单纯更新代码不需要。
 
 `workspace/` 包含 `data/app.db`（SQLite）、`app.db-wal`、`app.db-shm`、`servers/`（Minecraft 实例和世界）、`server_slots/`（上传包）、`jdks/`、`python/`、`templates/`、`skills/` 等。2026-09-26 检查时数据库约 12 GB、WAL 约 4.6 GB，备份前必须重新估算磁盘空间。仓库中的 `templates/reference/` 是**随版本发布的内置模板**，与运行时 `workspace/templates/` 不同。
+
+当前源码还包含连接器节点状态：默认 `.data/connector/nodes.json`，也可由 `CONNECTOR_STATE_FILE` 指向外部私有路径。它包含节点凭据、前端新增节点及移除记录，发布必须保留；外部路径需另行私有备份，不包含在 `workspace/` 备份内。
 
 ## 发布前确认
 
@@ -38,7 +42,7 @@ tar -czf "/tmp/mcs4e-${release}.tgz" \
   --exclude='.nuxt' \
   --exclude='.output' \
   --exclude='.env' \
-  package.json package-lock.json tsconfig.base.json proxy.js scripts apps templates \
+  package.json package-lock.json tsconfig.base.json proxy.js connector scripts apps templates \
   README.md pre-skill.md docs agent.md
 
 tar -tzf "/tmp/mcs4e-${release}.tgz" | head -40
@@ -97,7 +101,7 @@ cp -a /home/ubuntu/start_proxy.sh "$backup/"
 ```bash
 rsync -a \
   --exclude='node_modules/' --exclude='dist/' --exclude='.nuxt/' \
-  --exclude='.output/' --exclude='/workspace/' --exclude='/logs/' --exclude='/.tmp/' \
+  --exclude='.output/' --exclude='/workspace/' --exclude='/.data/' --exclude='/logs/' --exclude='/.tmp/' \
   "$stage/" "$app/"
 rsync -a --delete "$stage/node_modules/" "$app/node_modules/"
 rsync -a --delete "$stage/apps/server/dist/" "$app/apps/server/dist/"
@@ -127,7 +131,7 @@ journalctl -u minecraftserver4everyone.service -n 100 --no-pager
 
 ```bash
 sudo systemctl stop minecraftserver4everyone.service
-rsync -a "$backup/code/" "$app/"
+rsync -a --exclude='/.data/' "$backup/code/" "$app/"
 rsync -a --delete "$backup/code/node_modules/" "$app/node_modules/"
 rsync -a --delete "$backup/code/apps/server/dist/" "$app/apps/server/dist/"
 rsync -a --delete "$backup/code/apps/web/.output/" "$app/apps/web/.output/"
@@ -136,6 +140,8 @@ curl -fsS http://127.0.0.1:1143/health
 ```
 
 **不要默认回滚 `workspace/`**：启动新版本后它可能已经写入数据。只有确认数据库迁移或数据损坏需要恢复、接受备份后新数据丢失，并且所有写入者均停止时，才能单独恢复整份 `workspace`（含 `app.db`、`app.db-wal`、`app.db-shm`）。如果本次发布还修改了 systemd unit 或 `start_proxy.sh`，回滚时也要从 `$backup/` 恢复它们并执行 `sudo systemctl daemon-reload`；只发布代码不需要改动 unit。
+
+同样不要默认回滚 `.data/` 或外部连接器状态文件，以免丢失发布后新登记的节点和移除记录。备份中包含这些文件时，备份也必须按含密钥资料保护。
 
 ## 已知风险和后续改进
 

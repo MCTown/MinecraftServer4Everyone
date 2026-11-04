@@ -11,6 +11,7 @@ import { registerSettingsRoutes } from "./routes/settings.js";
 import { registerWebSocketRoutes } from "./routes/websockets.js";
 
 export function registerRoutes(app: FastifyInstance, services: RouteServices) {
+  app.get("/api/node", async () => ({ role: "backend", protocolVersion: 1 }));
   registerAuthRoutes(app);
   registerServerRoutes(app, services);
   registerFileRoutes(app, services);

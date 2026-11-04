@@ -30,6 +30,11 @@ function getCookieToken(): string | undefined {
 
 export function useApi() {
   const config = useRuntimeConfig();
+  // Capture the node at creation time. Late responses, uploads and retries must
+  // never be redirected when navigation selects another backend.
+  const nodeId = routeNodeId(useRoute().query.node);
+  const stateKey = (key: string) => nodeStateKey(nodeId, key);
+  const pendingMutations = useState<number>(stateKey("pending-mutations"), () => 0);
   const baseURL = (typeof document === "undefined" ? config.apiBase : config.public.apiBase).replace(/\/$/, "");
 
   async function api<T>(path: string, options: Parameters<typeof $fetch>[1] = {}) {
@@ -38,7 +43,10 @@ export function useApi() {
     const headers: Record<string, string> = { ...(options.headers as Record<string, string> ?? {}) };
     if (token) headers.authorization = `Bearer ${token}`;
     if (cookie && !headers.cookie) headers.cookie = cookie;
-    return $fetch<T>(path, { baseURL, ...options, headers });
+    const mutating = !["GET", "HEAD", "OPTIONS"].includes(String(options.method ?? "GET").toUpperCase());
+    if (mutating) pendingMutations.value++;
+    try { return await $fetch<T>(nodeApiPath(path, nodeId), { baseURL, retry: 0, ...options, headers }); }
+    finally { if (mutating) pendingMutations.value--; }
   }
 
   async function upload<T>(path: string, body: FormData, options: UploadOptions = {}) {
@@ -47,9 +55,10 @@ export function useApi() {
       return api<T>(path, { method, body });
     }
 
+    pendingMutations.value++;
     return new Promise<T>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open(method, `${baseURL}${path}`);
+      xhr.open(method, downloadUrl(path));
 
       const token = getCookieToken();
       if (token) xhr.setRequestHeader("authorization", `Bearer ${token}`);
@@ -73,7 +82,7 @@ export function useApi() {
       xhr.onerror = () => reject(new Error("Failed to fetch"));
       xhr.onabort = () => reject(new Error("Upload aborted"));
       xhr.send(body);
-    });
+    }).finally(() => { pendingMutations.value--; });
   }
 
   function parseUploadResponse(responseText: string) {
@@ -93,8 +102,18 @@ export function useApi() {
   }
 
   function downloadUrl(path: string) {
-    return `${baseURL}${path}`;
+    return `${baseURL}${nodeApiPath(path, nodeId)}`;
   }
 
-  return { api, upload, downloadUrl, baseURL };
+  function websocketUrl(path: string) {
+    const configured = config.public.wsBase.replace(/\/$/, "");
+    const origin = configured || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
+    const url = new URL(`${origin}${nodeSocketPath(path, nodeId)}`);
+    const token = getCookieToken();
+    if (token) url.searchParams.set("token", token);
+    return url.toString();
+  }
+
+  return { api, upload, downloadUrl, websocketUrl, nodeId, stateKey, pendingMutations, baseURL };
 }
+import { nodeApiPath, nodeSocketPath, nodeStateKey, routeNodeId } from "~/utils/nodeRouting";

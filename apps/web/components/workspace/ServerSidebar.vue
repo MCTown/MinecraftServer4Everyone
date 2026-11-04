@@ -9,6 +9,7 @@ const props = defineProps<{
   erroredServerIds: Set<string>;
   settingsOpen: boolean;
   dashboardOpen: boolean;
+  backendName: string;
 }>();
 
 const emit = defineEmits<{
@@ -16,11 +17,13 @@ const emit = defineEmits<{
   "open-dashboard": [];
   "open-instance-menu": [];
   "open-settings": [];
+  "open-backends": [];
   logout: [];
   select: [serverId: string];
 }>();
 
 const instanceMenuTrigger = ref<HTMLButtonElement | null>(null);
+const backendTrigger = ref<HTMLButtonElement | null>(null);
 const rail = ref<HTMLElement | null>(null);
 const railHead = ref<HTMLElement | null>(null);
 const railFooter = ref<HTMLElement | null>(null);
@@ -86,6 +89,7 @@ function serverTitle(server: ServerRecord) {
 }
 
 defineExpose({
+  focusBackendTrigger: () => backendTrigger.value?.focus(),
   focusInstanceMenuTrigger: () => {
     const target = instanceMenuTrigger.value
       ?? railActions.value?.querySelector<HTMLButtonElement>(".rail-server.active")
@@ -118,6 +122,7 @@ defineExpose({
     <div class="rail-spacer" />
 
     <div ref="railFooter" class="rail-footer">
+      <button ref="backendTrigger" class="rail-button rail-backend" type="button" :title="`切换后端实例：${props.backendName}`" :aria-label="`切换后端实例：${props.backendName}`" aria-haspopup="dialog" @click="emit('open-backends')"><AppIcon name="network" /><span class="rail-backend-label">节点</span></button>
       <ThemeToggle class="rail-button rail-theme" />
       <span class="rail-count" :title="props.loading ? '正在加载实例' : props.loaded ? `${props.servers.length} 个实例` : '实例数量尚未读取'">{{ props.loaded ? props.servers.length : '—' }}</span>
       <button class="rail-button rail-logout" type="button" title="退出登录" aria-label="退出登录" @click="emit('logout')">
@@ -126,3 +131,9 @@ defineExpose({
     </div>
   </aside>
 </template>
+
+<style scoped>
+.rail-backend { color: var(--blue); gap: 0.1rem; }
+.rail-backend-label { font-size: 0.55rem; line-height: 1; letter-spacing: 0; }
+@media (max-width: 820px) { .rail-backend-label { display: none; } }
+</style>

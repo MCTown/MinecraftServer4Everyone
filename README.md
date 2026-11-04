@@ -11,7 +11,15 @@ npm run dev
 
 对外访问默认只需要暴露 proxy 端口 `1143`：`http://<服务器IP>:1143`。组合启动脚本会将 proxy 固定绑定到 `0.0.0.0:1143`。
 
-后端和前端默认只监听本机，并在启动时从默认端口开始自动选择可用端口；proxy 将 `/api`、`/ws` 转发到后端，其它请求转发到前端。这样即使开发工具占用了默认端口，启动和重启仍可正常工作。
+后端和前端默认只监听本机，并在启动时从默认端口开始自动选择可用端口；连接器统一登录，将 `/api`、`/ws` 路由到对应后端，其它请求转发到前端。默认自动登记本机后端，因此原有单机启动方式不变。
+
+## 多后端管理
+
+支持“一个前端 → 服务器上的连接器 → 多个后端节点”。左下角「节点」按钮可以切换后端实例；各后端的 Minecraft 实例、文件、设置和 Agent 对话独立，草稿与待发送消息也按节点隔离。
+
+在左下角「节点」管理中直接添加或移除后端，填写名称、后端地址及该后端的 `APP_ACCESS_KEY`，保存后立即生效，重启后仍保留。移除只断开登记，不会删除后端实例或文件。独立部署连接器与前端使用 `npm run dev:connector` / `npm run start:connector`，可从空节点列表开始，各执行机器只运行 `apps/server`。
+
+也可通过 `CONNECTOR_NODES_FILE` 预置节点。前端管理的数据独立保存在 `.data/connector/nodes.json`（含凭据，请纳入私有备份，可用 `CONNECTOR_STATE_FILE` 指定路径）。完整配置、安全边界与部署步骤见 [多后端连接器](docs/multi-backend.md)，示例见 [`connector/nodes.example.json`](connector/nodes.example.json)。
 
 可通过环境变量覆盖端口和目标：
 
@@ -51,5 +59,6 @@ Agent 默认提供 `run_shell_command`，可在 Tools 中查看，无需安装�
 ```text
 apps/server  Node.js + TypeScript + Fastify 后端
 apps/web     Nuxt 3 + Vue 前端
+connector    多后端管理网关、认证与流式代理
 workspace    运行时工作目录，自动创建
 ```

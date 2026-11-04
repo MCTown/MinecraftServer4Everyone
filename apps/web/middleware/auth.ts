@@ -1,3 +1,5 @@
+import { routeNodeId } from "~/utils/nodeRouting";
+
 export default defineNuxtRouteMiddleware(async (to) => {
   if (to.path === "/login") return;
 
@@ -6,8 +8,17 @@ export default defineNuxtRouteMiddleware(async (to) => {
   }
 
   const { api } = useApi();
+  const backendNodes = useBackendNodes();
   try {
     await api("/api/auth/verify");
+    await backendNodes.refresh();
+    const nodes = backendNodes.registry.value;
+    if (!nodes.nodes.some((node) => node.id === routeNodeId(to.query.node))) {
+      const { node, ...query } = to.query;
+      if (nodes.defaultNodeId || node !== undefined) {
+        return navigateTo({ path: to.path, query: { ...query, ...(nodes.defaultNodeId ? { node: nodes.defaultNodeId } : {}) } }, { replace: true });
+      }
+    }
   } catch (error: any) {
     // Only a real 401 means the session is gone. Network errors and 5xx
     // responses (for example while the backend is restarting) must not kick

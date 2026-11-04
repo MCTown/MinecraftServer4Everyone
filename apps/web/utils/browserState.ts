@@ -9,3 +9,16 @@ export function writeBrowserState(key: string, value: unknown) {
     else localStorage.setItem(`mcsa:${key}`, JSON.stringify(value));
   } catch { /* Storage is optional. */ }
 }
+
+/** Migrate the former single-backend state only to the built-in local node. */
+export function readNodeBrowserState<T>(nodeId: string, key: string): T | null {
+  const scoped = readBrowserState<T>(nodeStateKey(nodeId, key));
+  if (scoped !== null || nodeId !== "local") return scoped;
+  const legacy = readBrowserState<T>(key);
+  if (legacy !== null) {
+    writeBrowserState(nodeStateKey(nodeId, key), legacy);
+    writeBrowserState(key, null);
+  }
+  return legacy;
+}
+import { nodeStateKey } from "./nodeRouting";

@@ -1,6 +1,7 @@
 import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { appConfig } from "../config.js";
 import { verifyAuthToken } from "./routes/auth.js";
+import { timingSafeEqual } from "node:crypto";
 
 const AUTH_COOKIE_NAME = "mcsa_token";
 
@@ -24,13 +25,23 @@ export function registerErrorHandling(app: FastifyInstance) {
   });
 
   app.addHook("onRequest", async (request, reply) => {
-    const url = request.url;
+    const url = request.url.split("?")[0] ?? "/";
 
     if (url === "/health") return;
 
+    const suppliedKey = request.headers["x-app-key"];
+    const validKey = typeof suppliedKey === "string" && Boolean(appConfig.accessKey)
+      && Buffer.byteLength(suppliedKey) === Buffer.byteLength(appConfig.accessKey)
+      && timingSafeEqual(Buffer.from(suppliedKey), Buffer.from(appConfig.accessKey));
+    if (appConfig.requireConnector) {
+      if (url.startsWith("/api/auth/")) { reply.status(404).send({ error: "请通过连接器登录" }); return; }
+      if (!validKey) reply.status(401).send({ error: "需要有效的连接器凭据" });
+      return;
+    }
+
     if (url.startsWith("/api/auth/")) return;
 
-    if (appConfig.accessKey && request.headers["x-app-key"] === appConfig.accessKey) return;
+    if (validKey) return;
 
     if (appConfig.password) {
       const cookieToken = getCookieValue(request.headers.cookie, AUTH_COOKIE_NAME);

@@ -3,8 +3,10 @@ import { createServer } from "node:net";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { randomBytes } from "node:crypto";
 
 const mode = process.argv[2] === "start" ? "start" : "dev";
+const connectorOnly = process.argv.includes("--connector-only");
 const npmExecPath = process.env.npm_execpath;
 const runNpmWithNode = npmExecPath && /\.[cm]?js$/i.test(npmExecPath);
 const npm = runNpmWithNode ? process.execPath : "npm";
@@ -174,12 +176,15 @@ async function main() {
 
   // Only the proxy is public. Internal ports are selected dynamically so a
   // stale dev server or another local service cannot break npm start.
-  const serverPort = await resolveInternalPort(process.env.APP_PORT, 8787, internalServerHost, "APP_PORT");
+  const serverPort = connectorOnly ? undefined : await resolveInternalPort(process.env.APP_PORT, 8787, internalServerHost, "APP_PORT");
   const webPort = await resolveInternalPort(process.env.NUXT_PORT ?? process.env.NITRO_PORT, 3000, internalWebHost, "NUXT_PORT");
 
-  startProcess("server", npm, npmArgs(["run", mode, "--workspace", "@mc-agent/server"]), {
+  const nodeAccessKey = process.env.APP_ACCESS_KEY || randomBytes(32).toString("hex");
+  if (!connectorOnly) startProcess("server", npm, npmArgs(["run", mode, "--workspace", "@mc-agent/server"]), {
     APP_HOST: internalServerHost,
-    APP_PORT: String(serverPort)
+    APP_PORT: String(serverPort),
+    APP_ACCESS_KEY: nodeAccessKey,
+    APP_REQUIRE_CONNECTOR: "true"
   });
 
   startProcess("web", npm, npmArgs(["run", mode, "--workspace", "@mc-agent/web"]), {
@@ -187,20 +192,21 @@ async function main() {
     NUXT_PORT: String(webPort),
     NITRO_HOST: internalWebHost,
     NITRO_PORT: String(webPort),
-    // Server-side rendering talks to the backend directly, so it needs the
-    // port chosen above instead of the APP_PORT default.
-    NUXT_API_BASE: process.env.NUXT_API_BASE ?? process.env.NUXT_PUBLIC_API_BASE ?? `http://127.0.0.1:${serverPort}`
+    // SSR must use the same authentication and node routing as the browser.
+    NUXT_API_BASE: process.env.NUXT_API_BASE ?? `http://127.0.0.1:${publicPort}`
   });
 
   startProcess("proxy", process.execPath, ["proxy.js"], {
     PROXY_HOST: publicHost,
     PROXY_PORT: String(publicPort),
-    PROXY_API_TARGET: `http://127.0.0.1:${serverPort}`,
+    APP_ACCESS_KEY: nodeAccessKey,
+    CONNECTOR_ONLY: String(connectorOnly),
+    PROXY_API_TARGET: `http://127.0.0.1:${serverPort ?? 8787}`,
     PROXY_WEB_TARGET: `http://127.0.0.1:${webPort}`
   });
 
   console.log(`[run] public entrypoint: http://${publicHost}:${publicPort}`);
-  console.log(`[run] internal server: ${internalServerHost}:${serverPort}`);
+  if (!connectorOnly) console.log(`[run] internal server: ${internalServerHost}:${serverPort}`);
   console.log(`[run] internal web: ${internalWebHost}:${webPort}`);
 }
 

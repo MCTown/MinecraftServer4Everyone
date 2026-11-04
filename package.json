@@ -10,17 +10,24 @@
   "dependencies": {
     "httpxy": "latest"
   },
+  "devDependencies": {
+    "ws": "^8.20.0"
+  },
   "scripts": {
     "dev": "node scripts/run.js dev",
     "dev:proxy": "node proxy.js",
+    "dev:connector": "node scripts/run.js dev --connector-only",
     "dev:server": "npm run dev --workspace @mc-agent/server",
     "dev:web": "npm run dev --workspace @mc-agent/web",
     "restart": "node scripts/restart.js",
+    "restart:connector": "node scripts/restart.js --connector-only",
     "benchmark": "node scripts/benchmark.mjs",
     "build": "npm run build --workspaces",
     "start": "node scripts/run.js start",
     "start:proxy": "node proxy.js",
-    "test": "npm run test --workspaces --if-present",
+    "start:connector": "node scripts/run.js start --connector-only",
+    "test:connector": "node --test connector/test/*.test.js",
+    "test": "npm run test:connector && npm run test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces"
   }
 }

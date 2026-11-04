@@ -19,7 +19,7 @@ function handleKeydown(event: KeyboardEvent) {
   if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
   else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
 }
-defineExpose({ focusInitialAction, requestClose, refresh: () => workspace.value?.refresh() });
+defineExpose({ focusInitialAction, requestClose, canLeave: () => workspace.value?.canLeave() !== false, refresh: () => workspace.value?.refresh() });
 </script>
 
 <template>

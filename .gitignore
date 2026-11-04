@@ -17,6 +17,8 @@ __pycache__/
 .env.*
 !.env.example
 .runtime/
+# Connector registries can contain per-node credentials.
+/connector.nodes.json
 .openchamber/
 .serena/
 .tmp/

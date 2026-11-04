@@ -4,7 +4,7 @@ import zhCN from "vuefinder/dist/locales/zhCN.js";
 import XHRUpload from "@uppy/xhr-upload";
 import CodeEditor from "~/components/CodeEditor.vue";
 import { createFileManagerDriver, fromFinderPath, toFinderPath } from "~/utils/fileManagerDriver";
-import { readBrowserState, writeBrowserState } from "~/utils/browserState";
+import { readNodeBrowserState, writeBrowserState } from "~/utils/browserState";
 import { initializeFileManagerPreferences } from "~/utils/fileManagerPreferences";
 
 const props = withDefaults(defineProps<{ id: string; apiPath: string; initialPath?: string }>(), { initialPath: "." });
@@ -20,24 +20,26 @@ provide("VueFinderOptions", { i18n: { zhCN: {
   "Search Files": "搜索文件", Filter: "筛选", "Toggle Tree View": "切换目录树",
   "Found %s results": "找到 %s 个结果"
 } }, locale: "zhCN" });
-initializeFileManagerPreferences(props.id, undefined, window.matchMedia("(min-width: 821px)").matches);
-const { api, baseURL, downloadUrl } = useApi();
+const { api, downloadUrl, nodeId, stateKey } = useApi();
+initializeFileManagerPreferences(stateKey(props.id), undefined, window.matchMedia("(min-width: 821px)").matches);
 const { isDark } = useTheme();
 const host = ref<HTMLElement | null>(null);
 let finder: VueFinderComposable | undefined;
 const editable = new Set<string>();
-const draft = useState<{ path: string; content: string; saved: string } | null>(`file-draft:${props.id}`, () => readBrowserState(`file-draft:${props.id}`));
+const draft = useState<{ path: string; content: string; saved: string } | null>(stateKey(`file-draft:${props.id}`), () => readNodeBrowserState(nodeId, `file-draft:${props.id}`));
 const editorOpen = ref(Boolean(draft.value));
 const editorLoading = ref(false), editorSaving = ref(false), editorError = ref("");
 const currentPath = ref(props.initialPath);
 const operationCount = ref(0), uploading = ref(false);
 const busy = computed(() => operationCount.value > 0 || uploading.value || editorSaving.value);
+const fileOperations = useState<number>(stateKey("file-operations"), () => 0);
+const stopBusyTracking = watch(busy, (active, previous) => { fileOperations.value += Number(active) - Number(previous ?? false); }, { immediate: true, flush: "sync" });
 const dirty = computed(() => Boolean(draft.value && draft.value.content !== draft.value.saved));
 const uploaders = new Set<any>();
 let editorRequest = 0;
 watch(busy, (value) => emit("busy-change", value), { immediate: true });
 watch(dirty, (value) => emit("dirty-change", value), { immediate: true });
-watch(draft, (value) => writeBrowserState(`file-draft:${props.id}`, value), { deep: true });
+watch(draft, (value) => writeBrowserState(stateKey(`file-draft:${props.id}`), value), { deep: true });
 // VueFinder watches config.theme; keep the instance alive during palette changes
 // so an in-flight upload or selection is not discarded.
 const config = computed(() => ({ initialPath: toFinderPath(currentPath.value), persist: false, view: "list" as const, showTreeView: true, showThumbnails: false, showMenuBar: true, theme: isDark.value ? "midnight" as const : "silver" as const, maxFileSize: "20gb", listItemHeight: 36 }));
@@ -66,7 +68,7 @@ const driver = createFileManagerDriver({
   configureUploader(uppy, context) {
     uploaders.add(uppy);
     uppy.use(XHRUpload, {
-      endpoint: `${baseURL}${props.apiPath}/upload`, fieldName: "file", formData: true, bundle: false, limit: 1,
+      endpoint: downloadUrl(`${props.apiPath}/upload`), fieldName: "file", formData: true, bundle: false, limit: 1,
       allowedMetaFields: ["path"],
       // Retrying a mutating POST after a lost response can only produce a name
       // conflict. Let the user inspect the refreshed directory before retrying.
@@ -148,6 +150,8 @@ function onPathChange(path: string) { currentPath.value = fromFinderPath(path); 
 function beforeUnload(event: BeforeUnloadEvent) { if (dirty.value || busy.value) { event.preventDefault(); event.returnValue = ""; } }
 onMounted(() => window.addEventListener("beforeunload", beforeUnload));
 onBeforeUnmount(() => {
+  stopBusyTracking();
+  if (busy.value) fileOperations.value--;
   editorRequest++;
   window.removeEventListener("beforeunload", beforeUnload);
   for (const uppy of uploaders) uppy.destroy();
@@ -158,7 +162,7 @@ defineExpose({ refresh, canLeave, clearEditor });
 
 <template>
   <div ref="host" class="file-workspace" :class="{ 'file-workspace-editing': editorOpen }">
-    <VueFinder :id="props.id" :driver="driver" :config="config" :context-menu-items="menu" locale="zhCN" :features="{ edit: false, language: false, theme: false, fullscreen: false }" @ready="finder = useVueFinder(props.id)" @file-dclick="onDoubleClick" @path-change="onPathChange">
+    <VueFinder :id="stateKey(props.id)" :driver="driver" :config="config" :context-menu-items="menu" locale="zhCN" :features="{ edit: false, language: false, theme: false, fullscreen: false }" @ready="finder = useVueFinder(stateKey(props.id))" @file-dclick="onDoubleClick" @path-change="onPathChange">
       <template #menubar-end>
         <button v-if="draft && !editorOpen" type="button" class="file-draft-trigger" @click="editorOpen = true">继续编辑 {{ draft.path }}<span v-if="dirty"> ●</span></button>
       </template>

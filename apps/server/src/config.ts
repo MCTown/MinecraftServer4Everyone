@@ -11,6 +11,7 @@ export const appConfig = {
   host: process.env.APP_HOST ?? "0.0.0.0",
   port: Number(process.env.APP_PORT ?? 8787),
   accessKey: process.env.APP_ACCESS_KEY ?? "",
+  requireConnector: process.env.APP_REQUIRE_CONNECTOR === "true",
   secretKey: process.env.APP_SECRET_KEY ?? "dev-secret-change-me",
   password: process.env.APP_PASSWORD ?? "ilovemct",
   curseForgeApiKey: process.env.CURSEFORGE_API_KEY ?? "",

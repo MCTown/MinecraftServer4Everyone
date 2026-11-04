@@ -9,6 +9,7 @@ import DeleteServerDialog from "~/components/dialogs/DeleteServerDialog.vue";
 import FileManagerDialog from "~/components/dialogs/FileManagerDialog.vue";
 import GlobalPromptEditorDialog from "~/components/dialogs/GlobalPromptEditorDialog.vue";
 import InstanceSwitcherDialog from "~/components/dialogs/InstanceSwitcherDialog.vue";
+import BackendSwitcherDialog from "~/components/dialogs/BackendSwitcherDialog.vue";
 import MapEditorDialog from "~/components/dialogs/MapEditorDialog.vue";
 import ProviderKeyDialog from "~/components/dialogs/ProviderKeyDialog.vue";
 import ProxyTestDialog from "~/components/dialogs/ProxyTestDialog.vue";
@@ -26,13 +27,16 @@ import { createIncrementalConsoleRenderer } from "~/utils/consoleRendering";
 import type { RenderedConsoleLogEntry } from "~/utils/consoleRendering";
 import { formatBytes, formatMemoryConfig, formatMemoryMb, parseMemoryToMb } from "~/utils/formatters";
 import { useStatusBubbles } from "~/composables/useStatusBubbles";
-import { readBrowserState, writeBrowserState } from "~/utils/browserState";
+import { readNodeBrowserState, writeBrowserState } from "~/utils/browserState";
 import type { DeploymentProgressState, PendingAgentAttachment, ServerConfigForm, SettingsNavItem, SettingsTab, StatusBubbleItem, StatusBubbleType, UploadState } from "~/types/ui";
 
 definePageMeta({ middleware: "auth" });
 
-const { api, upload } = useApi();
-const runtime = useRuntimeConfig();
+const { api, upload, websocketUrl, nodeId, stateKey, pendingMutations } = useApi();
+const fileOperations = useState<number>(stateKey("file-operations"), () => 0);
+const backendNodes = useBackendNodes();
+const backendMenuOpen = ref(false);
+const backendName = computed(() => backendNodes.registry.value.nodes.find((node) => node.id === nodeId)?.name ?? (nodeId || "默认后端"));
 const clock = useClock();
 const router = useRouter();
 
@@ -101,8 +105,8 @@ const agentStatus = ref<AgentStatus>("idle");
 const showAgentScrollToBottom = ref(false);
 const settingsOpen = ref(false);
 const settingsTab = ref<SettingsTab>("overview");
-const deploymentWorkflowDirty = useState<boolean>("deployment-workflow-dirty", () => false);
-const mcdrTemplateDirty = useState<boolean>("mcdr-template-dirty", () => false);
+const deploymentWorkflowDirty = useState<boolean>(stateKey("deployment-workflow-dirty"), () => false);
+const mcdrTemplateDirty = useState<boolean>(stateKey("mcdr-template-dirty"), () => false);
 const settingsNavItems: SettingsNavItem[] = [
   { id: "overview", label: "设置总览", desc: "工作空间配置概况" },
   { id: "model", label: "模型接入", desc: "连接你的 AI 模型" },
@@ -1929,10 +1933,6 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
   agentSocket?.close();
   if (!selectedServerId.value || !process.client) return;
   const serverId = selectedServerId.value;
-  const configuredWsBase = runtime.public.wsBase.replace(/\/$/, "");
-  const wsBase = configuredWsBase || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  const wsToken = document.cookie.split(";").find((c) => c.trim().startsWith("mcsa_token="))?.split("=").slice(1).join("=").trim();
-  const wsQuery = wsToken ? `?token=${encodeURIComponent(wsToken)}` : "";
   let consoleConnected = false;
   let agentConnected = false;
   const markSocketOpen = () => {
@@ -1951,7 +1951,7 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
     if (serverId !== selectedServerId.value || generation !== socketReconnectGeneration || socketsClosedIntentionally) return;
     scheduleSocketReconnect(serverId, generation);
   };
-  const nextConsoleSocket = new WebSocket(`${wsBase}/ws/console/${serverId}${wsQuery}`);
+  const nextConsoleSocket = new WebSocket(websocketUrl(`/ws/console/${serverId}`));
   consoleSocket = nextConsoleSocket;
   nextConsoleSocket.onopen = () => {
     if (consoleSocket !== nextConsoleSocket) return;
@@ -1990,7 +1990,7 @@ function connectSockets(resetReconnect = true, generation = socketReconnectGener
   };
   nextConsoleSocket.onclose = () => handleSocketClose(nextConsoleSocket);
   nextConsoleSocket.onerror = () => nextConsoleSocket.close();
-  const nextAgentSocket = new WebSocket(`${wsBase}/ws/agent/${serverId}${wsQuery}`);
+  const nextAgentSocket = new WebSocket(websocketUrl(`/ws/agent/${serverId}`));
   agentSocket = nextAgentSocket;
   nextAgentSocket.onopen = () => {
     if (agentSocket !== nextAgentSocket) return;
@@ -2111,6 +2111,7 @@ interface WorkspaceState {
   promptEditor?: typeof promptEditor;
 }
 let workspaceReady = false;
+let workspaceDisposed = false;
 let switchingDraft = false;
 let instanceDrafts: Record<string, InstanceDraft> = {};
 let deliveryTimer: ReturnType<typeof setInterval> | undefined;
@@ -2121,7 +2122,7 @@ function saveWorkspaceState() {
     input: agentInput.value, attachments: [...pendingAgentAttachments.value], path: currentPath.value,
     command: consoleCommand.value, config: { ...serverForm }, configOpen: configDialogOpen.value
   };
-  writeBrowserState("workspace", {
+  writeBrowserState(stateKey("workspace"), {
     selectedServerId: selectedServerId.value, dashboardOpen: dashboardOpen.value, mobileWorkspaceTab: mobileWorkspaceTab.value,
     settingsOpen: settingsOpen.value, settingsTab: settingsTab.value,
     dashboardInput: dashboardInput.value, dashboardAttachments: dashboardAttachments.value, instances: instanceDrafts,
@@ -2156,8 +2157,47 @@ function beforePageExit(event: BeforeUnloadEvent) {
   }
 }
 
+function canSwitchBackend() {
+  if (pendingMutations.value > 0 || fileOperations.value > 0) {
+    showStatusBubble("error", "当前有操作正在提交，请完成后再切换后端。", 5000);
+    return false;
+  }
+  if (deploymentWorkflowDirty.value || mcdrTemplateDirty.value || [serverSlotUpload, agentUpload, dashboardAgentUpload].some((item) => item.active && !item.done)) {
+    showStatusBubble("error", "请先保存设置修改，并等待上传完成后再切换后端。", 5000);
+    return false;
+  }
+  // The file manager also checks active operations and preserves editor drafts.
+  if (fileManagerDialog.value?.canLeave() === false) return false;
+  if (mapEditorDialogOpen.value || configDialogOpen.value || promptEditor.saving || creatingServer.value || deleteDialog.deleting || modelBusy.value || providerKeySaving.value) {
+    showStatusBubble("error", "请先完成并关闭当前编辑或操作，再切换后端。", 5000);
+    return false;
+  }
+  saveWorkspaceState();
+  return true;
+}
+
+onBeforeRouteUpdate((to, from) => {
+  // A confirmed removal already ran the leave checks before changing the
+  // registry. Never trap the user in a node that no longer exists.
+  if (!backendNodes.registry.value.nodes.some((node) => node.id === nodeId)) return;
+  if (to.query.node !== from.query.node && !canSwitchBackend()) return false;
+});
+
+function beforeRemoveBackend(id: string) { return id !== nodeId || canSwitchBackend(); }
+function backendRemoved(id: string, nextId: string) {
+  if (id === nodeId) void switchBackend(nextId);
+}
+
+async function switchBackend(id: string) {
+  if (id === nodeId) { backendMenuOpen.value = false; return; }
+  // Route keys remount the workspace, closing the old sockets and polling loops.
+  // Each useApi instance remains permanently bound to its original node.
+  await router.push({ path: "/", query: id ? { node: id } : {} });
+}
+
 onMounted(async () => {
-  const saved = readBrowserState<WorkspaceState>("workspace");
+  if (!nodeId) return;
+  const saved = readNodeBrowserState<WorkspaceState>(nodeId, "workspace");
   if (saved) {
     instanceDrafts = saved.instances ?? {};
     selectedServerId.value = saved.selectedServerId ?? "";
@@ -2187,6 +2227,7 @@ onMounted(async () => {
     }),
     safe(loadSettings)
   ]);
+  if (workspaceDisposed) return;
   workspaceReady = true;
   saveWorkspaceState();
   startJavaPolling();
@@ -2194,6 +2235,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+  workspaceDisposed = true;
   saveWorkspaceState();
   window.removeEventListener("beforeunload", beforePageExit);
   window.removeEventListener("pagehide", saveWorkspaceState);
@@ -2215,6 +2257,10 @@ onBeforeUnmount(() => {
     </div>
 
     <StatusBubble :items="statusBubbles" @action="handleStatusBubbleAction" />
+    <BackendSwitcherDialog :open="backendMenuOpen" :node-id="nodeId" :before-remove="beforeRemoveBackend" @close="backendMenuOpen = false" @after-leave="serverSidebar?.focusBackendTrigger()" @select="switchBackend" @removed="backendRemoved" />
+    <section v-if="!nodeId" class="backend-setup">
+      <div class="card stack"><AppIcon name="network" :size="36" /><h1>连接你的第一台后端</h1><p class="muted">添加后端后，即可管理该机器上的 Minecraft 实例、文件与 Agent 任务。</p><p v-if="backendNodes.error.value" role="alert">{{ backendNodes.error.value }}</p><button type="button" class="primary" @click="backendMenuOpen = true"><AppIcon name="plus" />管理后端连接</button><div class="row"><ThemeToggle /><button type="button" @click="logout">退出登录</button></div></div>
+    </section>
     <div v-if="delivery.pending.value.length" class="card stack" role="status">
       <strong>有 {{ delivery.pending.value.length }} 条消息等待服务器确认接收，将自动重试；不会重复创建任务。</strong>
       <p class="muted">关闭页面后会保留待发送消息。移除仅停止重试，不会取消可能已经接收的任务。</p>
@@ -2270,7 +2316,7 @@ onBeforeUnmount(() => {
     />
 
     <ServerSidebar
-      v-if="hasServers || dashboardOpen || settingsOpen"
+      v-if="nodeId && (hasServers || dashboardOpen || settingsOpen)"
       ref="serverSidebar"
        :loading="serverListLoad.initialLoading.value"
        :loaded="serversLoaded"
@@ -2279,15 +2325,17 @@ onBeforeUnmount(() => {
        :errored-server-ids="erroredServerIds"
        :settings-open="settingsOpen"
        :dashboard-open="dashboardOpen"
+       :backend-name="backendName"
        @create="openCreateServerDialog"
        @open-dashboard="openDashboard"
        @open-instance-menu="openInstanceMenu"
-       @open-settings="toggleWorkspaceSettings"
+        @open-settings="toggleWorkspaceSettings"
+        @open-backends="backendMenuOpen = true"
        @logout="logout"
        @select="selectServerWithFeedback"
     />
 
-    <main v-if="hasServers || dashboardOpen || settingsOpen" class="main">
+    <main v-if="nodeId && (hasServers || dashboardOpen || settingsOpen)" class="main">
       <AgentConfirmationDialog :confirmation="dashboardOpen ? globalAgent.confirmation.value : pendingConfirmation" @resolve="resolveAgentConfirmation" />
       <AgentQuestionDialog :scope-id="dashboardOpen ? 'global' : selectedServerId" />
 
@@ -2602,3 +2650,11 @@ onBeforeUnmount(() => {
     </main>
   </div>
 </template>
+
+<style scoped>
+.backend-setup { grid-column: 1 / -1; display: grid; place-items: center; padding: 1.5rem; min-height: 100dvh; }
+.backend-setup > .card { width: min(32rem, 100%); padding: 2rem; align-items: start; }
+.backend-setup h1 { font-size: 1.4rem; margin: 0; }
+.backend-setup p { line-height: 1.7; }
+.backend-setup .row { margin-top: 0.75rem; }
+</style>

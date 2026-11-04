@@ -22,6 +22,7 @@ import { UploadService } from "./services/uploadService.js";
 import { TemplateService } from "./services/templateService.js";
 
 async function bootstrap() {
+  if (appConfig.requireConnector && !appConfig.accessKey) throw new Error("APP_REQUIRE_CONNECTOR=true 时必须设置 APP_ACCESS_KEY");
   await ensureRuntimeDirectories();
   initDatabase();
 

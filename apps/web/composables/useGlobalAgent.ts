@@ -9,7 +9,7 @@ import type { AgentActivity, AgentConfirmationRequest, AgentContextUsage, AgentF
  * dashboard can own this state without the instance workspace's socket logic.
  */
 export function useGlobalAgent() {
-  const { api } = useApi();
+  const { api, websocketUrl } = useApi();
   const delivery = useAgentDelivery();
   const confirmation = ref<AgentConfirmationRequest | null>(null);
   const toolConfigRequired = ref<AgentToolConfigRequired | null>(null);
@@ -189,12 +189,7 @@ export function useGlobalAgent() {
     const current = generation;
     closedIntentionally = false;
     socket?.close();
-    const runtime = useRuntimeConfig();
-    const configuredWsBase = String(runtime.public.wsBase ?? "").replace(/\/$/, "");
-    const wsBase = configuredWsBase || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-    const wsToken = document.cookie.split(";").find((c) => c.trim().startsWith("mcsa_token="))?.split("=").slice(1).join("=").trim();
-    const query = wsToken ? `?token=${encodeURIComponent(wsToken)}` : "";
-    const next = new WebSocket(`${wsBase}/ws/agent/global${query}`);
+    const next = new WebSocket(websocketUrl("/ws/agent/global"));
     socket = next;
     next.onopen = () => { reconnectAttempt = 0; };
     next.onmessage = (event) => {

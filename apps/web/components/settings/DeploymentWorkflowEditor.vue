@@ -2,10 +2,10 @@
 import DeploymentWorkflowCanvas from "./DeploymentWorkflowCanvas.vue";
 import { analyzeWorkflowGraph, connectWorkflowNodes, groupWorkflowStep, moveWorkflowStep, normalizeGraphWorkflow, rebuildWorkflowEdges, removeWorkflowEdge, setWorkflowPosition, toggleWorkflowStep, withWorkflowCanvas, workflowGraphLayout, workflowIssues, workflowRounds, type DeploymentWorkflow, type DeploymentWorkflowState, type WorkflowPoint } from "~/utils/deploymentWorkflow";
 
-const { api } = useApi();
+const { api, stateKey } = useApi();
 // Keep a draft when navigating between settings sections; never silently discard it.
-const state = useState<DeploymentWorkflowState | null>("deployment-workflow-state", () => null);
-const draft = useState<DeploymentWorkflow | null>("deployment-workflow-draft", () => null);
+const state = useState<DeploymentWorkflowState | null>(stateKey("deployment-workflow-state"), () => null);
+const draft = useState<DeploymentWorkflow | null>(stateKey("deployment-workflow-draft"), () => null);
 const selectedId = ref("identify_modpack");
 const selectedEdgeId = ref("");
 const canvasEditor = ref<InstanceType<typeof DeploymentWorkflowCanvas> | null>(null);
@@ -19,7 +19,7 @@ const copied = ref(false);
 let previewTimer: ReturnType<typeof setTimeout> | undefined;
 let previewSerial = 0;
 const dirty = computed(() => !!draft.value && JSON.stringify(draft.value) !== JSON.stringify(state.value ? withWorkflowCanvas(state.value.workflow) : null));
-const workspaceDirty = useState<boolean>("deployment-workflow-dirty", () => false);
+const workspaceDirty = useState<boolean>(stateKey("deployment-workflow-dirty"), () => false);
 watch(dirty, (value) => { workspaceDirty.value = value; }, { immediate: true });
 const issues = computed(() => draft.value && state.value ? workflowIssues(draft.value, state.value.catalog) : []);
 const graphCheck = computed(() => draft.value ? analyzeWorkflowGraph(draft.value) : { rounds: [], issues: [] });

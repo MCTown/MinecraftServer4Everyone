@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import FileWorkspace from "~/components/files/FileWorkspace.client.vue";
-const { api } = useApi();
+const { api, stateKey } = useApi();
 const customized = ref(false), loading = ref(true), resetting = ref(false), busy = ref(false), error = ref("");
-const workspaceDirty = useState<boolean>("mcdr-template-dirty", () => false);
+const workspaceDirty = useState<boolean>(stateKey("mcdr-template-dirty"), () => false);
 const workspace = ref<{ refresh(): Promise<void>; canLeave(): boolean; clearEditor(): void } | null>(null);
 async function loadState() {
   try { customized.value = (await api<{ customized: boolean }>("/api/settings/mcdr-template")).customized; }

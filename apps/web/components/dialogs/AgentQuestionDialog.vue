@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import type { AgentQuestionRequest } from "~/types/app";
-import { readBrowserState, writeBrowserState } from "~/utils/browserState";
+import { readNodeBrowserState, writeBrowserState } from "~/utils/browserState";
 
 const props = defineProps<{ scopeId: string }>();
-const { api } = useApi();
+const { api, nodeId, stateKey } = useApi();
 const question = ref<AgentQuestionRequest | null>(null);
 const selected = ref<string[]>([]);
 const submitting = ref(false);
@@ -20,7 +20,7 @@ async function poll(current: number) {
       const result = await api<{ question: AgentQuestionRequest | null }>(endpoint(scope));
       if (current !== generation) return;
       if (result.question?.id !== question.value?.id) {
-        const saved = readBrowserState<{ id: string; selected: string[] }>(`question:${scope}`);
+        const saved = readNodeBrowserState<{ id: string; selected: string[] }>(nodeId, `question:${scope}`);
         question.value = result.question;
         selected.value = saved && saved.id === result.question?.id
           ? saved.selected.filter((label) => result.question!.options.some((option) => option.label === label)) : [];
@@ -46,7 +46,7 @@ function restart() {
 
 watch(() => props.scopeId, restart);
 watch(selected, (value) => {
-  if (question.value) writeBrowserState(`question:${props.scopeId}`, { id: question.value.id, selected: value });
+  if (question.value) writeBrowserState(stateKey(`question:${props.scopeId}`), { id: question.value.id, selected: value });
 }, { deep: true, flush: "sync" });
 onMounted(() => { mounted = true; restart(); });
 onBeforeUnmount(() => { mounted = false; generation++; clearTimeout(timer); });
@@ -59,7 +59,7 @@ async function submit(cancelled = false) {
   error.value = "";
   try {
     await api(endpoint(props.scopeId), { method: "POST", body: { questionId: id, selected: selected.value, cancelled } });
-    writeBrowserState(`question:${props.scopeId}`, null);
+    writeBrowserState(stateKey(`question:${props.scopeId}`), null);
     if (current === generation && question.value?.id === id) question.value = null;
   } catch (cause) {
     if (current === generation) error.value = cause instanceof Error ? cause.message : "提交失败，请重试";

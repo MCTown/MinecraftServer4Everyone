@@ -16,12 +16,10 @@ async function handleLogin() {
   loading.value = true;
   error.value = "";
   try {
-    const result = await api<{ success: boolean; token: string }>("/api/auth/login", {
+    await api<{ success: boolean }>("/api/auth/login", {
       method: "POST",
       body: { password: password.value }
     });
-    const maxAge = 7 * 24 * 60 * 60;
-    document.cookie = `mcsa_token=${result.token}; path=/; max-age=${maxAge}; SameSite=Lax`;
     await router.replace("/");
   } catch (e: any) {
     error.value = e?.data?.error || e?.message || "登录失败，请稍后重试";

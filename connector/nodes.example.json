@@ -1,0 +1,17 @@
+{
+  "defaultNodeId": "host-a",
+  "nodes": [
+    {
+      "id": "host-a",
+      "name": "服务器 A",
+      "url": "http://10.0.0.11:8787",
+      "accessKeyEnv": "HOST_A_ACCESS_KEY"
+    },
+    {
+      "id": "host-b",
+      "name": "服务器 B",
+      "url": "http://10.0.0.12:8787",
+      "accessKeyEnv": "HOST_B_ACCESS_KEY"
+    }
+  ]
+}

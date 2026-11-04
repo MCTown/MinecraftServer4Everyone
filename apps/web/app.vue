@@ -7,5 +7,5 @@ useHead(() => ({
 </script>
 
 <template>
-  <NuxtPage />
+  <NuxtPage :page-key="route => `${route.path}:${route.query.node ?? ''}`" />
 </template>

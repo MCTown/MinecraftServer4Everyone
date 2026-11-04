@@ -8,7 +8,8 @@ const pidFile = process.env.MCSA_PID_FILE ?? path.join(projectRoot, ".runtime", 
 const npmExecPath = process.env.npm_execpath;
 const runNpmWithNode = npmExecPath && /\.[cm]?js$/i.test(npmExecPath);
 const npm = runNpmWithNode ? process.execPath : "npm";
-const npmArgs = runNpmWithNode ? [npmExecPath, "start"] : ["start"];
+const startArgs = process.argv.includes("--connector-only") ? ["run", "start:connector"] : ["start"];
+const npmArgs = runNpmWithNode ? [npmExecPath, ...startArgs] : startArgs;
 
 function readManagedPid() {
   if (!existsSync(pidFile)) return undefined;
